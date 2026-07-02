@@ -141,7 +141,7 @@ export async function POST(request: Request) {
     supabase: {
       configured: hasSupabaseServerConfig(),
       url_set: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
-      url_value: process.env.NEXT_PUBLIC_SUPABASE_URL ?? null,
+      url_host: process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).host : null,
       secret_key_set: Boolean(process.env.SUPABASE_SECRET_KEY),
       secret_key_prefix: process.env.SUPABASE_SECRET_KEY ? process.env.SUPABASE_SECRET_KEY.slice(0, 12) + '...' : null,
       service_role_key_set: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
