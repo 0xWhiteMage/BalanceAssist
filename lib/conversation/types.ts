@@ -23,6 +23,7 @@ export type ChatMessage = {
   isDisclaimer?: boolean;
   isTeamMessage?: boolean;
   isSystem?: boolean;
+  teamDbId?: number;
 };
 
 export type ConversationStepId =

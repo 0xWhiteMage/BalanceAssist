@@ -81,7 +81,16 @@ export function WidgetOverlay({
       const messages = await fetchTeamMessages(id, lastTeamMessageIdRef.current);
       if (messages.length === 0) return;
 
-      const freshMessages = messages.filter((m) => !seenTeamMessageIdsRef.current.has(m.id));
+      const existingDbIds = new Set<number>();
+      for (const m of messagesRef.current) {
+        if (m.isTeamMessage && m.teamDbId !== undefined) {
+          existingDbIds.add(m.teamDbId);
+        }
+      }
+
+      const freshMessages = messages.filter(
+        (m) => !seenTeamMessageIdsRef.current.has(m.id) && !existingDbIds.has(m.id)
+      );
       if (freshMessages.length === 0) {
         lastTeamMessageIdRef.current = Math.max(lastTeamMessageIdRef.current, ...messages.map((m) => m.id));
         return;
@@ -100,7 +109,8 @@ export function WidgetOverlay({
           sender: 'bot',
           text: msg.text,
           timestamp: Date.now(),
-          isTeamMessage: true
+          isTeamMessage: true,
+          teamDbId: msg.id
         });
       }
       messagesRef.current = next;
@@ -700,7 +710,7 @@ const startConversation = useCallback(async () => {
             )}
 
             {!isTyping && isTeamConnected && teamWaitingForReply && (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
                 <span
                   style={{
                     marginLeft: '4px',
