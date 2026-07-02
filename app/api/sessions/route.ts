@@ -30,15 +30,19 @@ export async function POST(request: Request) {
           sessionId: data.id,
           status: data.status,
           sourceUrl: data.source_url,
-          createdAt: data.created_at
+          createdAt: data.created_at,
+          persisted: true
         });
       }
+
+      console.error('[sessions] Failed to insert session', { error });
     }
   }
 
   return jsonWithCors({
     sessionId: crypto.randomUUID(),
     status: 'open',
-    sourceUrl
+    sourceUrl,
+    persisted: false
   });
 }

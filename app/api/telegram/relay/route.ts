@@ -36,7 +36,13 @@ export async function POST(request: Request) {
         telegram_message_id: telegramMessageId?.messageId ?? null
       });
 
-      if (!error) {
+      if (error) {
+        console.error('[telegram-relay] Failed to insert user message', {
+          sessionId,
+          telegramMessageId: telegramMessageId?.messageId,
+          error
+        });
+      } else {
         await supabase
           .from('sessions')
           .update({ status: 'escalated' })
@@ -46,15 +52,21 @@ export async function POST(request: Request) {
       return jsonWithCors({
         ok: true,
         sessionId,
-        telegramSent: telegramMessageId !== null
+        telegramSent: telegramMessageId !== null,
+        persisted: !error
       });
     }
+
+    console.warn('[telegram-relay] Supabase client creation failed despite hasSupabaseServerConfig() returning true');
+  } else {
+    console.warn('[telegram-relay] Supabase not configured on this deployment');
   }
 
   return jsonWithCors({
     ok: true,
     sessionId,
-    telegramSent: telegramMessageId !== null
+    telegramSent: telegramMessageId !== null,
+    persisted: false
   });
 }
 
