@@ -13,8 +13,8 @@ export async function POST(request: Request) {
 
   const message = update.message;
 
-  if (!message?.text || !message.reply_to_message) {
-    return NextResponse.json({ ok: true, ignored: 'not-a-reply' });
+  if (!message?.text) {
+    return NextResponse.json({ ok: true, ignored: 'no-text' });
   }
 
   if (!hasSupabaseServerConfig()) {
@@ -27,17 +27,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Supabase client failed' }, { status: 503 });
   }
 
-  const { data: parent } = await supabase
-    .from('human_messages')
-    .select('session_id, telegram_message_id')
-    .eq('telegram_message_id', message.reply_to_message.message_id)
-    .single();
+  let sessionId: string | null = null;
 
-  if (!parent) {
+  if (message.reply_to_message?.message_id) {
+    const { data: parent } = await supabase
+      .from('human_messages')
+      .select('session_id')
+      .eq('telegram_message_id', message.reply_to_message.message_id)
+      .maybeSingle();
+
+    const parentRow = parent as { session_id?: string } | null;
+    sessionId = parentRow?.session_id ?? null;
+  }
+
+  if (!sessionId) {
+    const { data: latest } = await supabase
+      .from('human_messages')
+      .select('session_id')
+      .eq('sender', 'user')
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const latestRow = latest as { session_id?: string } | null;
+    sessionId = latestRow?.session_id ?? null;
+  }
+
+  if (!sessionId) {
+    console.warn('[telegram-webhook] No matching session for update', {
+      reply_to_message_id: message.reply_to_message?.message_id,
+      chat_id: message.chat?.id,
+      from: message.from?.username ?? message.from?.first_name
+    });
     return NextResponse.json({ ok: true, ignored: 'no-matching-session' });
   }
 
-  const sessionId = parent.session_id;
   const senderName = message.from?.first_name ?? message.from?.username ?? 'Team';
 
   const { error } = await supabase.from('human_messages').insert({
@@ -47,6 +71,7 @@ export async function POST(request: Request) {
   });
 
   if (error) {
+    console.error('[telegram-webhook] Failed to insert team message', error);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 

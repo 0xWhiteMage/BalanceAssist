@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   const { sessionId, text } = parsed.data;
 
   const telegramMessageId = await sendTelegramMessage(
-    `<b>[Session ${sessionId}]</b>\n${escapeHtml(text)}`
+    `<b>[Session ${sessionId}]</b>\n${escapeHtml(text)}\n\n<i>Reply to this message to respond to the user.</i>`
   );
 
   if (hasSupabaseServerConfig()) {
