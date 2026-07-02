@@ -174,6 +174,25 @@ export async function closeForumTopic(threadId: number): Promise<boolean> {
   return response.ok;
 }
 
+export async function deleteForumTopic(threadId: number): Promise<boolean> {
+  const config = getTelegramConfig();
+
+  if (!config) {
+    return false;
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/deleteForumTopic`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: config.chatId,
+      message_thread_id: threadId
+    })
+  });
+
+  return response.ok;
+}
+
 export function extractSessionIdFromText(text: string): string | null {
   const match = text.match(/\[Session ([a-f0-9-]+)\]/i);
   return match?.[1] ?? null;

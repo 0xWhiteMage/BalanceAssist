@@ -99,6 +99,19 @@ export async function POST(request: Request) {
   let contactName = sessionSnap?.contact_name ?? null;
   let contactCompany = sessionSnap?.contact_company ?? null;
 
+  if (!sessionSnap) {
+    console.warn('[telegram-relay] Session not found in DB, skipping topic creation', { sessionId });
+    const messageHtml = buildMessageHtml(text, detectedName, detectedCompany, shortId);
+    const telegramMessageId = await sendTelegramMessage(messageHtml);
+    return jsonWithCors({
+      ok: true,
+      sessionId,
+      telegramSent: telegramMessageId !== null,
+      persisted: false,
+      threadId: null
+    });
+  }
+
   const updates: Record<string, unknown> = {};
   if (detectedName && !contactName) {
     contactName = detectedName;
