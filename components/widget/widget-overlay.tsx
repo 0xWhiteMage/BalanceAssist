@@ -100,20 +100,20 @@ export function WidgetOverlay({
 
       pollTeamMessages().catch(() => undefined);
 
-      pollIntervalRef.current = setInterval(() => {
+      const interval = setInterval(() => {
         pollTeamMessages().catch(() => undefined);
-      }, 4000);
+      }, teamWaitingForReply ? 1000 : 2000);
+
+      pollIntervalRef.current = interval;
 
       return () => {
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
+        clearInterval(interval);
+        pollIntervalRef.current = null;
       };
     }
 
     return undefined;
-  }, [isTeamConnected, pollTeamMessages]);
+  }, [isTeamConnected, pollTeamMessages, teamWaitingForReply]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -426,6 +426,10 @@ const startConversation = useCallback(async () => {
         if (!ok) {
           setTeamWaitingForReply(false);
           await botSay('Sorry, I could not reach the team right now. Please email hello@balancestudio.tv.');
+        } else {
+          setTimeout(() => {
+            pollTeamMessages().catch(() => undefined);
+          }, 500);
         }
       } else {
         setTeamWaitingForReply(false);
