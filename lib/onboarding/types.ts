@@ -18,6 +18,7 @@ export type LeadDraft = {
   budgetBand: BudgetBandId | '';
   contactName: string;
   contactEmail: string;
+  contactCompany?: string;
 };
 
 export type EssentialsProgress = {

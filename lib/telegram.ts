@@ -118,6 +118,26 @@ export async function createForumTopic(
   };
 }
 
+export async function editForumTopic(threadId: number, name: string): Promise<boolean> {
+  const config = getTelegramConfig();
+
+  if (!config) {
+    return false;
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/editForumTopic`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: config.chatId,
+      message_thread_id: threadId,
+      name: name.slice(0, 128)
+    })
+  });
+
+  return response.ok;
+}
+
 export async function closeForumTopic(threadId: number): Promise<boolean> {
   const config = getTelegramConfig();
 

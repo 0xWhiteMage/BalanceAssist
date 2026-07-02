@@ -99,12 +99,39 @@ function detectBudget(text: string): BudgetBandId | null {
 }
 
 function detectName(text: string): string | null {
-  const nameMatch = text.match(/(?:i am|i'm|my name is|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/);
-  if (nameMatch?.[1]) return nameMatch[1].trim();
+  const nameMatch = text.match(/(?:i am|i'm|my name is|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/i);
+  if (nameMatch?.[1]) {
+    const captured = nameMatch[1].trim();
+    const titled = captured
+      .split(/\s+/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(' ');
+    return titled;
+  }
 
   const trimmed = text.trim();
   if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/.test(trimmed)) {
     return trimmed;
+  }
+
+  return null;
+}
+
+function detectCompany(text: string): string | null {
+  const patterns = [
+    /(?:from|at|for|with)\s+([A-Z][A-Za-z0-9&]+(?:\s+[A-Z][A-Za-z0-9&]+){0,3})\b/,
+    /\b([A-Z][A-Za-z0-9&]+(?:\s+[A-Z][A-Za-z0-9&]+){0,2})\s+(?:Inc|Corp|Ltd|LLC|Pvt|Pte|Co|Studio|Studios|Group|Agency|Lab)\b/,
+    /(?:i\s+(?:work|am)\s+(?:at|with|for))\s+([A-Z][A-Za-z0-9&]+(?:\s+[A-Z][A-Za-z0-9&]+){0,3})/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const cleaned = match[1].trim();
+      if (cleaned.length >= 2 && !/^(I|My|Me|You|We|They|The|This|That|It|At|From|With|And|Or|But)$/i.test(cleaned)) {
+        return cleaned;
+      }
+    }
   }
 
   return null;
@@ -118,12 +145,18 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
   const detectedBudget = detectBudget(text);
   const detectedEmail = text.match(emailPattern)?.[0] ?? null;
   const detectedName = detectName(text);
+  const detectedCompany = detectCompany(text);
 
   if (detectedService && !currentDraft.service) updates.service = detectedService;
   if (detectedTimeline && !currentDraft.timelineBand) updates.timelineBand = detectedTimeline;
   if (detectedBudget && !currentDraft.budgetBand) updates.budgetBand = detectedBudget;
   if (detectedEmail && !currentDraft.contactEmail) updates.contactEmail = detectedEmail;
   if (detectedName && !currentDraft.contactName) updates.contactName = detectedName;
+
+  const currentCompany = (currentDraft as Record<string, unknown>).contactCompany;
+  if (detectedCompany && !currentCompany) {
+    (updates as Record<string, unknown>).contactCompany = detectedCompany;
+  }
 
   const looksLikeScopeDescription = text.trim().length > 20 || text.trim().includes(' ');
 

@@ -33,3 +33,20 @@ test('captures a direct contact name response', () => {
 
   expect(draft.contactName).toBe('Jane Lee');
 });
+
+test('captures company name from natural phrasing', () => {
+  const draft = applyTextToDraft(
+    'I am John, I work at Acme Studios',
+    createDefaultLeadDraft(),
+    'scope'
+  );
+
+  expect(draft.contactName).toBe('John');
+  expect((draft as { contactCompany?: string }).contactCompany).toBe('Acme Studios');
+});
+
+test('captures company name from "from" phrasing', () => {
+  const draft = applyTextToDraft('Sarah from OpenAI Labs here', createDefaultLeadDraft(), 'scope');
+
+  expect((draft as { contactCompany?: string }).contactCompany).toBe('OpenAI Labs');
+});
