@@ -54,6 +54,8 @@ export function WidgetOverlay({
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPollingRef = useRef<boolean>(false);
+  const seenTeamMessageIdsRef = useRef<Set<number>>(new Set());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -69,17 +71,30 @@ export function WidgetOverlay({
   sessionIdRef.current = sessionId;
 
   const pollTeamMessages = useCallback(async () => {
-    const id = sessionIdRef.current;
-    if (!id) return;
+    if (isPollingRef.current) return;
+    isPollingRef.current = true;
 
-    const messages = await fetchTeamMessages(id, lastTeamMessageIdRef.current);
+    try {
+      const id = sessionIdRef.current;
+      if (!id) return;
 
-    if (messages.length > 0) {
+      const messages = await fetchTeamMessages(id, lastTeamMessageIdRef.current);
+      if (messages.length === 0) return;
+
+      const freshMessages = messages.filter((m) => !seenTeamMessageIdsRef.current.has(m.id));
+      if (freshMessages.length === 0) {
+        lastTeamMessageIdRef.current = Math.max(lastTeamMessageIdRef.current, ...messages.map((m) => m.id));
+        return;
+      }
+
+      for (const msg of freshMessages) {
+        seenTeamMessageIdsRef.current.add(msg.id);
+      }
       lastTeamMessageIdRef.current = Math.max(lastTeamMessageIdRef.current, ...messages.map((m) => m.id));
       setTeamWaitingForReply(false);
 
       const next = [...messagesRef.current];
-      for (const msg of messages) {
+      for (const msg of freshMessages) {
         next.push({
           id: nextId(),
           sender: 'bot',
@@ -90,6 +105,8 @@ export function WidgetOverlay({
       }
       messagesRef.current = next;
       setMessages(next);
+    } finally {
+      isPollingRef.current = false;
     }
   }, []);
 
@@ -123,6 +140,8 @@ export function WidgetOverlay({
   useEffect(() => {
     if (!isTeamConnected) {
       hasInitializedTeamPollingRef.current = false;
+      seenTeamMessageIdsRef.current = new Set();
+      lastTeamMessageIdRef.current = 0;
     }
   }, [isTeamConnected]);
 
