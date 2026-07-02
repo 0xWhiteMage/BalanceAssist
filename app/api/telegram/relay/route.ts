@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { closeForumTopic, createForumTopic, editForumTopic, sendTelegramMessage } from '@/lib/telegram';
+import { buildTopicName, TOPIC_STATUS_COLOR } from '@/lib/conversation/topic-status';
 
 const relayPayloadSchema = z.object({
   sessionId: z.string().min(1),
@@ -34,16 +35,20 @@ function detectCompany(text: string): string | null {
   return null;
 }
 
-function buildTopicName(name: string | null | undefined, company: string | null | undefined, shortId: string): string {
-  const parts: string[] = [];
-  if (name?.trim()) parts.push(name.trim());
-  if (company?.trim()) parts.push(company.trim());
-  const label = parts.length > 0 ? parts.join(' / ') : 'New inquiry';
-  return `${label} (${shortId})`.slice(0, 128);
-}
-
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function buildMessageHtml(text: string, contactName: string | null, contactCompany: string | null, shortId: string): string {
+  const sender = [contactName, contactCompany].filter(Boolean).join(' · ') || 'Anonymous';
+
+  return [
+    `<b>📨 ${escapeHtml(sender)}</b>`,
+    '',
+    `<blockquote>${escapeHtml(text)}</blockquote>`,
+    '',
+    `<code>${shortId}</code>`
+  ].join('\n');
 }
 
 export async function OPTIONS() {
@@ -64,18 +69,16 @@ export async function POST(request: Request) {
   const detectedCompany = detectCompany(text);
 
   if (!hasSupabaseServerConfig()) {
-    const fallbackMessage = await sendTelegramMessage(
-      `<b>[${shortId}]</b>\n${escapeHtml(text)}`
-    );
+    const messageHtml = buildMessageHtml(text, detectedName, detectedCompany, shortId);
+    const fallbackMessage = await sendTelegramMessage(messageHtml);
     return jsonWithCors({ ok: true, sessionId, telegramSent: fallbackMessage !== null, persisted: false });
   }
 
   const supabase = createServerSupabaseClient();
 
   if (!supabase) {
-    const fallbackMessage = await sendTelegramMessage(
-      `<b>[${shortId}]</b>\n${escapeHtml(text)}`
-    );
+    const messageHtml = buildMessageHtml(text, detectedName, detectedCompany, shortId);
+    const fallbackMessage = await sendTelegramMessage(messageHtml);
     return jsonWithCors({ ok: true, sessionId, telegramSent: fallbackMessage !== null, persisted: false });
   }
 
@@ -106,13 +109,13 @@ export async function POST(request: Request) {
     updates.contact_company = contactCompany;
   }
 
-  let newTopicName: string | null = null;
-  if (!threadId || (contactName && !sessionSnap?.contact_name) || (contactCompany && !sessionSnap?.contact_company)) {
-    newTopicName = buildTopicName(contactName, contactCompany, shortId);
-  }
+  const newTopicName = buildTopicName(contactName, contactCompany, shortId, 'new');
+  const shouldRename = !threadId
+    || (contactName && !sessionSnap?.contact_name)
+    || (contactCompany && !sessionSnap?.contact_company);
 
   if (!threadId) {
-    const topic = await createForumTopic(newTopicName ?? buildTopicName(contactName, contactCompany, shortId));
+    const topic = await createForumTopic(newTopicName, { iconColor: TOPIC_STATUS_COLOR.new });
 
     if (topic) {
       const { data: claimed } = await supabase
@@ -138,8 +141,8 @@ export async function POST(request: Request) {
     } else {
       console.warn('[telegram-relay] createForumTopic failed; falling back to flat message');
     }
-  } else if (newTopicName) {
-    const updated = await editForumTopic(threadId, newTopicName);
+  } else if (shouldRename) {
+    const updated = await editForumTopic(threadId, newTopicName, { iconColor: TOPIC_STATUS_COLOR.new });
     if (updated) {
       console.log('[telegram-relay] Renamed topic', { sessionId, threadId, name: newTopicName });
     } else {
@@ -162,8 +165,9 @@ export async function POST(request: Request) {
     }
   }
 
+  const messageHtml = buildMessageHtml(text, contactName, contactCompany, shortId);
   const telegramMessageId = await sendTelegramMessage(
-    `<b>[${shortId}]</b>\n${escapeHtml(text)}`,
+    messageHtml,
     threadId ? { threadId } : undefined
   );
 

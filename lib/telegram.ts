@@ -83,7 +83,8 @@ export async function sendTelegramMessage(
 }
 
 export async function createForumTopic(
-  name: string
+  name: string,
+  options?: { iconColor?: number }
 ): Promise<{ threadId: number; name: string } | null> {
   const config = getTelegramConfig();
 
@@ -91,13 +92,19 @@ export async function createForumTopic(
     return null;
   }
 
+  const body: Record<string, unknown> = {
+    chat_id: config.chatId,
+    name: name.slice(0, 128)
+  };
+
+  if (options?.iconColor !== undefined) {
+    body.icon_color = options.iconColor;
+  }
+
   const response = await fetch(`https://api.telegram.org/bot${config.botToken}/createForumTopic`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: config.chatId,
-      name: name.slice(0, 128)
-    })
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) {
@@ -118,21 +125,31 @@ export async function createForumTopic(
   };
 }
 
-export async function editForumTopic(threadId: number, name: string): Promise<boolean> {
+export async function editForumTopic(
+  threadId: number,
+  name: string,
+  options?: { iconColor?: number }
+): Promise<boolean> {
   const config = getTelegramConfig();
 
   if (!config) {
     return false;
   }
 
+  const body: Record<string, unknown> = {
+    chat_id: config.chatId,
+    message_thread_id: threadId,
+    name: name.slice(0, 128)
+  };
+
+  if (options?.iconColor !== undefined) {
+    body.icon_color = options.iconColor;
+  }
+
   const response = await fetch(`https://api.telegram.org/bot${config.botToken}/editForumTopic`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: config.chatId,
-      message_thread_id: threadId,
-      name: name.slice(0, 128)
-    })
+    body: JSON.stringify(body)
   });
 
   return response.ok;

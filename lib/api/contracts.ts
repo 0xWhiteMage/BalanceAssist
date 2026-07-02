@@ -24,7 +24,8 @@ export const finalizeLeadPayloadSchema = z.object({
       timelineBand: z.string().optional(),
       budgetBand: z.string().optional(),
       contactName: z.string().optional(),
-      contactEmail: z.string().optional()
+      contactEmail: z.string().optional(),
+      contactCompany: z.string().optional()
     })
     .optional()
 });
