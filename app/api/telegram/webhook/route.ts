@@ -29,7 +29,18 @@ export async function POST(request: Request) {
 
   let sessionId: string | null = null;
 
-  if (message.reply_to_message?.message_id) {
+  if (typeof message.message_thread_id === 'number') {
+    const { data: byThread } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('telegram_thread_id', message.message_thread_id)
+      .maybeSingle();
+
+    const byThreadRow = byThread as { id?: string } | null;
+    sessionId = byThreadRow?.id ?? null;
+  }
+
+  if (!sessionId && message.reply_to_message?.message_id) {
     const { data: parent } = await supabase
       .from('human_messages')
       .select('session_id')
@@ -55,6 +66,7 @@ export async function POST(request: Request) {
 
   if (!sessionId) {
     console.warn('[telegram-webhook] No matching session for update', {
+      thread_id: message.message_thread_id,
       reply_to_message_id: message.reply_to_message?.message_id,
       chat_id: message.chat?.id,
       from: message.from?.username ?? message.from?.first_name
@@ -67,7 +79,8 @@ export async function POST(request: Request) {
   const { error } = await supabase.from('human_messages').insert({
     session_id: sessionId,
     sender: 'team',
-    text: `${senderName}: ${message.text}`
+    text: `${senderName}: ${message.text}`,
+    telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
   });
 
   if (error) {
