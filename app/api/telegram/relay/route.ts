@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { createForumTopic, editForumTopic, sendTelegramMessage } from '@/lib/telegram';
+import { closeForumTopic, createForumTopic, editForumTopic, sendTelegramMessage } from '@/lib/telegram';
 
 const relayPayloadSchema = z.object({
   sessionId: z.string().min(1),
@@ -115,9 +115,26 @@ export async function POST(request: Request) {
     const topic = await createForumTopic(newTopicName ?? buildTopicName(contactName, contactCompany, shortId));
 
     if (topic) {
-      threadId = topic.threadId;
-      updates.telegram_thread_id = threadId;
-      console.log('[telegram-relay] Created topic', { sessionId, threadId, name: newTopicName });
+      const { data: claimed } = await supabase
+        .from('sessions')
+        .update({ telegram_thread_id: topic.threadId })
+        .eq('id', sessionId)
+        .is('telegram_thread_id', null)
+        .select('telegram_thread_id');
+
+      if (claimed && claimed.length > 0) {
+        threadId = topic.threadId;
+        console.log('[telegram-relay] Created topic', { sessionId, threadId, name: newTopicName });
+      } else {
+        await closeForumTopic(topic.threadId).catch(() => undefined);
+        const { data: refreshed } = await supabase
+          .from('sessions')
+          .select('telegram_thread_id')
+          .eq('id', sessionId)
+          .maybeSingle();
+        threadId = (refreshed as { telegram_thread_id?: number | null } | null)?.telegram_thread_id ?? null;
+        console.log('[telegram-relay] Lost topic race, reused existing thread', { sessionId, threadId });
+      }
     } else {
       console.warn('[telegram-relay] createForumTopic failed; falling back to flat message');
     }
@@ -130,14 +147,18 @@ export async function POST(request: Request) {
     }
   }
 
-  if (Object.keys(updates).length > 0) {
+  const sessionPatch: Record<string, unknown> = {};
+  if (updates.contact_name) sessionPatch.contact_name = updates.contact_name;
+  if (updates.contact_company) sessionPatch.contact_company = updates.contact_company;
+
+  if (Object.keys(sessionPatch).length > 0) {
     const { error: sessionUpdateError } = await supabase
       .from('sessions')
-      .update(updates)
+      .update(sessionPatch)
       .eq('id', sessionId);
 
     if (sessionUpdateError) {
-      console.error('[telegram-relay] Failed to update session', { sessionId, updates, sessionUpdateError });
+      console.error('[telegram-relay] Failed to update session', { sessionId, sessionPatch, sessionUpdateError });
     }
   }
 
