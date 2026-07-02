@@ -19,7 +19,8 @@ const envSchema = z.object({
   MONDAY_BOARD_ID: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
-  CALENDLY_URL: optionalUrl
+  CALENDLY_URL: optionalUrl,
+  SETUP_TOKEN: z.string().optional()
 });
 
 export function getEnv() {
