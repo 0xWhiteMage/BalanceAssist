@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
+import { hasSupabaseServerConfig } from '@/lib/supabase/server';
 
 const setupPayloadSchema = z.object({
   webhookUrl: z.string().url().optional(),
@@ -137,6 +138,15 @@ export async function POST(request: Request) {
   return jsonWithCors({
     ok: true,
     message: 'Telegram bot is ready. Save TELEGRAM_CHAT_ID in your environment if it was auto-detected.',
+    supabase: {
+      configured: hasSupabaseServerConfig(),
+      url_set: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
+      url_value: process.env.NEXT_PUBLIC_SUPABASE_URL ?? null,
+      secret_key_set: Boolean(process.env.SUPABASE_SECRET_KEY),
+      secret_key_prefix: process.env.SUPABASE_SECRET_KEY ? process.env.SUPABASE_SECRET_KEY.slice(0, 12) + '...' : null,
+      service_role_key_set: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      service_role_key_prefix: process.env.SUPABASE_SERVICE_ROLE_KEY ? process.env.SUPABASE_SERVICE_ROLE_KEY.slice(0, 12) + '...' : null
+    },
     ...summary
   });
 }
