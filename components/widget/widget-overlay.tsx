@@ -93,10 +93,15 @@ export function WidgetOverlay({
     }
   }, []);
 
+  const hasInitializedTeamPollingRef = useRef(false);
+
   useEffect(() => {
     if (isTeamConnected && sessionIdRef.current) {
-      lastTeamMessageIdRef.current = 0;
-      setTeamWaitingForReply(false);
+      if (!hasInitializedTeamPollingRef.current) {
+        lastTeamMessageIdRef.current = 0;
+        setTeamWaitingForReply(false);
+        hasInitializedTeamPollingRef.current = true;
+      }
 
       pollTeamMessages().catch(() => undefined);
 
@@ -114,6 +119,12 @@ export function WidgetOverlay({
 
     return undefined;
   }, [isTeamConnected, pollTeamMessages, teamWaitingForReply]);
+
+  useEffect(() => {
+    if (!isTeamConnected) {
+      hasInitializedTeamPollingRef.current = false;
+    }
+  }, [isTeamConnected]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
