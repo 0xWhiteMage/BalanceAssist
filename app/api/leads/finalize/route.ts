@@ -6,6 +6,31 @@ export async function OPTIONS() {
   return corsOptionsResponse();
 }
 
+function hasSubstance(
+  draft:
+    | {
+        service?: string;
+        projectScope?: string;
+        timelineBand?: string;
+        budgetBand?: string;
+        contactName?: string;
+        contactEmail?: string;
+      }
+    | undefined
+): boolean {
+  if (!draft) return false;
+
+  const hasContact = Boolean(draft.contactEmail?.trim() || draft.contactName?.trim());
+  const hasProjectDetail = Boolean(
+    draft.service?.trim() ||
+      draft.projectScope?.trim() ||
+      draft.timelineBand?.trim() ||
+      draft.budgetBand?.trim()
+  );
+
+  return hasContact && hasProjectDetail;
+}
+
 export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, finalizeLeadPayloadSchema);
 
@@ -14,6 +39,16 @@ export async function POST(request: Request) {
   }
 
   const { sessionId, qualificationStatus, score, recommendedNextStep, leadDraft } = parsed.data;
+
+  if (!hasSubstance(leadDraft)) {
+    return jsonWithCors({
+      ok: true,
+      sessionId,
+      qualificationStatus,
+      persisted: false,
+      reason: 'No contact + project detail; skipped to keep the database clean.'
+    });
+  }
 
   if (hasSupabaseServerConfig()) {
     const supabase = createServerSupabaseClient();
@@ -39,7 +74,8 @@ export async function POST(request: Request) {
       return jsonWithCors({
         ok: true,
         sessionId,
-        qualificationStatus
+        qualificationStatus,
+        persisted: !error
       });
     }
   }
@@ -47,6 +83,8 @@ export async function POST(request: Request) {
   return jsonWithCors({
     ok: true,
     sessionId,
-    qualificationStatus
+    qualificationStatus,
+    persisted: false,
+    reason: 'Supabase not configured.'
   });
 }

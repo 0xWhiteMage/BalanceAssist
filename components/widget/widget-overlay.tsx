@@ -189,26 +189,31 @@ export function WidgetOverlay({
     [botSay]
   );
 
-  const startConversation = useCallback(async () => {
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    if (sessionIdRef.current) return sessionIdRef.current;
+    if (typeof window === 'undefined') return null;
+
+    const sourceUrl = window.location.href;
+    const referrer = document.referrer || undefined;
+
+    try {
+      const session = await createSession({ sourceUrl, referrer });
+      if (session?.sessionId) {
+        setSessionId(session.sessionId);
+        sessionIdRef.current = session.sessionId;
+        return session.sessionId;
+      }
+    } catch {
+      // Persistence is best-effort; widget continues without it.
+    }
+
+    return null;
+  }, []);
+
+const startConversation = useCallback(async () => {
     if (hasStarted) return;
     setHasStarted(true);
     cancelRef.current = false;
-
-    if (typeof window !== 'undefined') {
-      const sourceUrl = window.location.href;
-      const referrer = document.referrer || undefined;
-
-      try {
-        const session = await createSession({ sourceUrl, referrer });
-        if (session?.sessionId) {
-          setSessionId(session.sessionId);
-          sessionIdRef.current = session.sessionId;
-          await logEvent({ sessionId: session.sessionId, eventName: 'widget_opened' });
-        }
-      } catch {
-        // Persistence is best-effort; widget continues without it.
-      }
-    }
 
     await advanceStep('intro', createDefaultLeadDraft());
   }, [hasStarted, advanceStep]);
@@ -226,6 +231,10 @@ export function WidgetOverlay({
     }
     cancelRef.current = true;
     setIsOpen(false);
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
   }
 
   function handleOpen() {
@@ -299,6 +308,7 @@ export function WidgetOverlay({
     setIsTeamConnected(true);
     setCurrentStep('free-chat');
 
+    await ensureSession();
     if (sessionIdRef.current) {
       void logEvent({ sessionId: sessionIdRef.current, eventName: 'human_handoff' });
     }
@@ -315,7 +325,7 @@ export function WidgetOverlay({
     setMessages(next);
   }
 
-  function processFlowAnswer(value: string, displayLabel?: string) {
+  async function processFlowAnswer(value: string, displayLabel?: string) {
     const step = conversationSteps[currentStep];
     const userMsg: ChatMessage = {
       id: nextId(),
@@ -356,6 +366,10 @@ export function WidgetOverlay({
     }
 
     const reachedQualification = nextStepId === 'qualification';
+
+    if (reachedQualification || nextStepId) {
+      await ensureSession();
+    }
 
     if (reachedQualification && sessionIdRef.current) {
       const result = scoreLead(updatedDraft);
@@ -399,6 +413,7 @@ export function WidgetOverlay({
     }
 
     if (isTeamConnected) {
+      await ensureSession();
       const id = sessionIdRef.current;
       const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
       const nextMessages = [...messagesRef.current, userMsg];
@@ -419,6 +434,7 @@ export function WidgetOverlay({
     }
 
     if (currentStep === 'free-chat') {
+      await ensureSession();
       const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
       const nextMessages = [...messagesRef.current, userMsg];
       messagesRef.current = nextMessages;
