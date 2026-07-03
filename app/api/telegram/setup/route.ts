@@ -150,3 +150,26 @@ export async function POST(request: Request) {
     ...summary
   });
 }
+
+export async function PUT() {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!botToken) {
+    return jsonWithCors({ ok: false, error: 'TELEGRAM_BOT_TOKEN not set' }, { status: 400 });
+  }
+
+  const commandsResult = await callTelegram(botToken, 'setMyCommands', {
+    commands: [
+      { command: 'request_files', description: 'Ask the user to upload files' },
+      { command: 'help', description: 'Show available commands' }
+    ],
+    scope: { type: 'all_chat_administrators' }
+  });
+
+  return jsonWithCors({
+    ok: commandsResult.ok,
+    message: commandsResult.ok
+      ? 'Commands registered. Type / in the group to see them.'
+      : `Failed: ${commandsResult.description ?? 'unknown'}`
+  });
+}
