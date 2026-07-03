@@ -54,10 +54,6 @@ const intents: LocalIntent[] = [
     response: "I can help you:\n\n• Explore our services and figure out what fits your project\n• Capture your project brief — scope, timeline, budget\n• Share files or references with our team\n• Connect you with the right person for a call or chat\n\nWhat would you like to start with?"
   },
   {
-    patterns: [/how.*much|what.*price|pricing|cost|rates?|expensive|cheap|how.*much.*do.*you.*charge/i],
-    response: "Pricing depends on the scope and type of work. I can give you indicative guidance once I understand what you're planning.\n\nWould you like to walk me through your project?"
-  },
-  {
     patterns: [/what.*services|what.*do.*you.*offer|what.*do.*you.*guys.*do|tell.*me.*about.*(?:your|balance).*(?:services|work)/i],
     response: "Balance Studio offers:\n\n• **Production** — End-to-end film and video production\n• **Post-Production** — Editing, color, sound, finishing\n• **Event & Experience** — Immersive event coverage\n• **Media Asset Adaptation** — Content optimization across channels\n• **Design & Direction** — Art direction and visual systems\n• **Generative AI** — AI-assisted workflows\n\nWhich of these interests you?"
   },
@@ -92,6 +88,22 @@ const intents: LocalIntent[] = [
   {
     patterns: [/timeline|how.*long|turnaround|delivery/i],
     response: "Timelines vary depending on the project scope. Typically, we work in ranges from a few weeks for focused projects to several months for larger campaigns."
+  },
+  {
+    patterns: [/how much|what.*price|quote|cost|fees?|rates?/i],
+    response: "Final pricing is set by our producers after understanding scope. I can't quote from here, but I can pass this to the team."
+  },
+  {
+    patterns: [/legal|contract|terms|liability|nda/i],
+    response: "I'm not able to advise on legal or contract terms. Our producers can walk you through that directly."
+  },
+  {
+    patterns: [/apply.*job|hire.*me|recruit|subscribe|sign.*in|password|login/i],
+    response: "I'm Balance Assist and I only help with creative production briefs for the Balance team. For other requests, please contact hello@balancestudio.tv."
+  },
+  {
+    patterns: [/write.*code|program|script|hack|exploit|sql injection|prompt inject|jailbreak|ignore.*previous|ignore.*instructions|reveal.*prompt|system.*prompt|change.*role|pretend.*human/i],
+    response: "I'm here to help with your Balance project brief. I can't help with that, but I can help you capture a creative brief if you have one in mind."
   }
 ];
 
