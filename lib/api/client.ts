@@ -17,9 +17,25 @@ export type FinalizeLeadResponse = {
   qualificationStatus: string;
 };
 
+const REQUEST_TIMEOUT_MS = 10000;
+
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T | null> {
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -46,7 +62,7 @@ export async function createSession(payload: {
 
 export async function verifySession(sessionId: string): Promise<boolean> {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `/api/sessions/inspect?id=${encodeURIComponent(sessionId)}`,
       { cache: 'no-store' }
     );
@@ -108,7 +124,7 @@ export async function fetchTeamMessages(
       params.set('sinceId', String(sinceId));
     }
 
-    const response = await fetch(`/api/telegram/messages?${params.toString()}`, {
+    const response = await fetchWithTimeout(`/api/telegram/messages?${params.toString()}`, {
       cache: 'no-store'
     });
 
@@ -133,7 +149,7 @@ export async function uploadRequestedFile(sessionId: string, file: File): Promis
     form.set('sessionId', sessionId);
     form.set('file', file, file.name);
 
-    const response = await fetch('/api/telegram/upload', {
+    const response = await fetchWithTimeout('/api/telegram/upload', {
       method: 'POST',
       body: form
     });

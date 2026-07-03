@@ -103,12 +103,16 @@ export function WidgetOverlay({
   const draftRef = useRef(draft);
   const stepRef = useRef(currentStep);
   const teamRef = useRef(isTeamConnected);
+  const humanFileRequestOpenRef = useRef(humanFileRequestOpen);
+  const humanFileRequestNoteRef = useRef(humanFileRequestNote);
 
   messagesRef.current = messages;
   draftRef.current = draft;
   stepRef.current = currentStep;
   teamRef.current = isTeamConnected;
   sessionIdRef.current = sessionId;
+  humanFileRequestOpenRef.current = humanFileRequestOpen;
+  humanFileRequestNoteRef.current = humanFileRequestNote;
 
   const pollTeamMessages = useCallback(async () => {
     if (isPollingRef.current) return;
@@ -119,8 +123,12 @@ export function WidgetOverlay({
       if (!id) return;
 
       const pollState = await fetchTeamMessages(id, lastTeamMessageIdRef.current);
-      setHumanFileRequestOpen(pollState.fileRequestOpen);
-      setHumanFileRequestNote(pollState.fileRequestNote);
+      if (pollState.fileRequestOpen !== humanFileRequestOpenRef.current) {
+        setHumanFileRequestOpen(pollState.fileRequestOpen);
+      }
+      if (pollState.fileRequestNote !== humanFileRequestNoteRef.current) {
+        setHumanFileRequestNote(pollState.fileRequestNote);
+      }
 
       const messages = pollState.messages;
       if (messages.length === 0) return;
@@ -398,7 +406,7 @@ const startConversation = useCallback(async () => {
     try {
       const llmMessages = history
         .filter((message) => message.text.trim().length > 0)
-        .slice(-10)
+        .slice(-6)
         .map((message) => ({
           role: message.sender === 'user' ? 'user' : 'assistant',
           content: message.text

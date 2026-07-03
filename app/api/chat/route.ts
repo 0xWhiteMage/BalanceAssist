@@ -32,6 +32,21 @@ export async function OPTIONS() {
 }
 
 type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+const PROVIDER_TIMEOUT_MS = 15000;
+
+async function fetchProvider(input: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function readMinimaxContent(data: unknown): string | null {
   if (!data || typeof data !== 'object') {
@@ -74,7 +89,7 @@ async function callOpenAICompatible(
   model: string,
   messages: OpenAIMessage[]
 ): Promise<string> {
-  const response = await fetch(endpoint, {
+  const response = await fetchProvider(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -95,7 +110,7 @@ async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<s
   const systemContent = messages.find((m) => m.role === 'system')?.content ?? '';
   const userMessages = messages.filter((m) => m.role !== 'system');
 
-  const response = await fetch('https://api.minimax.chat/v1/text/chatcompletion_v2', {
+  const response = await fetchProvider('https://api.minimax.chat/v1/text/chatcompletion_v2', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
