@@ -82,11 +82,18 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: true, sessionId, telegramSent: fallbackMessage !== null, persisted: false });
   }
 
-  const { data: existingRow } = await supabase
+  const { data: existingRow, error: fetchError } = await supabase
     .from('sessions')
     .select('telegram_thread_id, contact_name, contact_company')
     .eq('id', sessionId)
     .maybeSingle();
+
+  if (fetchError) {
+    console.error('[telegram-relay] Failed to fetch session', {
+      sessionId,
+      fetchError: fetchError.message ?? fetchError
+    });
+  }
 
   type SessionSnapshot = {
     telegram_thread_id?: number | null;
@@ -99,35 +106,22 @@ export async function POST(request: Request) {
   let contactName = sessionSnap?.contact_name ?? null;
   let contactCompany = sessionSnap?.contact_company ?? null;
 
-  if (!sessionSnap) {
-    console.warn('[telegram-relay] Session not found in DB, skipping topic creation', { sessionId });
-    const messageHtml = buildMessageHtml(text, detectedName, detectedCompany, shortId);
-    const telegramMessageId = await sendTelegramMessage(messageHtml);
-    return jsonWithCors({
-      ok: true,
-      sessionId,
-      telegramSent: telegramMessageId !== null,
-      persisted: false,
-      threadId: null
-    });
-  }
-
-  const updates: Record<string, unknown> = {};
+  const detectedUpdates: Record<string, unknown> = {};
   if (detectedName && !contactName) {
     contactName = detectedName;
-    updates.contact_name = contactName;
+    detectedUpdates.contact_name = contactName;
   }
   if (detectedCompany && !contactCompany) {
     contactCompany = detectedCompany;
-    updates.contact_company = contactCompany;
+    detectedUpdates.contact_company = contactCompany;
   }
 
   const newTopicName = buildTopicName(contactName, contactCompany, shortId, 'new');
   const shouldRename = !threadId
-    || (contactName && !sessionSnap?.contact_name)
-    || (contactCompany && !sessionSnap?.contact_company);
+    || (contactName && contactName !== sessionSnap?.contact_name)
+    || (contactCompany && contactCompany !== sessionSnap?.contact_company);
 
-  if (!threadId) {
+  if (sessionSnap && !threadId) {
     const topic = await createForumTopic(newTopicName, { iconColor: TOPIC_STATUS_COLOR.new });
 
     if (topic) {
@@ -154,28 +148,15 @@ export async function POST(request: Request) {
     } else {
       console.warn('[telegram-relay] createForumTopic failed; falling back to flat message');
     }
-  } else if (shouldRename) {
+  } else if (threadId && shouldRename) {
     const updated = await editForumTopic(threadId, newTopicName, { iconColor: TOPIC_STATUS_COLOR.new });
     if (updated) {
       console.log('[telegram-relay] Renamed topic', { sessionId, threadId, name: newTopicName });
     } else {
       console.warn('[telegram-relay] editForumTopic failed', { sessionId, threadId });
     }
-  }
-
-  const sessionPatch: Record<string, unknown> = {};
-  if (updates.contact_name) sessionPatch.contact_name = updates.contact_name;
-  if (updates.contact_company) sessionPatch.contact_company = updates.contact_company;
-
-  if (Object.keys(sessionPatch).length > 0) {
-    const { error: sessionUpdateError } = await supabase
-      .from('sessions')
-      .update(sessionPatch)
-      .eq('id', sessionId);
-
-    if (sessionUpdateError) {
-      console.error('[telegram-relay] Failed to update session', { sessionId, sessionPatch, sessionUpdateError });
-    }
+  } else if (!sessionSnap) {
+    console.warn('[telegram-relay] Session not in DB; sending flat message without topic', { sessionId });
   }
 
   const messageHtml = buildMessageHtml(text, contactName, contactCompany, shortId);
@@ -184,20 +165,22 @@ export async function POST(request: Request) {
     threadId ? { threadId } : undefined
   );
 
-  const { error } = await supabase.from('human_messages').insert({
+  const insertPayload: Record<string, unknown> = {
     session_id: sessionId,
     sender: 'user',
     text,
     telegram_message_id: telegramMessageId?.messageId ?? null,
     telegram_thread_id: threadId
-  });
+  };
 
-  if (error) {
+  const { error: insertError } = await supabase.from('human_messages').insert(insertPayload);
+
+  if (insertError) {
     console.error('[telegram-relay] Failed to insert user message', {
       sessionId,
-      telegramMessageId: telegramMessageId?.messageId,
       threadId,
-      error
+      telegramMessageId: telegramMessageId?.messageId,
+      insertError: insertError.message ?? insertError
     });
   } else {
     await supabase
@@ -206,11 +189,26 @@ export async function POST(request: Request) {
       .eq('id', sessionId);
   }
 
+  if (Object.keys(detectedUpdates).length > 0) {
+    const { error: sessionUpdateError } = await supabase
+      .from('sessions')
+      .update(detectedUpdates)
+      .eq('id', sessionId);
+
+    if (sessionUpdateError) {
+      console.error('[telegram-relay] Failed to update session detected fields', {
+        sessionId,
+        detectedUpdates,
+        sessionUpdateError: sessionUpdateError.message ?? sessionUpdateError
+      });
+    }
+  }
+
   return jsonWithCors({
     ok: true,
     sessionId,
     telegramSent: telegramMessageId !== null,
-    persisted: !error,
+    persisted: !insertError,
     threadId
   });
 }
