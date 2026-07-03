@@ -181,7 +181,7 @@ export function WidgetOverlay({
   }, [teamWaitingForReply]);
 
   useEffect(() => {
-    if (!isTeamConnected || !sessionIdRef.current) {
+    if (!isTeamConnected || !sessionId) {
       return undefined;
     }
 
@@ -210,7 +210,7 @@ export function WidgetOverlay({
       }
       pollIntervalRef.current = null;
     };
-  }, [isTeamConnected, pollTeamMessages]);
+  }, [isTeamConnected, sessionId, pollTeamMessages]);
 
   useEffect(() => {
     if (!isTeamConnected) {
