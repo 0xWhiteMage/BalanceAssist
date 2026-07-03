@@ -85,7 +85,7 @@ export function WidgetOverlay({
   const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingRef = useRef<boolean>(false);
   const seenTeamMessageIdsRef = useRef<Set<number>>(new Set());
   const submitInFlightRef = useRef<boolean>(false);
@@ -181,14 +181,21 @@ export function WidgetOverlay({
 
     pollTeamMessages().catch(() => undefined);
 
-    const interval = setInterval(() => {
-      pollTeamMessages().catch(() => undefined);
-    }, pollRateMsRef.current);
+    const scheduleNextPoll = () => {
+      pollIntervalRef.current = setTimeout(async () => {
+        await pollTeamMessages().catch(() => undefined);
+        if (!cancelRef.current && teamRef.current && sessionIdRef.current) {
+          scheduleNextPoll();
+        }
+      }, pollRateMsRef.current);
+    };
 
-    pollIntervalRef.current = interval;
+    scheduleNextPoll();
 
     return () => {
-      clearInterval(interval);
+      if (pollIntervalRef.current) {
+        clearTimeout(pollIntervalRef.current);
+      }
       pollIntervalRef.current = null;
     };
   }, [isTeamConnected, pollTeamMessages]);
@@ -327,7 +334,7 @@ const startConversation = useCallback(async () => {
     setHumanFileRequestOpen(false);
     setHumanFileRequestNote(null);
     if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
+      clearTimeout(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
     if (advanceTimerRef.current) {
