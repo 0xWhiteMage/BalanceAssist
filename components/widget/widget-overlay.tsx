@@ -88,6 +88,10 @@ export function WidgetOverlay({
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isPollingRef = useRef<boolean>(false);
   const seenTeamMessageIdsRef = useRef<Set<number>>(new Set());
+  const submitInFlightRef = useRef<boolean>(false);
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollImmediateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -158,31 +162,36 @@ export function WidgetOverlay({
   }, []);
 
   const hasInitializedTeamPollingRef = useRef(false);
+  const pollRateMsRef = useRef(2000);
 
   useEffect(() => {
-    if (isTeamConnected && sessionIdRef.current) {
-      if (!hasInitializedTeamPollingRef.current) {
-        lastTeamMessageIdRef.current = 0;
-        setTeamWaitingForReply(false);
-        hasInitializedTeamPollingRef.current = true;
-      }
+    pollRateMsRef.current = teamWaitingForReply ? 1000 : 2000;
+  }, [teamWaitingForReply]);
 
-      pollTeamMessages().catch(() => undefined);
-
-      const interval = setInterval(() => {
-        pollTeamMessages().catch(() => undefined);
-      }, teamWaitingForReply ? 1000 : 2000);
-
-      pollIntervalRef.current = interval;
-
-      return () => {
-        clearInterval(interval);
-        pollIntervalRef.current = null;
-      };
+  useEffect(() => {
+    if (!isTeamConnected || !sessionIdRef.current) {
+      return undefined;
     }
 
-    return undefined;
-  }, [isTeamConnected, pollTeamMessages, teamWaitingForReply]);
+    if (!hasInitializedTeamPollingRef.current) {
+      lastTeamMessageIdRef.current = 0;
+      setTeamWaitingForReply(false);
+      hasInitializedTeamPollingRef.current = true;
+    }
+
+    pollTeamMessages().catch(() => undefined);
+
+    const interval = setInterval(() => {
+      pollTeamMessages().catch(() => undefined);
+    }, pollRateMsRef.current);
+
+    pollIntervalRef.current = interval;
+
+    return () => {
+      clearInterval(interval);
+      pollIntervalRef.current = null;
+    };
+  }, [isTeamConnected, pollTeamMessages]);
 
   useEffect(() => {
     if (!isTeamConnected) {
@@ -321,6 +330,18 @@ const startConversation = useCallback(async () => {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    if (pollImmediateTimerRef.current) {
+      clearTimeout(pollImmediateTimerRef.current);
+      pollImmediateTimerRef.current = null;
+    }
   }
 
   function handleOpen() {
@@ -330,6 +351,18 @@ const startConversation = useCallback(async () => {
 
   function handleReset() {
     cancelRef.current = true;
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    if (pollImmediateTimerRef.current) {
+      clearTimeout(pollImmediateTimerRef.current);
+      pollImmediateTimerRef.current = null;
+    }
     messagesRef.current = [];
     setMessages([]);
     setDraft(createDefaultLeadDraft());
@@ -342,7 +375,10 @@ const startConversation = useCallback(async () => {
     setView('chat');
     setAllowAttachment(false);
     cancelRef.current = false;
-    setTimeout(() => startConversation(), 200);
+    resetTimerRef.current = setTimeout(() => {
+      resetTimerRef.current = null;
+      startConversation();
+    }, 200);
   }
 
   async function handleLLMResponse(history: ChatMessage[]) {
@@ -518,86 +554,124 @@ const startConversation = useCallback(async () => {
     }
 
     if (nextStepId) {
-      setTimeout(() => advanceStep(nextStepId!, updatedDraft), 300);
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = setTimeout(() => {
+        advanceTimerRef.current = null;
+        advanceStep(nextStepId!, updatedDraft).catch(() => undefined);
+      }, 300);
     }
   }
 
+  function appendUserMessage(text: string) {
+    const userMsg: ChatMessage = { id: nextId(), sender: 'user', text, timestamp: Date.now() };
+    const nextMessages = [...messagesRef.current, userMsg];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    return userMsg;
+  }
+
   async function handleSubmitText() {
+    if (submitInFlightRef.current) return;
     const trimmed = inputValue.trim();
     if (!trimmed || isTyping) return;
+    submitInFlightRef.current = true;
     setInputValue('');
 
-    const step = conversationSteps[currentStep];
+    try {
+      const step = conversationSteps[currentStep];
 
-    const memoryResetPattern = /forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i;
-    if (!isTeamConnected && memoryResetPattern.test(trimmed)) {
-      await botSay('I\'ve cleared my memory of this project. We can start fresh.');
-      setTimeout(() => handleReset(), 200);
-      return;
-    }
+      const memoryResetPattern = /forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i;
+      if (!isTeamConnected && memoryResetPattern.test(trimmed)) {
+        appendUserMessage(trimmed);
+        await botSay("I've cleared my memory of this project. We can start fresh.");
+        if (resetTimerRef.current) {
+          clearTimeout(resetTimerRef.current);
+        }
+        resetTimerRef.current = setTimeout(() => {
+          resetTimerRef.current = null;
+          handleReset();
+        }, 200);
+        return;
+      }
 
-    const memoryUpdatePattern = /\b(update that|correct that|change that|actually|correction)\b/i;
-    if (!isTeamConnected && memoryUpdatePattern.test(trimmed)) {
-      const updatedDraft = applyTextToDraft(trimmed, draft, currentStep);
-      setDraft(updatedDraft);
-      const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
-      const nextMessages = [...messagesRef.current, userMsg];
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
-      const lines = getDraftSummaryLines(updatedDraft);
-      await botSay(
-        lines.length > 0
-          ? `Updated. I now have:\n\n${lines.map((line) => `• ${line}`).join('\n')}`
-          : 'Updated. What would you like me to capture next?'
-      );
-      return;
-    }
+      const memoryUpdatePattern = /\b(update that|correct that|change that|actually|correction)\b/i;
+      if (!isTeamConnected && memoryUpdatePattern.test(trimmed)) {
+        const updatedDraft = applyTextToDraft(trimmed, draft, currentStep);
+        setDraft(updatedDraft);
+        appendUserMessage(trimmed);
+        const lines = getDraftSummaryLines(updatedDraft);
+        await botSay(
+          lines.length > 0
+            ? `Updated. I now have:\n\n${lines.map((line) => `• ${line}`).join('\n')}`
+            : 'Updated. What would you like me to capture next?'
+        );
+        return;
+      }
 
-    const humanKeywords = /talk.*to.*human|speak.*to.*human|real.*person|human.*agent|connect.*team|connect.*me/i;
-    if (humanKeywords.test(trimmed) && !isTeamConnected) {
-      const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
-      const nextMessages = [...messagesRef.current, userMsg];
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
-      handleTeamConnect();
-      return;
-    }
+      const humanKeywords = /talk.*to.*human|speak.*to.*human|real.*person|human.*agent|connect.*team|connect.*me/i;
+      if (humanKeywords.test(trimmed) && !isTeamConnected) {
+        appendUserMessage(trimmed);
+        handleTeamConnect();
+        return;
+      }
 
-    if (isTeamConnected) {
-      await ensureSession();
-      const id = sessionIdRef.current;
-      const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
-      const nextMessages = [...messagesRef.current, userMsg];
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
-      setTeamWaitingForReply(true);
-      setHumanStatus('delivered');
+      if (isTeamConnected) {
+        await ensureSession();
+        const id = sessionIdRef.current;
+        appendUserMessage(trimmed);
+        setTeamWaitingForReply(true);
+        setHumanStatus('delivered');
 
-      if (id) {
+        if (!id) {
+          setTeamWaitingForReply(false);
+          setHumanStatus('connected');
+          return;
+        }
+
         const ok = await relayUserMessage(id, trimmed);
         if (!ok) {
           setTeamWaitingForReply(false);
           setHumanStatus('connected');
           await botSay('Sorry, I could not reach the team right now. Please email hello@balancestudio.tv.');
-        } else {
-          setHumanStatus('awaiting');
-          setTimeout(() => {
-            pollTeamMessages().catch(() => undefined);
-          }, 500);
+          return;
         }
-      } else {
-        setTeamWaitingForReply(false);
-        setHumanStatus('connected');
-      }
-      return;
-    }
 
-    if (currentStep === 'free-chat') {
-      await ensureSession();
-      const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
-      const nextMessages = [...messagesRef.current, userMsg];
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
+        setHumanStatus('awaiting');
+        if (pollImmediateTimerRef.current) {
+          clearTimeout(pollImmediateTimerRef.current);
+        }
+        pollImmediateTimerRef.current = setTimeout(() => {
+          pollImmediateTimerRef.current = null;
+          pollTeamMessages().catch(() => undefined);
+        }, 500);
+        return;
+      }
+
+      if (currentStep === 'free-chat') {
+        await ensureSession();
+        appendUserMessage(trimmed);
+
+        const localResponse = getLocalResponse(trimmed, {
+          draft,
+          step: currentStep,
+          isTeamConnected
+        });
+
+        if (localResponse) {
+          await botSay(localResponse);
+          return;
+        }
+
+        await handleLLMResponse(messagesRef.current);
+        return;
+      }
+
+      const matched = step.quickReplies ? tryMatchOption(trimmed, step) : null;
+      if (matched) {
+        appendUserMessage(matched);
+        processFlowAnswer(matched, getQuickReplyLabel(currentStep, matched));
+        return;
+      }
 
       const localResponse = getLocalResponse(trimmed, {
         draft,
@@ -606,47 +680,22 @@ const startConversation = useCallback(async () => {
       });
 
       if (localResponse) {
+        appendUserMessage(trimmed);
         await botSay(localResponse);
         return;
       }
 
-      await handleLLMResponse(nextMessages);
-      return;
-    }
-
-    if (step.quickReplies) {
-      const matched = tryMatchOption(trimmed, step);
-      if (matched) {
-        processFlowAnswer(matched, getQuickReplyLabel(currentStep, matched));
+      if (step.freeText) {
+        appendUserMessage(trimmed);
+        processFlowAnswer(trimmed);
         return;
       }
+
+      appendUserMessage(trimmed);
+      await handleLLMResponse(messagesRef.current);
+    } finally {
+      submitInFlightRef.current = false;
     }
-
-    const localResponse = getLocalResponse(trimmed, {
-      draft,
-      step: currentStep,
-      isTeamConnected
-    });
-
-    if (localResponse) {
-      const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
-      const nextMessages = [...messagesRef.current, userMsg];
-      messagesRef.current = nextMessages;
-      setMessages(nextMessages);
-      await botSay(localResponse);
-      return;
-    }
-
-    if (step.freeText) {
-      processFlowAnswer(trimmed);
-      return;
-    }
-
-    const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
-    const nextMessages = [...messagesRef.current, userMsg];
-    messagesRef.current = nextMessages;
-    setMessages(nextMessages);
-    await handleLLMResponse(nextMessages);
   }
 
   function handleSubmitQuickReply(value: string, label: string) {

@@ -30,3 +30,15 @@ export function checkRateLimit(sessionId: string): {
 export function resetRateLimit(sessionId: string) {
   buckets.delete(sessionId);
 }
+
+export function gcRateLimits(): number {
+  const cutoff = Date.now() - WINDOW_MS;
+  let removed = 0;
+  for (const [key, timestamps] of buckets) {
+    if (timestamps.every((timestamp) => timestamp <= cutoff)) {
+      buckets.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
