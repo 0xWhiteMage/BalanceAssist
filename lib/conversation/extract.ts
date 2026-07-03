@@ -163,10 +163,18 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
     (updates as Record<string, unknown>).contactCompany = detectedCompany;
   }
 
-  const looksLikeScopeDescription = text.trim().length > 20 || text.trim().includes(' ');
+  const trimmedText = text.trim();
+  const looksLikeScopeDescription =
+    trimmedText.length > 24 &&
+    !/^(apply|hire|recruit|subscribe|login|sign in|hi|hello|hey|thanks?|thank you)\b/i.test(trimmedText) &&
+    !/^(help|support|cancel|stop|bye|goodbye)\b/i.test(trimmedText);
 
-  if ((currentStep === 'intro' || currentStep === 'scope' || currentStep === 'service') && looksLikeScopeDescription && (!currentDraft.projectScope || overwrite)) {
-    updates.projectScope = text.trim();
+  if (
+    (currentStep === 'intro' || currentStep === 'scope' || currentStep === 'service') &&
+    looksLikeScopeDescription &&
+    (!currentDraft.projectScope || overwrite)
+  ) {
+    updates.projectScope = trimmedText;
   }
 
   if (currentStep === 'contact-name' && !updates.contactName && (!currentDraft.contactName || overwrite)) {

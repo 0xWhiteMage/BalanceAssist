@@ -381,7 +381,26 @@ const startConversation = useCallback(async () => {
         return;
       }
 
-      await botSay(data.message ?? getFallbackResponse());
+      const replyText: string = data.message ?? getFallbackResponse();
+      const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
+
+      if (Object.keys(draftUpdates).length > 0) {
+        const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
+        for (const [key, value] of Object.entries(draftUpdates)) {
+          if (value && value.trim().length > 0) {
+            (merged as Record<string, unknown>)[key] = value;
+          }
+        }
+        setDraft(merged);
+
+        const nextStep = getNextConversationStep(merged);
+        if (nextStep !== stepRef.current) {
+          setCurrentStep(nextStep);
+          advanceStep(nextStep, merged).catch(() => undefined);
+        }
+      }
+
+      await botSay(replyText);
     } catch {
       const localFallback = getLocalResponse(latestUserText, {
         draft: draftRef.current,
@@ -435,6 +454,18 @@ const startConversation = useCallback(async () => {
     } else if (step.field) {
       updatedDraft = { ...draft, [step.field]: value };
       setDraft(updatedDraft);
+    }
+
+    const isFreeTextIntakeStep =
+      (step.freeText || currentStep === 'intro') &&
+      currentStep !== 'qualification' &&
+      currentStep !== 'offer-upload' &&
+      currentStep !== 'upload' &&
+      currentStep !== 'handoff';
+
+    if (isFreeTextIntakeStep && value.trim().length >= 3) {
+      await handleLLMResponse(nextMessages);
+      return;
     }
 
     let nextStepId: ConversationStepId | undefined;
@@ -869,7 +900,12 @@ const startConversation = useCallback(async () => {
                 <div style={{ fontSize: '10px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em', marginBottom: '4px' }}>
                   File request from team
                 </div>
-                <div>{humanFileRequestNote ?? 'Balance team asked you to upload files for this project.'}</div>
+                <div style={{ marginBottom: '6px' }}>
+                  {humanFileRequestNote ?? 'The team asked you to upload files for this project.'}
+                </div>
+                <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText }}>
+                  Tap the paperclip icon on the left of the message box below to attach your files.
+                </div>
               </div>
             )}
 
@@ -877,6 +913,35 @@ const startConversation = useCallback(async () => {
           </div>
 
           {/* Input Bar */}
+          {isTeamConnected && humanFileRequestOpen && (
+            <div
+              style={{
+                padding: '6px 14px',
+                background: 'rgba(219, 181, 128, 0.08)',
+                borderTop: `1px solid ${brandTokens.colors.subtleBorder}`,
+                fontSize: '10px',
+                fontWeight: 600,
+                color: brandTokens.colors.warmGold,
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                flexShrink: 0
+              }}
+            >
+              <span
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: brandTokens.colors.warmGold,
+                  display: 'inline-block'
+                }}
+              />
+              File upload ready · use the paperclip icon
+            </div>
+          )}
           <div
             style={{
               padding: '10px 12px',

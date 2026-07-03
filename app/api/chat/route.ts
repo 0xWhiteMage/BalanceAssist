@@ -76,7 +76,7 @@ async function callOpenAICompatible(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.7 })
+    body: JSON.stringify({ model, messages, max_tokens: 512, temperature: 0.6 })
   });
 
   if (!response.ok) {
@@ -103,8 +103,8 @@ async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<s
         { role: 'system', content: systemContent },
         ...userMessages
       ],
-      max_tokens: 256,
-      temperature: 0.7
+      max_tokens: 512,
+      temperature: 0.6
     })
   });
 
@@ -191,9 +191,41 @@ export async function POST(request: Request) {
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    return jsonWithCors({ message: response });
+    const { displayText, draftUpdates } = parseAssistantReply(response);
+
+    return jsonWithCors({
+      message: displayText,
+      draftUpdates
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return jsonWithCors({ error: 'Chat service error', detail: message }, { status: 500 });
   }
+}
+
+const DRAFT_LINE_PATTERN = /:::draft:::\s*(\{[\s\S]*?\})\s*:::/i;
+
+function parseAssistantReply(reply: string): {
+  displayText: string;
+  draftUpdates: Record<string, string>;
+} {
+  const match = reply.match(DRAFT_LINE_PATTERN);
+  let draftUpdates: Record<string, string> = {};
+
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(parsed)) {
+        if (typeof value === 'string') {
+          draftUpdates[key] = value;
+        }
+      }
+    } catch {
+      // ignore malformed JSON
+    }
+  }
+
+  const displayText = reply.replace(DRAFT_LINE_PATTERN, '').trim();
+
+  return { displayText, draftUpdates };
 }

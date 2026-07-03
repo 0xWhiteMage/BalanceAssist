@@ -92,7 +92,7 @@ export async function POST(request: Request) {
 
     const humanText = note
       ? `${senderName}: Please upload ${note}.`
-      : `${senderName}: Please upload the files for this project.`;
+      : `${senderName}: Please upload the files for this project. Use the attachment (paperclip) icon on the left of the message box in the chat to attach your files.`;
 
     const { error: requestMessageError } = await supabase.from('human_messages').insert({
       session_id: sessionId,
