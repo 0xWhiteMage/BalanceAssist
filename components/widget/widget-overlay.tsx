@@ -5,7 +5,7 @@ import { TypingDots } from '@/components/chat/typing-dots';
 import { MessageBubble } from '@/components/chat/message-bubble';
 import { CalendlyEmbed } from '@/components/chat/calendly-embed';
 import { brandTokens } from '@/lib/brand-tokens';
-import { applyTextToDraft, getNextConversationStep } from '@/lib/conversation/extract';
+import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
@@ -28,6 +28,31 @@ function resolveBotTexts(stepId: ConversationStepId, draft: LeadDraft): string[]
   const step = conversationSteps[stepId];
   const raw = step.botMessages;
   return typeof raw === 'function' ? raw(draft) : raw;
+}
+
+function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): string | null {
+  const lines = getDraftSummaryLines(draft);
+  if (lines.length === 0) return null;
+
+  if (currentStep === 'scope' || currentStep === 'service') {
+    return `So far I have:\n\n${lines
+      .filter((line) => line.startsWith('Project scope:') || line.startsWith('Service:'))
+      .map((line) => `• ${line}`)
+      .join('\n')}\n\nAnything to correct before we move on?`;
+  }
+
+  if (currentStep === 'timeline' || currentStep === 'budget') {
+    return `So far I have:\n\n${lines
+      .filter((line) => line.startsWith('Timeline:') || line.startsWith('Budget:') || line.startsWith('Service:'))
+      .map((line) => `• ${line}`)
+      .join('\n')}\n\nDoes that look right?`;
+  }
+
+  if (currentStep === 'contact-name' || currentStep === 'contact-email') {
+    return `I now have the core brief:\n\n${lines.map((line) => `• ${line}`).join('\n')}\n\nAnything you'd like me to correct before I summarise it for the team?`;
+  }
+
+  return null;
 }
 
 export function WidgetOverlay({
@@ -299,6 +324,7 @@ const startConversation = useCallback(async () => {
     setCurrentStep('intro');
     setHasStarted(false);
     setIsTeamConnected(false);
+    setHumanStatus('idle');
     setView('chat');
     setAllowAttachment(false);
     cancelRef.current = false;
@@ -440,6 +466,11 @@ const startConversation = useCallback(async () => {
       });
     }
 
+    const summary = getSectionSummary(currentStep, updatedDraft);
+    if (summary) {
+      await botSay(summary, { delay: 250 });
+    }
+
     if (nextStepId) {
       setTimeout(() => advanceStep(nextStepId!, updatedDraft), 300);
     }
@@ -451,6 +482,30 @@ const startConversation = useCallback(async () => {
     setInputValue('');
 
     const step = conversationSteps[currentStep];
+
+    const memoryResetPattern = /forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i;
+    if (!isTeamConnected && memoryResetPattern.test(trimmed)) {
+      await botSay('I\'ve cleared my memory of this project. We can start fresh.');
+      setTimeout(() => handleReset(), 200);
+      return;
+    }
+
+    const memoryUpdatePattern = /\b(update that|correct that|change that|actually|correction)\b/i;
+    if (!isTeamConnected && memoryUpdatePattern.test(trimmed)) {
+      const updatedDraft = applyTextToDraft(trimmed, draft, currentStep);
+      setDraft(updatedDraft);
+      const userMsg: ChatMessage = { id: nextId(), sender: 'user', text: trimmed, timestamp: Date.now() };
+      const nextMessages = [...messagesRef.current, userMsg];
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
+      const lines = getDraftSummaryLines(updatedDraft);
+      await botSay(
+        lines.length > 0
+          ? `Updated. I now have:\n\n${lines.map((line) => `• ${line}`).join('\n')}`
+          : 'Updated. What would you like me to capture next?'
+      );
+      return;
+    }
 
     const humanKeywords = /talk.*to.*human|speak.*to.*human|real.*person|human.*agent|connect.*team|connect.*me/i;
     if (humanKeywords.test(trimmed) && !isTeamConnected) {

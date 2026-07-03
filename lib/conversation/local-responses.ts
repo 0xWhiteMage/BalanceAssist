@@ -47,7 +47,7 @@ const intents: LocalIntent[] = [
   },
   {
     patterns: [/what.*model|which.*model|what.*llm|are.*you.*gpt|are.*you.*chatgpt|are.*you.*claude|what.*ai.*model/i],
-    response: "I'm powered by a large language model integrated into Balance Studio's systems. My role is to guide your project inquiry and connect you with our team."
+    response: "I'm Balance Assist, the AI assistant supporting Balance Studio's project intake and handoff flow. My job is to help gather the brief clearly and route it to the right human producer."
   },
   {
     patterns: [/what.*can.*you.*do|how.*does.*this.*work|what.*do.*you.*do|how.*can.*you.*help|help.*me.*with/i],

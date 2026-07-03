@@ -7,7 +7,8 @@ export function createDefaultLeadDraft(): LeadDraft {
     timelineBand: '',
     budgetBand: '',
     contactName: '',
-    contactEmail: ''
+    contactEmail: '',
+    contactCompany: ''
   };
 }
 

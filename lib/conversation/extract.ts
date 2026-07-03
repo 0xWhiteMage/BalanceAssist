@@ -7,6 +7,10 @@ const numberBudgetPattern = /(\d+(?:[.,]\d+)?)\s*(k\b|m\b|thousand\b|million\b)?
 
 type DraftUpdates = Partial<LeadDraft>;
 
+function shouldOverwriteExistingValue(text: string) {
+  return /\b(update|change|correct|actually|instead|replace|revise)\b/i.test(text);
+}
+
 function normalize(input: string) {
   return input.toLowerCase().trim();
 }
@@ -139,6 +143,7 @@ function detectCompany(text: string): string | null {
 
 export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraft, currentStep: ConversationStepId): DraftUpdates {
   const updates: DraftUpdates = {};
+  const overwrite = shouldOverwriteExistingValue(text);
 
   const detectedService = detectService(text);
   const detectedTimeline = detectTimeline(text);
@@ -147,28 +152,28 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
   const detectedName = detectName(text);
   const detectedCompany = detectCompany(text);
 
-  if (detectedService && !currentDraft.service) updates.service = detectedService;
-  if (detectedTimeline && !currentDraft.timelineBand) updates.timelineBand = detectedTimeline;
-  if (detectedBudget && !currentDraft.budgetBand) updates.budgetBand = detectedBudget;
-  if (detectedEmail && !currentDraft.contactEmail) updates.contactEmail = detectedEmail;
-  if (detectedName && !currentDraft.contactName) updates.contactName = detectedName;
+  if (detectedService && (!currentDraft.service || overwrite)) updates.service = detectedService;
+  if (detectedTimeline && (!currentDraft.timelineBand || overwrite)) updates.timelineBand = detectedTimeline;
+  if (detectedBudget && (!currentDraft.budgetBand || overwrite)) updates.budgetBand = detectedBudget;
+  if (detectedEmail && (!currentDraft.contactEmail || overwrite)) updates.contactEmail = detectedEmail;
+  if (detectedName && (!currentDraft.contactName || overwrite)) updates.contactName = detectedName;
 
   const currentCompany = (currentDraft as Record<string, unknown>).contactCompany;
-  if (detectedCompany && !currentCompany) {
+  if (detectedCompany && (!currentCompany || overwrite)) {
     (updates as Record<string, unknown>).contactCompany = detectedCompany;
   }
 
   const looksLikeScopeDescription = text.trim().length > 20 || text.trim().includes(' ');
 
-  if ((currentStep === 'intro' || currentStep === 'scope' || currentStep === 'service') && looksLikeScopeDescription && !currentDraft.projectScope) {
+  if ((currentStep === 'intro' || currentStep === 'scope' || currentStep === 'service') && looksLikeScopeDescription && (!currentDraft.projectScope || overwrite)) {
     updates.projectScope = text.trim();
   }
 
-  if (currentStep === 'contact-name' && !updates.contactName && !currentDraft.contactName) {
+  if (currentStep === 'contact-name' && !updates.contactName && (!currentDraft.contactName || overwrite)) {
     updates.contactName = text.trim();
   }
 
-  if (currentStep === 'contact-email' && !updates.contactEmail && !currentDraft.contactEmail) {
+  if (currentStep === 'contact-email' && !updates.contactEmail && (!currentDraft.contactEmail || overwrite)) {
     updates.contactEmail = text.trim();
   }
 
@@ -188,4 +193,32 @@ export function getNextConversationStep(draft: LeadDraft): ConversationStepId {
   if (!draft.contactName) return 'contact-name';
   if (!draft.contactEmail) return 'contact-email';
   return 'qualification';
+}
+
+export function getDraftSummaryLines(draft: LeadDraft): string[] {
+  const lines: string[] = [];
+
+  if (draft.service) {
+    lines.push(`Service: ${draft.service.replace(/-/g, ' ')}`);
+  }
+  if (draft.projectScope) {
+    lines.push(`Project scope: ${draft.projectScope}`);
+  }
+  if (draft.timelineBand) {
+    lines.push(`Timeline: ${draft.timelineBand.replace(/-/g, ' ')}`);
+  }
+  if (draft.budgetBand) {
+    lines.push(`Budget: ${draft.budgetBand.replace(/-/g, ' ')}`);
+  }
+  if (draft.contactName) {
+    lines.push(`Contact: ${draft.contactName}`);
+  }
+  if (draft.contactCompany) {
+    lines.push(`Company: ${draft.contactCompany}`);
+  }
+  if (draft.contactEmail) {
+    lines.push(`Email: ${draft.contactEmail}`);
+  }
+
+  return lines;
 }
