@@ -3,6 +3,7 @@ export type SessionResponse = {
   status: string;
   sourceUrl: string;
   createdAt?: string;
+  persisted?: boolean;
 };
 
 export type EventResponse = {

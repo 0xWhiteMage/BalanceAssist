@@ -238,13 +238,20 @@ export function WidgetOverlay({
 
     try {
       const session = await createSession({ sourceUrl, referrer });
+
       if (session?.sessionId) {
+        if (session.persisted === false) {
+          console.warn('[widget] Session not persisted to Supabase; using fallback ID', {
+            sessionId: session.sessionId
+          });
+        }
+
         setSessionId(session.sessionId);
         sessionIdRef.current = session.sessionId;
         return session.sessionId;
       }
-    } catch {
-      // Persistence is best-effort; widget continues without it.
+    } catch (error) {
+      console.error('[widget] Failed to create session', error);
     }
 
     return null;

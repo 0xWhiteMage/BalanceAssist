@@ -35,7 +35,14 @@ export async function POST(request: Request) {
         });
       }
 
-      console.error('[sessions] Failed to insert session', { error });
+      console.error('[sessions] Failed to insert session into Supabase', {
+        errorCode: error?.code,
+        errorMessage: error?.message,
+        errorDetails: error?.details,
+        hint: error?.hint
+      });
+    } else {
+      console.error('[sessions] Supabase client creation failed despite hasSupabaseServerConfig() returning true');
     }
   }
 
