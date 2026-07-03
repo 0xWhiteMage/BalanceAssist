@@ -44,6 +44,24 @@ export async function createSession(payload: {
   return postJson<SessionResponse>('/api/sessions', payload);
 }
 
+export async function verifySession(sessionId: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `/api/sessions/inspect?id=${encodeURIComponent(sessionId)}`,
+      { cache: 'no-store' }
+    );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = (await response.json()) as { exists?: boolean };
+    return data.exists === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function logEvent(payload: {
   sessionId: string;
   eventName: string;

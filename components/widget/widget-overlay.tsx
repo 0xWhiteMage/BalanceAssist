@@ -10,7 +10,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
-import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, type TeamMessage } from '@/lib/api/client';
+import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, verifySession, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 
@@ -230,7 +230,17 @@ export function WidgetOverlay({
   );
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
-    if (sessionIdRef.current) return sessionIdRef.current;
+    if (sessionIdRef.current) {
+      const isValid = await verifySession(sessionIdRef.current);
+      if (isValid) return sessionIdRef.current;
+
+      console.warn('[widget] Cached session is invalid, rehydrating', {
+        sessionId: sessionIdRef.current
+      });
+      sessionIdRef.current = null;
+      setSessionId(null);
+    }
+
     if (typeof window === 'undefined') return null;
 
     const sourceUrl = window.location.href;
@@ -241,9 +251,9 @@ export function WidgetOverlay({
 
       if (session?.sessionId) {
         if (session.persisted === false) {
-          console.warn('[widget] Session not persisted to Supabase; using fallback ID', {
-            sessionId: session.sessionId
-          });
+          console.error(
+            '[widget] Session not persisted to Supabase. Check Vercel env vars and redeploy.'
+          );
         }
 
         setSessionId(session.sessionId);
