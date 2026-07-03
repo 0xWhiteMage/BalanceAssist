@@ -10,7 +10,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
-import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, verifySession, type TeamMessage } from '@/lib/api/client';
+import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 
@@ -49,6 +49,7 @@ export function WidgetOverlay({
   const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [isTeamConnected, setIsTeamConnected] = useState(false);
+  const [humanStatus, setHumanStatus] = useState<'idle' | 'connected' | 'delivered' | 'awaiting' | 'replied'>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
@@ -101,6 +102,7 @@ export function WidgetOverlay({
       }
       lastTeamMessageIdRef.current = Math.max(lastTeamMessageIdRef.current, ...messages.map((m) => m.id));
       setTeamWaitingForReply(false);
+      setHumanStatus('replied');
 
       const next = [...messagesRef.current];
       for (const msg of freshMessages) {
@@ -230,17 +232,7 @@ export function WidgetOverlay({
   );
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
-    if (sessionIdRef.current) {
-      const isValid = await verifySession(sessionIdRef.current);
-      if (isValid) return sessionIdRef.current;
-
-      console.warn('[widget] Cached session is invalid, rehydrating', {
-        sessionId: sessionIdRef.current
-      });
-      sessionIdRef.current = null;
-      setSessionId(null);
-    }
-
+    if (sessionIdRef.current) return sessionIdRef.current;
     if (typeof window === 'undefined') return null;
 
     const sourceUrl = window.location.href;
@@ -363,6 +355,7 @@ const startConversation = useCallback(async () => {
   async function handleTeamConnect() {
     if (isTeamConnected) return;
     setIsTeamConnected(true);
+    setHumanStatus('connected');
     setCurrentStep('free-chat');
 
     await ensureSession();
@@ -373,7 +366,7 @@ const startConversation = useCallback(async () => {
     const connectMsg: ChatMessage = {
       id: nextId(),
       sender: 'bot',
-      text: 'Connected to Balance Studio team — they will respond here in real time.',
+      text: 'Connected to Balance Studio team. Type your message below and it will be sent directly to our producers.',
       timestamp: Date.now(),
       isSystem: true
     };
@@ -477,19 +470,23 @@ const startConversation = useCallback(async () => {
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
       setTeamWaitingForReply(true);
+      setHumanStatus('delivered');
 
       if (id) {
         const ok = await relayUserMessage(id, trimmed);
         if (!ok) {
           setTeamWaitingForReply(false);
+          setHumanStatus('connected');
           await botSay('Sorry, I could not reach the team right now. Please email hello@balancestudio.tv.');
         } else {
+          setHumanStatus('awaiting');
           setTimeout(() => {
             pollTeamMessages().catch(() => undefined);
           }, 500);
         }
       } else {
         setTeamWaitingForReply(false);
+        setHumanStatus('connected');
       }
       return;
     }
@@ -838,32 +835,79 @@ const startConversation = useCallback(async () => {
               <button
                 onClick={handleTeamConnect}
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  color: brandTokens.colors.mutedText,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: `1px solid ${brandTokens.colors.border}`,
+                  background: 'transparent',
+                  color: brandTokens.colors.warmGold,
                   fontSize: '11px',
+                  fontWeight: 600,
                   cursor: 'pointer',
-                  fontFamily: brandTokens.typography.ui,
-                  textDecoration: 'underline',
-                  textUnderlineOffset: '2px'
+                  fontFamily: brandTokens.typography.condensed,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.12em',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = brandTokens.colors.warmGold;
+                  e.currentTarget.style.background = 'rgba(219, 181, 128, 0.06)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = brandTokens.colors.border;
+                  e.currentTarget.style.background = 'transparent';
                 }}
               >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill={brandTokens.colors.warmGold} />
+                </svg>
                 Talk to a human
               </button>
             ) : (
-              <a
-                href="https://t.me/balancestudio"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  color: brandTokens.colors.mutedText,
-                  fontSize: '11px',
-                  textDecoration: 'underline',
-                  textUnderlineOffset: '2px'
-                }}
-              >
-                Open in Telegram &#8599;
-              </a>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: humanStatus === 'replied' ? '#4ade80' : humanStatus === 'awaiting' ? brandTokens.colors.warmGold : brandTokens.colors.mutedText }}>
+                  {humanStatus === 'replied' && (
+                    <span
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: '#4ade80',
+                        display: 'inline-block'
+                      }}
+                    />
+                  )}
+                  {humanStatus === 'awaiting' && (
+                    <span
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: brandTokens.colors.warmGold,
+                        display: 'inline-block'
+                      }}
+                    />
+                  )}
+                  {humanStatus === 'replied' ? 'Replied by team' : humanStatus === 'awaiting' ? 'Awaiting reply' : humanStatus === 'delivered' ? 'Message delivered' : 'Connected to team'}
+                </div>
+                <a
+                  href="https://t.me/balancestudio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: brandTokens.colors.mutedText,
+                    fontSize: '10px',
+                    textDecoration: 'underline',
+                    textUnderlineOffset: '2px'
+                  }}
+                >
+                  Open in Telegram &#8599;
+                </a>
+              </div>
             )}
           </div>
         </div>

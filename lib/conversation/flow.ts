@@ -91,7 +91,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   handoff: {
     id: 'handoff',
     botMessages: [
-      "Thank you! I'd love to connect you with our team to take this further.\n\nYou can book a discovery call at a time that works for you, or continue the conversation on Telegram — whatever you prefer."
+      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also book a discovery call below if you'd like to talk sooner."
     ],
     inlineCards: [
       {
@@ -99,12 +99,6 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
         url: 'https://calendly.com/balancestudio/intro-call',
         label: 'Book a Discovery Call',
         subtitle: '30 min · Video call · Pick a time'
-      },
-      {
-        type: 'telegram',
-        url: 'https://t.me/balancestudio',
-        label: 'Continue on Telegram',
-        subtitle: 'Chat with our team · Usually replies within 1 hour'
       }
     ],
     next: 'free-chat'

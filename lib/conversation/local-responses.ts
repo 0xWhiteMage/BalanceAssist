@@ -14,6 +14,30 @@ type ConversationContext = {
 
 const intents: LocalIntent[] = [
   {
+    patterns: [/what.*do.*you.*remember|what.*have.*i.*shared|what.*do.*you.*know.*about.*my.*project/i],
+    response: (ctx) => {
+      const d = ctx.draft;
+      const parts: string[] = [];
+      if (d.service) parts.push(`Service: ${d.service.replace(/-/g, ' ')}`);
+      if (d.projectScope) parts.push(`Project scope: ${d.projectScope}`);
+      if (d.timelineBand) parts.push(`Timeline: ${d.timelineBand.replace(/-/g, ' ')}`);
+      if (d.budgetBand) parts.push(`Budget: ${d.budgetBand.replace(/-/g, ' ')}`);
+      if (d.contactName) parts.push(`Name: ${d.contactName}`);
+      if (d.contactEmail) parts.push(`Email: ${d.contactEmail}`);
+      const company = (d as Record<string, unknown>).contactCompany;
+      if (company) parts.push(`Company: ${company}`);
+
+      if (parts.length === 0) {
+        return "I haven't captured any details yet. Tell me about your project and I'll keep track of everything you share.";
+      }
+      return `Here's what I've captured so far:\n\n${parts.map((p) => `\u2022 ${p}`).join('\n')}\n\nAnything you'd like to correct or update?`;
+    }
+  },
+  {
+    patterns: [/forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i],
+    response: "I've cleared my memory of this project. We can start fresh whenever you're ready."
+  },
+  {
     patterns: [/what.*your.*name|who.*are.*you|what.*are.*you.*called|your.*name/i],
     response: "I'm **Balance Assist** — Balance Studio's intelligent AI agent. I help guide project inquiries, answer questions about our services, and connect you with the right people on our team."
   },
