@@ -87,6 +87,12 @@ export type TeamMessage = {
   createdAt: string;
 };
 
+export type TeamPollState = {
+  messages: TeamMessage[];
+  fileRequestOpen: boolean;
+  fileRequestNote: string | null;
+};
+
 export async function relayUserMessage(sessionId: string, text: string): Promise<boolean> {
   const result = await postJson<{ ok: boolean }>('/api/telegram/relay', { sessionId, text });
   return Boolean(result?.ok);
@@ -95,7 +101,7 @@ export async function relayUserMessage(sessionId: string, text: string): Promise
 export async function fetchTeamMessages(
   sessionId: string,
   sinceId?: number
-): Promise<TeamMessage[]> {
+): Promise<TeamPollState> {
   try {
     const params = new URLSearchParams({ sessionId });
     if (sinceId !== undefined) {
@@ -107,12 +113,38 @@ export async function fetchTeamMessages(
     });
 
     if (!response.ok) {
-      return [];
+      return { messages: [], fileRequestOpen: false, fileRequestNote: null };
     }
 
-    const data = (await response.json()) as { messages: TeamMessage[] };
-    return data.messages ?? [];
+    const data = (await response.json()) as TeamPollState;
+    return {
+      messages: data.messages ?? [],
+      fileRequestOpen: Boolean(data.fileRequestOpen),
+      fileRequestNote: data.fileRequestNote ?? null
+    };
   } catch {
-    return [];
+    return { messages: [], fileRequestOpen: false, fileRequestNote: null };
+  }
+}
+
+export async function uploadRequestedFile(sessionId: string, file: File): Promise<boolean> {
+  try {
+    const form = new FormData();
+    form.set('sessionId', sessionId);
+    form.set('file', file, file.name);
+
+    const response = await fetch('/api/telegram/upload', {
+      method: 'POST',
+      body: form
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = (await response.json()) as { ok?: boolean };
+    return data.ok === true;
+  } catch {
+    return false;
   }
 }

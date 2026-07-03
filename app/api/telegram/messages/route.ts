@@ -49,10 +49,20 @@ export async function GET(request: Request) {
   const { data, error } = await query;
 
   if (error) {
-    return jsonWithCors({ messages: [] });
+    return jsonWithCors({ messages: [], fileRequestOpen: false, fileRequestNote: null });
   }
 
+  const { data: sessionRow } = await supabase
+    .from('sessions')
+    .select('file_request_open, file_request_note')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  const sessionState = sessionRow as { file_request_open?: boolean; file_request_note?: string | null } | null;
+
   return jsonWithCors({
+    fileRequestOpen: Boolean(sessionState?.file_request_open),
+    fileRequestNote: sessionState?.file_request_note ?? null,
     messages: (data ?? []).map((row) => ({
       id: Number(row.id),
       sender: row.sender,

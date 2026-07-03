@@ -82,6 +82,46 @@ export async function sendTelegramMessage(
   return { messageId: data.result.message_id };
 }
 
+export async function sendTelegramDocument(
+  file: File,
+  options?: { caption?: string; threadId?: number }
+): Promise<{ messageId: number } | null> {
+  const config = getTelegramConfig();
+
+  if (!config) {
+    return null;
+  }
+
+  const form = new FormData();
+  form.set('chat_id', config.chatId);
+  form.set('document', file, file.name);
+
+  if (options?.caption) {
+    form.set('caption', options.caption);
+    form.set('parse_mode', 'HTML');
+  }
+
+  if (options?.threadId) {
+    form.set('message_thread_id', String(options.threadId));
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
+    method: 'POST',
+    body: form
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as TelegramResponse;
+  if (!data.ok || !data.result) {
+    return null;
+  }
+
+  return { messageId: data.result.message_id };
+}
+
 export async function createForumTopic(
   name: string,
   options?: { iconColor?: number }

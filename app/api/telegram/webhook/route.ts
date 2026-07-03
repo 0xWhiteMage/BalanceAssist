@@ -76,6 +76,39 @@ export async function POST(request: Request) {
 
   const senderName = message.from?.first_name ?? message.from?.username ?? 'Team';
 
+  const requestFilesMatch = message.text.match(/^\/request_files(?:@\w+)?\s*(.*)$/i);
+  if (requestFilesMatch) {
+    const note = requestFilesMatch[1]?.trim() || null;
+
+    const { error: sessionUpdateError } = await supabase
+      .from('sessions')
+      .update({ file_request_open: true, file_request_note: note })
+      .eq('id', sessionId);
+
+    if (sessionUpdateError) {
+      console.error('[telegram-webhook] Failed to update file request state', sessionUpdateError);
+      return NextResponse.json({ ok: false, error: sessionUpdateError.message }, { status: 500 });
+    }
+
+    const humanText = note
+      ? `${senderName}: Please upload ${note}.`
+      : `${senderName}: Please upload the files for this project.`;
+
+    const { error: requestMessageError } = await supabase.from('human_messages').insert({
+      session_id: sessionId,
+      sender: 'team',
+      text: humanText,
+      telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
+    });
+
+    if (requestMessageError) {
+      console.error('[telegram-webhook] Failed to insert file request message', requestMessageError);
+      return NextResponse.json({ ok: false, error: requestMessageError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, sessionId, fileRequestOpen: true });
+  }
+
   const { error } = await supabase.from('human_messages').insert({
     session_id: sessionId,
     sender: 'team',

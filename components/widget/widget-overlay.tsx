@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { MessageBubble } from '@/components/chat/message-bubble';
 import { CalendlyEmbed } from '@/components/chat/calendly-embed';
@@ -10,7 +11,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
-import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, type TeamMessage } from '@/lib/api/client';
+import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, uploadRequestedFile, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 
@@ -29,6 +30,9 @@ function resolveBotTexts(stepId: ConversationStepId, draft: LeadDraft): string[]
   const raw = step.botMessages;
   return typeof raw === 'function' ? raw(draft) : raw;
 }
+
+const balanceLogoUrl =
+  'https://images.squarespace-cdn.com/content/v1/5c81167bab1a62362b828e3f/d5e257d2-800b-4f0b-82e4-edfabe552823/gold.png?format=2500w';
 
 function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): string | null {
   const lines = getDraftSummaryLines(draft);
@@ -77,6 +81,8 @@ export function WidgetOverlay({
   const [humanStatus, setHumanStatus] = useState<'idle' | 'connected' | 'delivered' | 'awaiting' | 'replied'>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
+  const [humanFileRequestOpen, setHumanFileRequestOpen] = useState(false);
+  const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -104,7 +110,11 @@ export function WidgetOverlay({
       const id = sessionIdRef.current;
       if (!id) return;
 
-      const messages = await fetchTeamMessages(id, lastTeamMessageIdRef.current);
+      const pollState = await fetchTeamMessages(id, lastTeamMessageIdRef.current);
+      setHumanFileRequestOpen(pollState.fileRequestOpen);
+      setHumanFileRequestNote(pollState.fileRequestNote);
+
+      const messages = pollState.messages;
       if (messages.length === 0) return;
 
       const existingDbIds = new Set<number>();
@@ -305,6 +315,8 @@ const startConversation = useCallback(async () => {
     }
     cancelRef.current = true;
     setIsOpen(false);
+    setHumanFileRequestOpen(false);
+    setHumanFileRequestNote(null);
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
@@ -325,6 +337,8 @@ const startConversation = useCallback(async () => {
     setHasStarted(false);
     setIsTeamConnected(false);
     setHumanStatus('idle');
+    setHumanFileRequestOpen(false);
+    setHumanFileRequestNote(null);
     setView('chat');
     setAllowAttachment(false);
     cancelRef.current = false;
@@ -630,6 +644,39 @@ const startConversation = useCallback(async () => {
 
     const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
 
+    if (isTeamConnected) {
+      await ensureSession();
+      const id = sessionIdRef.current;
+      if (!id) return;
+
+      const userMsg: ChatMessage = {
+        id: nextId(),
+        sender: 'user',
+        text: `Shared: ${file.name}`,
+        timestamp: Date.now(),
+        attachment: { name: file.name, size: sizeStr }
+      };
+      const nextMessages = [...messagesRef.current, userMsg];
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
+      setTeamWaitingForReply(true);
+      setHumanStatus('delivered');
+
+      const ok = await uploadRequestedFile(id, file);
+      if (!ok) {
+        setTeamWaitingForReply(false);
+        setHumanStatus('connected');
+        await botSay('Sorry, the file could not be delivered to the team. Please try again or ask the team to resend the upload request.');
+      } else {
+        setHumanStatus('awaiting');
+        setHumanFileRequestOpen(false);
+        setHumanFileRequestNote(null);
+      }
+
+      e.target.value = '';
+      return;
+    }
+
     const userMsg: ChatMessage = {
       id: nextId(),
       sender: 'user',
@@ -654,6 +701,8 @@ const startConversation = useCallback(async () => {
 
     e.target.value = '';
   }
+
+  const showAttachmentButton = isTeamConnected ? humanFileRequestOpen : allowAttachment;
 
   return (
     <div
@@ -714,9 +763,17 @@ const startConversation = useCallback(async () => {
                   flexShrink: 0
                 }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#101010" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <Image
+                  src={balanceLogoUrl}
+                  alt="Balance logo"
+                  width={18}
+                  height={18}
+                  unoptimized
+                  style={{
+                    objectFit: 'contain',
+                    filter: 'brightness(0) saturate(100%)'
+                  }}
+                />
               </div>
               <div>
                 <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: brandTokens.colors.lightText, letterSpacing: '0.02em' }}>
@@ -796,6 +853,26 @@ const startConversation = useCallback(async () => {
               </div>
             )}
 
+            {!isTyping && isTeamConnected && humanFileRequestOpen && (
+              <div
+                style={{
+                  border: `1px solid ${brandTokens.colors.border}`,
+                  background: 'rgba(219, 181, 128, 0.06)',
+                  borderRadius: '10px',
+                  padding: '10px 12px',
+                  fontSize: '12px',
+                  lineHeight: 1.6,
+                  color: brandTokens.colors.lightText,
+                  maxWidth: '280px'
+                }}
+              >
+                <div style={{ fontSize: '10px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em', marginBottom: '4px' }}>
+                  File request from team
+                </div>
+                <div>{humanFileRequestNote ?? 'Balance team asked you to upload files for this project.'}</div>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
 
@@ -811,7 +888,7 @@ const startConversation = useCallback(async () => {
               background: 'rgba(16, 16, 16, 0.4)'
             }}
           >
-            {allowAttachment && (
+            {showAttachmentButton && (
               <label
                 style={{
                   width: '36px',
@@ -949,19 +1026,6 @@ const startConversation = useCallback(async () => {
                   )}
                   {humanStatus === 'replied' ? 'Replied by team' : humanStatus === 'awaiting' ? 'Awaiting reply' : humanStatus === 'delivered' ? 'Message delivered' : 'Connected to team'}
                 </div>
-                <a
-                  href="https://t.me/balancestudio"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    color: brandTokens.colors.mutedText,
-                    fontSize: '10px',
-                    textDecoration: 'underline',
-                    textUnderlineOffset: '2px'
-                  }}
-                >
-                  Open in Telegram &#8599;
-                </a>
               </div>
             )}
           </div>
