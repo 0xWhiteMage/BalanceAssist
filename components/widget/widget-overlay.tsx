@@ -421,7 +421,7 @@ const startConversation = useCallback(async () => {
             step: stepRef.current,
             isTeamConnected: teamRef.current,
             draft: JSON.stringify(draftRef.current),
-            sessionId: sessionIdRef.current
+            sessionId: sessionIdRef.current ?? undefined
           }
         })
       });
@@ -687,7 +687,6 @@ const startConversation = useCallback(async () => {
 
       const matched = step.quickReplies ? tryMatchOption(trimmed, step) : null;
       if (matched) {
-        appendUserMessage(matched);
         processFlowAnswer(matched, getQuickReplyLabel(currentStep, matched));
         return;
       }
@@ -705,7 +704,6 @@ const startConversation = useCallback(async () => {
       }
 
       if (step.freeText) {
-        appendUserMessage(trimmed);
         processFlowAnswer(trimmed);
         return;
       }
