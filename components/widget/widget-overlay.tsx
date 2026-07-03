@@ -365,7 +365,8 @@ const startConversation = useCallback(async () => {
           context: {
             step: stepRef.current,
             isTeamConnected: teamRef.current,
-            draft: JSON.stringify(draftRef.current)
+            draft: JSON.stringify(draftRef.current),
+            sessionId: sessionIdRef.current
           }
         })
       });

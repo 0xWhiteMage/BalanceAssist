@@ -3,22 +3,26 @@ import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/r
 import { z } from 'zod';
 import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
+import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-responses';
 import { conversationSteps } from '@/lib/conversation/flow';
+import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
+import { checkRateLimit } from '@/lib/conversation/rate-limit';
 import type { ConversationStepId } from '@/lib/conversation/types';
 
 const chatMessageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant']),
-  content: z.string()
+  content: z.string().max(8000)
 });
 
 const chatRequestSchema = z.object({
-  messages: z.array(chatMessageSchema).min(1),
+  messages: z.array(chatMessageSchema).min(1).max(20),
   context: z
     .object({
       step: z.string().optional(),
       isTeamConnected: z.boolean().optional(),
-      draft: z.string().optional()
+      draft: z.string().optional(),
+      sessionId: z.string().optional()
     })
     .optional()
 });
@@ -127,6 +131,27 @@ async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<s
   return content;
 }
 
+async function logLlmEvent(
+  baseUrl: string,
+  sessionId: string | undefined,
+  category: 'reply' | 'refusal' | 'local_fallback',
+  hasDraft: boolean
+) {
+  try {
+    await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: sessionId ?? 'anonymous',
+        eventName: 'llm_request',
+        properties: { category, hasDraft }
+      })
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, chatRequestSchema);
 
@@ -137,10 +162,26 @@ export async function POST(request: Request) {
   const { messages, context } = parsed.data;
   const env = getEnv();
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const sessionId = context?.sessionId;
+  const baseUrl = new URL(request.url).origin;
+
+  if (sessionId) {
+    const limit = checkRateLimit(sessionId);
+    if (!limit.allowed) {
+      return jsonWithCors(
+        {
+          error: 'Rate limit reached',
+          detail: `Max ${limit.max} LLM calls per session per hour.`
+        },
+        { status: 429 }
+      );
+    }
+  }
+
+  let response: string;
+  let category: 'reply' | 'refusal' | 'local_fallback' = 'reply';
 
   try {
-    let response: string;
-
     if (env.DEEPSEEK_API_KEY) {
       const systemPrompt = buildSystemPrompt({
         isTeamConnected: context?.isTeamConnected,
@@ -174,6 +215,7 @@ export async function POST(request: Request) {
       const model = env.OPENAI_MODEL ?? 'gpt-4o-mini';
       response = await callOpenAICompatible(endpoint, env.OPENAI_API_KEY, model, llmMessages);
     } else {
+      category = 'local_fallback';
       const localResponse = getLocalResponse(lastUserMessage, {
         draft: {} as never,
         step: (context?.step as ConversationStepId) ?? 'free-chat',
@@ -191,10 +233,21 @@ export async function POST(request: Request) {
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    const { displayText, draftUpdates } = parseAssistantReply(response);
+    const sanitized = sanitizeReply(response, lastUserMessage);
+    response = sanitized.reply;
+    if (sanitized.overridden) {
+      category = 'refusal';
+    }
+
+    const rawDraft = sanitized.draft;
+    const draftUpdates = sanitizeDraftUpdates(rawDraft as Record<string, unknown>);
+
+    if (sessionId) {
+      void logLlmEvent(baseUrl, sessionId, category, Object.keys(draftUpdates).length > 0);
+    }
 
     return jsonWithCors({
-      message: displayText,
+      message: response,
       draftUpdates
     });
   } catch (error) {
@@ -207,17 +260,17 @@ const DRAFT_LINE_PATTERN = /:::draft:::\s*(\{[\s\S]*?\})\s*:::/i;
 
 function parseAssistantReply(reply: string): {
   displayText: string;
-  draftUpdates: Record<string, string>;
+  draft: Record<string, unknown>;
 } {
   const match = reply.match(DRAFT_LINE_PATTERN);
-  let draftUpdates: Record<string, string> = {};
+  let draft: Record<string, unknown> = {};
 
   if (match) {
     try {
       const parsed = JSON.parse(match[1]) as Record<string, unknown>;
       for (const [key, value] of Object.entries(parsed)) {
         if (typeof value === 'string') {
-          draftUpdates[key] = value;
+          draft[key] = value;
         }
       }
     } catch {
@@ -227,5 +280,5 @@ function parseAssistantReply(reply: string): {
 
   const displayText = reply.replace(DRAFT_LINE_PATTERN, '').trim();
 
-  return { displayText, draftUpdates };
+  return { displayText, draft };
 }
