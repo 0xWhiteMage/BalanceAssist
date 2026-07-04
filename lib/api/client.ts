@@ -143,7 +143,7 @@ export async function fetchTeamMessages(
   }
 }
 
-export async function uploadRequestedFile(sessionId: string, file: File): Promise<boolean> {
+export async function uploadRequestedFile(sessionId: string, file: File): Promise<{ ok: boolean; error?: string }> {
   try {
     const form = new FormData();
     form.set('sessionId', sessionId);
@@ -155,12 +155,13 @@ export async function uploadRequestedFile(sessionId: string, file: File): Promis
     });
 
     if (!response.ok) {
-      return false;
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: data.error };
     }
 
     const data = (await response.json()) as { ok?: boolean };
-    return data.ok === true;
+    return { ok: data.ok === true };
   } catch {
-    return false;
+    return { ok: false, error: 'Upload failed due to a network issue.' };
   }
 }

@@ -1,6 +1,7 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { sendTelegramDocument } from '@/lib/telegram';
+import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-policy';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -17,6 +18,14 @@ export async function POST(request: Request) {
 
   if (!sessionId || !(file instanceof File)) {
     return jsonWithCors({ ok: false, error: 'Missing sessionId or file' }, { status: 400 });
+  }
+
+  const validation = validateUploadFile(file);
+  if (!validation.ok) {
+    return jsonWithCors(
+      { ok: false, error: validation.reason, guidance: HUMAN_UPLOAD_GUIDANCE },
+      { status: 415 }
+    );
   }
 
   if (!hasSupabaseServerConfig()) {

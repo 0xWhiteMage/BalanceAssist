@@ -21,6 +21,7 @@ import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-
 import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, uploadRequestedFile, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
+import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 
 let messageCounter = 0;
 function nextId() {
@@ -740,6 +741,13 @@ const startConversation = useCallback(async () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const validation = validateUploadFile(file);
+    if (!validation.ok) {
+      e.target.value = '';
+      await botSay(`${validation.reason}\n\n${HUMAN_UPLOAD_GUIDANCE}`);
+      return;
+    }
+
     const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
 
     if (isTeamConnected) {
@@ -760,11 +768,11 @@ const startConversation = useCallback(async () => {
       setTeamWaitingForReply(true);
       setHumanStatus('delivered');
 
-      const ok = await uploadRequestedFile(id, file);
-      if (!ok) {
+      const uploadResult = await uploadRequestedFile(id, file);
+      if (!uploadResult.ok) {
         setTeamWaitingForReply(false);
         setHumanStatus('connected');
-        await botSay('Sorry, the file could not be delivered to the team. Please try again or ask the team to resend the upload request.');
+        await botSay(uploadResult.error ?? 'Sorry, the file could not be delivered to the team. Please try again or ask the team to resend the upload request.');
       } else {
         setHumanStatus('awaiting');
         setHumanFileRequestOpen(false);
@@ -894,7 +902,7 @@ const startConversation = useCallback(async () => {
                   flexShrink: 0
                 }}
               >
-                <input type="file" onChange={handleFileSelect} style={{ display: 'none' }} />
+                <input type="file" accept={UPLOAD_ACCEPT_ATTRIBUTE} onChange={handleFileSelect} style={{ display: 'none' }} />
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>

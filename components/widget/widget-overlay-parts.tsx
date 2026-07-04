@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { brandTokens } from '@/lib/brand-tokens';
+import { HUMAN_UPLOAD_GUIDANCE } from '@/lib/uploads/file-policy';
 
 export const balanceLogoUrl =
   'https://images.squarespace-cdn.com/content/v1/5c81167bab1a62362b828e3f/d5e257d2-800b-4f0b-82e4-edfabe552823/gold.png?format=2500w';
@@ -154,6 +155,9 @@ export function FileRequestBanner({ note }: { note: string | null }) {
       </div>
       <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText }}>
         Tap the paperclip icon on the left of the message box below to attach your files.
+      </div>
+      <div style={{ marginTop: '6px', fontSize: '10px', color: brandTokens.colors.mutedText }}>
+        {HUMAN_UPLOAD_GUIDANCE}
       </div>
     </div>
   );
