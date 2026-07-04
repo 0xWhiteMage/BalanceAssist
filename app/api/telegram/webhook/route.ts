@@ -76,9 +76,20 @@ export async function POST(request: Request) {
 
   const senderName = message.from?.first_name ?? message.from?.username ?? 'Team';
 
+  const helpMatch = message.text.match(/^\/help(?:@\w+)?$/i);
+  if (helpMatch) {
+    return NextResponse.json({ ok: true, ignored: 'help-command' });
+  }
+
   const requestFilesMatch = message.text.match(/^\/request_files(?:@\w+)?\s*(.*)$/i);
   if (requestFilesMatch) {
     const note = requestFilesMatch[1]?.trim() || null;
+
+    console.log('[telegram-webhook] /request_files received', {
+      sessionId,
+      threadId: message.message_thread_id,
+      note
+    });
 
     const { error: sessionUpdateError } = await supabase
       .from('sessions')
@@ -86,25 +97,35 @@ export async function POST(request: Request) {
       .eq('id', sessionId);
 
     if (sessionUpdateError) {
-      console.error('[telegram-webhook] Failed to update file request state', sessionUpdateError);
+      console.error('[telegram-webhook] Failed to update file request state', {
+        sessionId,
+        error: sessionUpdateError.message,
+        code: sessionUpdateError.code
+      });
       return NextResponse.json({ ok: false, error: sessionUpdateError.message }, { status: 500 });
     }
 
-    const humanText = note
-      ? `${senderName}: Please upload ${note}.`
-      : `${senderName}: Please upload the files for this project. Use the attachment (paperclip) icon on the left of the message box in the chat to attach your files.`;
+    console.log('[telegram-webhook] File request state updated', { sessionId });
 
     const { error: requestMessageError } = await supabase.from('human_messages').insert({
       session_id: sessionId,
       sender: 'team',
-      text: humanText,
+      text: note
+        ? `${senderName}: Please upload ${note}. Use the attachment (paperclip) icon on the left of the message box to attach your files.`
+        : `${senderName}: Please upload the files for this project. Use the attachment (paperclip) icon on the left of the message box to attach your files.`,
       telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
     });
 
     if (requestMessageError) {
-      console.error('[telegram-webhook] Failed to insert file request message', requestMessageError);
+      console.error('[telegram-webhook] Failed to insert file request message', {
+        sessionId,
+        error: requestMessageError.message,
+        code: requestMessageError.code
+      });
       return NextResponse.json({ ok: false, error: requestMessageError.message }, { status: 500 });
     }
+
+    console.log('[telegram-webhook] File request message inserted', { sessionId });
 
     return NextResponse.json({ ok: true, sessionId, fileRequestOpen: true });
   }
