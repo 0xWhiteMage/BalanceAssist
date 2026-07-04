@@ -195,6 +195,80 @@ export function FileRequestInputHint() {
   );
 }
 
+export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
+  const groups = [
+    ['Documents', 'pdf, ppt, pptx, key, doc, docx, pages, xls, xlsx, txt, csv'],
+    ['Images', 'jpg, png, gif, svg, tif, webp, heic, psd, ai, eps, indd'],
+    ['Video / Audio', 'mp4, mov, avi, mkv, webm, mp3, wav, flac, m4a, aiff'],
+    ['Project files', 'aep, prproj, drp, drpx, fcpxml, sketch, fig, xd'],
+    ['Archives / Fonts', 'zip, rar, 7z, tar, gz, ttf, otf, woff, woff2']
+  ];
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 120,
+        background: 'rgba(0,0,0,0.68)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px'
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '340px',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          borderRadius: '14px',
+          border: `1px solid ${brandTokens.colors.border}`,
+          background: brandTokens.gradients.panel,
+          color: brandTokens.colors.lightText,
+          padding: '18px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', color: brandTokens.colors.warmGold }}>
+              Accepted files
+            </div>
+            <div style={{ marginTop: '4px', fontSize: '14px', fontWeight: 600 }}>Upload guidelines</div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: brandTokens.colors.mutedText, cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}
+            aria-label="Close upload guidelines"
+          >
+            ×
+          </button>
+        </div>
+
+        <p style={{ marginTop: '12px', fontSize: '12px', lineHeight: 1.6, color: brandTokens.colors.mutedText }}>
+          {HUMAN_UPLOAD_GUIDANCE}
+        </p>
+
+        <div style={{ marginTop: '14px', display: 'grid', gap: '10px' }}>
+          {groups.map(([label, list]) => (
+            <div key={label} style={{ border: `1px solid ${brandTokens.colors.subtleBorder}`, borderRadius: '10px', padding: '10px 12px', background: 'rgba(255,255,255,0.02)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                {label}
+              </div>
+              <div style={{ marginTop: '4px', fontSize: '12px', lineHeight: 1.6 }}>{list}</div>
+            </div>
+          ))}
+        </div>
+
+        <p style={{ marginTop: '12px', fontSize: '11px', lineHeight: 1.6, color: brandTokens.colors.mutedText }}>
+          Anything outside these creative-production formats, especially executables and scripts, will be blocked.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function HumanFooter({
   isTeamConnected,
   humanStatus,

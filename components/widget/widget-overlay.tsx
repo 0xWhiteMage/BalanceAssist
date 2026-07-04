@@ -10,6 +10,7 @@ import {
   FileRequestInputHint,
   HumanFooter,
   TeamTypingIndicator,
+  UploadPolicyModal,
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
 import { brandTokens } from '@/lib/brand-tokens';
@@ -18,7 +19,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
-import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, uploadRequestedFile, type TeamMessage } from '@/lib/api/client';
+import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
@@ -88,6 +89,7 @@ export function WidgetOverlay({
   const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
   const [humanFileRequestOpen, setHumanFileRequestOpen] = useState(false);
   const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
+  const [showUploadPolicy, setShowUploadPolicy] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -738,41 +740,44 @@ const startConversation = useCallback(async () => {
   }
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
 
-    const validation = validateUploadFile(file);
-    if (!validation.ok) {
-      e.target.value = '';
-      await botSay(`${validation.reason}\n\n${HUMAN_UPLOAD_GUIDANCE}`);
-      return;
+    for (const file of files) {
+      const validation = validateUploadFile(file);
+      if (!validation.ok) {
+        e.target.value = '';
+        await botSay(`${validation.reason}\n\n${HUMAN_UPLOAD_GUIDANCE}`);
+        return;
+      }
     }
-
-    const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
 
     if (isTeamConnected) {
       await ensureSession();
       const id = sessionIdRef.current;
       if (!id) return;
 
-      const userMsg: ChatMessage = {
-        id: nextId(),
-        sender: 'user',
-        text: `Shared: ${file.name}`,
-        timestamp: Date.now(),
-        attachment: { name: file.name, size: sizeStr }
-      };
-      const nextMessages = [...messagesRef.current, userMsg];
+      const nextMessages = [...messagesRef.current];
+      for (const file of files) {
+        const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
+        nextMessages.push({
+          id: nextId(),
+          sender: 'user',
+          text: `Shared: ${file.name}`,
+          timestamp: Date.now(),
+          attachment: { name: file.name, size: sizeStr }
+        });
+      }
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
       setTeamWaitingForReply(true);
       setHumanStatus('delivered');
 
-      const uploadResult = await uploadRequestedFile(id, file);
+      const uploadResult = await uploadRequestedFiles(id, files);
       if (!uploadResult.ok) {
         setTeamWaitingForReply(false);
         setHumanStatus('connected');
-        await botSay(uploadResult.error ?? 'Sorry, the file could not be delivered to the team. Please try again or ask the team to resend the upload request.');
+        await botSay(uploadResult.error ?? 'Sorry, the files could not be delivered to the team. Please try again or ask the team to resend the upload request.');
       } else {
         setHumanStatus('awaiting');
         setHumanFileRequestOpen(false);
@@ -783,21 +788,24 @@ const startConversation = useCallback(async () => {
       return;
     }
 
-    const userMsg: ChatMessage = {
-      id: nextId(),
-      sender: 'user',
-      text: `Shared: ${file.name}`,
-      timestamp: Date.now(),
-      attachment: { name: file.name, size: sizeStr }
-    };
-    const nextMessages = [...messagesRef.current, userMsg];
+    const nextMessages = [...messagesRef.current];
+    for (const file of files) {
+      const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
+      nextMessages.push({
+        id: nextId(),
+        sender: 'user',
+        text: `Shared: ${file.name}`,
+        timestamp: Date.now(),
+        attachment: { name: file.name, size: sizeStr }
+      });
+    }
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
 
     await sleep(500);
     if (cancelRef.current) return;
 
-    await botSay(`Got it! I\u2019ve received **${file.name}**. Our team will review this alongside your project details.`);
+    await botSay(`Got it! I\u2019ve received ${files.length === 1 ? `**${files[0].name}**` : `${files.length} files`}. Our team will review them alongside your project details.`);
     setAllowAttachment(false);
 
     await sleep(400);
@@ -844,6 +852,8 @@ const startConversation = useCallback(async () => {
             <CalendlyEmbed url={calendlyUrl} onBack={() => setView('chat')} />
           )}
 
+          {showUploadPolicy && <UploadPolicyModal onClose={() => setShowUploadPolicy(false)} />}
+
           <WidgetOverlayHeader isTeamConnected={isTeamConnected} onClose={handleClose} />
 
           {/* Messages */}
@@ -877,6 +887,32 @@ const startConversation = useCallback(async () => {
 
           {/* Input Bar */}
           {isTeamConnected && humanFileRequestOpen && <FileRequestInputHint />}
+          {showAttachmentButton && (
+            <div
+              style={{
+                padding: '6px 12px 0',
+                background: 'rgba(16, 16, 16, 0.4)',
+                textAlign: 'right',
+                flexShrink: 0
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowUploadPolicy(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: brandTokens.colors.mutedText,
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px'
+                }}
+              >
+                Accepted file types
+              </button>
+            </div>
+          )}
           <div
             style={{
               padding: '10px 12px',
@@ -902,7 +938,7 @@ const startConversation = useCallback(async () => {
                   flexShrink: 0
                 }}
               >
-                <input type="file" accept={UPLOAD_ACCEPT_ATTRIBUTE} onChange={handleFileSelect} style={{ display: 'none' }} />
+                <input type="file" multiple accept={UPLOAD_ACCEPT_ATTRIBUTE} onChange={handleFileSelect} style={{ display: 'none' }} />
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>

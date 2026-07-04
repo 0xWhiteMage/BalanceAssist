@@ -143,11 +143,13 @@ export async function fetchTeamMessages(
   }
 }
 
-export async function uploadRequestedFile(sessionId: string, file: File): Promise<{ ok: boolean; error?: string }> {
+export async function uploadRequestedFiles(sessionId: string, files: File[]): Promise<{ ok: boolean; error?: string }> {
   try {
     const form = new FormData();
     form.set('sessionId', sessionId);
-    form.set('file', file, file.name);
+    for (const file of files) {
+      form.append('files', file, file.name);
+    }
 
     const response = await fetchWithTimeout('/api/telegram/upload', {
       method: 'POST',

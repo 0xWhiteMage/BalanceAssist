@@ -1,4 +1,5 @@
 export const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024;
+export const UPLOAD_BUCKET_NAME = 'balance-assist-uploads';
 
 export const ALLOWED_UPLOAD_EXTENSIONS = [
   'pdf',
@@ -83,6 +84,8 @@ export const UPLOAD_ACCEPT_ATTRIBUTE = ALLOWED_UPLOAD_EXTENSIONS.map((ext) => `.
 
 export const HUMAN_UPLOAD_GUIDANCE =
   'Accepted: documents, presentations, images, video, audio, design/project files, and archives up to 50 MB. Executables and scripts are blocked.';
+
+export const HUMAN_UPLOAD_SUMMARY = 'Accepted: docs, decks, images, video, audio, design files, archives · max 50 MB · no executables or scripts.';
 
 function getExtension(filename: string): string {
   const trimmed = filename.trim();

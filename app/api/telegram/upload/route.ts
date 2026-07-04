@@ -1,7 +1,9 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { sendTelegramDocument } from '@/lib/telegram';
-import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-policy';
+import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_BUCKET_NAME, validateUploadFile } from '@/lib/uploads/file-policy';
+
+type SupabaseClient = NonNullable<ReturnType<typeof createServerSupabaseClient>>;
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -14,18 +16,23 @@ export async function POST(request: Request) {
   }
 
   const sessionId = String(form.get('sessionId') ?? '').trim();
-  const file = form.get('file');
+  const files = form
+    .getAll('files')
+    .concat(form.getAll('file'))
+    .filter((value): value is File => value instanceof File);
 
-  if (!sessionId || !(file instanceof File)) {
-    return jsonWithCors({ ok: false, error: 'Missing sessionId or file' }, { status: 400 });
+  if (!sessionId || files.length === 0) {
+    return jsonWithCors({ ok: false, error: 'Missing sessionId or files' }, { status: 400 });
   }
 
-  const validation = validateUploadFile(file);
-  if (!validation.ok) {
-    return jsonWithCors(
-      { ok: false, error: validation.reason, guidance: HUMAN_UPLOAD_GUIDANCE },
-      { status: 415 }
-    );
+  for (const file of files) {
+    const validation = validateUploadFile(file);
+    if (!validation.ok) {
+      return jsonWithCors(
+        { ok: false, error: validation.reason, guidance: HUMAN_UPLOAD_GUIDANCE },
+        { status: 415 }
+      );
+    }
   }
 
   if (!hasSupabaseServerConfig()) {
@@ -52,32 +59,88 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'File upload has not been requested by the team' }, { status: 403 });
   }
 
+  await ensureUploadBucket(supabase);
+
   const shortId = sessionId.slice(0, 8);
-  const caption = `<b>📎 File upload</b>\n<code>${shortId}</code>\n${escapeHtml(file.name)}`;
+  const uploaded: Array<{ fileName: string; sent: boolean; storagePath: string | null }> = [];
 
-  const sent = await sendTelegramDocument(file, {
-    caption,
-    threadId: session.telegram_thread_id ?? undefined
-  });
+  for (const file of files) {
+    const storagePath = `${sessionId}/${Date.now()}-${safeFilename(file.name)}`;
+    const { error: storageError } = await supabase.storage
+      .from(UPLOAD_BUCKET_NAME)
+      .upload(storagePath, file, {
+        upsert: false,
+        contentType: file.type || undefined
+      });
 
-  const { error: insertError } = await supabase.from('human_messages').insert({
-    session_id: sessionId,
-    sender: 'user',
-    text: `[File] ${file.name}`,
-    telegram_message_id: sent?.messageId ?? null,
-    telegram_thread_id: session.telegram_thread_id ?? null
-  });
+    if (storageError) {
+      return jsonWithCors({ ok: false, error: storageError.message }, { status: 500 });
+    }
+
+    const caption = `<b>📎 File upload</b>\n<code>${shortId}</code>\n${escapeHtml(file.name)}`;
+
+    const sent = await sendTelegramDocument(file, {
+      caption,
+      threadId: session.telegram_thread_id ?? undefined
+    });
+
+    const { error: insertError } = await supabase.from('human_messages').insert({
+      session_id: sessionId,
+      sender: 'user',
+      text: `[File] ${file.name}`,
+      telegram_message_id: sent?.messageId ?? null,
+      telegram_thread_id: session.telegram_thread_id ?? null
+    });
+
+    if (insertError) {
+      return jsonWithCors({ ok: false, error: insertError.message }, { status: 500 });
+    }
+
+    const { error: metadataError } = await supabase.from('uploaded_files').insert({
+      session_id: sessionId,
+      storage_path: storagePath,
+      original_name: file.name,
+      mime_type: file.type || null,
+      size_bytes: file.size,
+      telegram_message_id: sent?.messageId ?? null
+    });
+
+    if (metadataError) {
+      return jsonWithCors({ ok: false, error: metadataError.message }, { status: 500 });
+    }
+
+    uploaded.push({ fileName: file.name, sent: sent !== null, storagePath });
+  }
 
   await supabase
     .from('sessions')
     .update({ file_request_open: false, file_request_note: null })
     .eq('id', sessionId);
 
-  if (insertError) {
-    return jsonWithCors({ ok: false, error: insertError.message }, { status: 500 });
+  return jsonWithCors({ ok: true, files: uploaded, count: uploaded.length });
+}
+
+async function ensureUploadBucket(supabase: SupabaseClient) {
+  const { data: buckets, error } = await supabase.storage.listBuckets();
+  if (error) {
+    throw new Error(error.message);
   }
 
-  return jsonWithCors({ ok: true, sent: sent !== null, fileName: file.name });
+  if (buckets.some((bucket) => bucket.name === UPLOAD_BUCKET_NAME)) {
+    return;
+  }
+
+  const { error: createError } = await supabase.storage.createBucket(UPLOAD_BUCKET_NAME, {
+    public: false,
+    fileSizeLimit: `${Math.floor(50)}MB`
+  });
+  if (createError) {
+    throw new Error(createError.message);
+  }
+}
+
+function safeFilename(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 function escapeHtml(text: string): string {
