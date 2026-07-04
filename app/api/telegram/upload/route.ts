@@ -1,6 +1,6 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { sendTelegramDocument } from '@/lib/telegram';
+import { sendTelegramDocument, sendTelegramMessage } from '@/lib/telegram';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_BUCKET_NAME, validateUploadFile } from '@/lib/uploads/file-policy';
 
 type SupabaseClient = NonNullable<ReturnType<typeof createServerSupabaseClient>>;
@@ -110,6 +110,15 @@ export async function POST(request: Request) {
     }
 
     uploaded.push({ fileName: file.name, sent: sent !== null, storagePath });
+  }
+
+  if (files.length > 1) {
+    const summary = `<b>📦 Upload batch</b>\n<code>${shortId}</code>\n${files
+      .map((file) => `• ${escapeHtml(file.name)}`)
+      .join('\n')}`;
+    await sendTelegramMessage(summary, {
+      threadId: session.telegram_thread_id ?? undefined
+    });
   }
 
   await supabase

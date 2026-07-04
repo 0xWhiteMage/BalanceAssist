@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
 import type { ChatMessage, InlineCard, QuickReply } from '@/lib/conversation/types';
 
@@ -37,7 +38,7 @@ function renderText(text: string) {
   });
 }
 
-export function MessageBubble({ message, onQuickReply, onInlineCardClick }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onQuickReply, onInlineCardClick }: MessageBubbleProps) {
   const isBot = message.sender === 'bot';
 
   if (message.isSystem) {
@@ -133,13 +134,43 @@ export function MessageBubble({ message, onQuickReply, onInlineCardClick }: Mess
             }}
           >
             <FileIcon />
-            <div>
+            <div style={{ minWidth: 0 }}>
               <p style={{ margin: 0, fontSize: '12px', fontWeight: 600, color: brandTokens.colors.lightText }}>
                 {message.attachment.name}
               </p>
               <p style={{ margin: 0, fontSize: '11px', color: brandTokens.colors.mutedText }}>
                 {message.attachment.size}
               </p>
+              {message.attachment.previewUrl && message.attachment.mediaKind === 'image' && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={message.attachment.previewUrl}
+                  alt={message.attachment.name}
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    maxWidth: '180px',
+                    maxHeight: '120px',
+                    objectFit: 'cover',
+                    borderRadius: '8px',
+                    display: 'block'
+                  }}
+                />
+              )}
+              {message.attachment.previewUrl && message.attachment.mediaKind === 'video' && (
+                <video
+                  src={message.attachment.previewUrl}
+                  controls
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    maxWidth: '180px',
+                    maxHeight: '120px',
+                    borderRadius: '8px',
+                    display: 'block'
+                  }}
+                />
+              )}
             </div>
           </div>
         )}
@@ -214,7 +245,7 @@ export function MessageBubble({ message, onQuickReply, onInlineCardClick }: Mess
       </div>
     </div>
   );
-}
+});
 
 function BotAvatar() {
   return (

@@ -65,6 +65,35 @@ function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): s
   return null;
 }
 
+function createAttachment(file: File) {
+  const size =
+    file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.round(file.size / 1024)} KB`;
+
+  const mediaKind: 'image' | 'video' | undefined = file.type.startsWith('image/')
+    ? 'image'
+    : file.type.startsWith('video/')
+      ? 'video'
+      : undefined;
+
+  return {
+    name: file.name,
+    size,
+    mediaKind,
+    previewUrl: mediaKind ? URL.createObjectURL(file) : undefined
+  };
+}
+
+function cleanupAttachmentPreviews(messages: ChatMessage[]) {
+  for (const message of messages) {
+    const previewUrl = message.attachment?.previewUrl;
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+  }
+}
+
 export function WidgetOverlay({
   autoOpen = false,
   calendlyUrlOverride
@@ -233,6 +262,12 @@ export function WidgetOverlay({
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
 
+  useEffect(() => {
+    return () => {
+      cleanupAttachmentPreviews(messagesRef.current);
+    };
+  }, []);
+
   const botSay = useCallback(
     async (
       text: string,
@@ -345,6 +380,7 @@ const startConversation = useCallback(async () => {
       void logEvent({ sessionId: sessionIdRef.current, eventName: 'widget_closed' });
     }
     cancelRef.current = true;
+    cleanupAttachmentPreviews(messagesRef.current);
     setIsOpen(false);
     setHumanFileRequestOpen(false);
     setHumanFileRequestNote(null);
@@ -385,6 +421,7 @@ const startConversation = useCallback(async () => {
       clearTimeout(pollImmediateTimerRef.current);
       pollImmediateTimerRef.current = null;
     }
+    cleanupAttachmentPreviews(messagesRef.current);
     messagesRef.current = [];
     setMessages([]);
     setDraft(createDefaultLeadDraft());
@@ -759,13 +796,12 @@ const startConversation = useCallback(async () => {
 
       const nextMessages = [...messagesRef.current];
       for (const file of files) {
-        const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
         nextMessages.push({
           id: nextId(),
           sender: 'user',
           text: `Shared: ${file.name}`,
           timestamp: Date.now(),
-          attachment: { name: file.name, size: sizeStr }
+          attachment: createAttachment(file)
         });
       }
       messagesRef.current = nextMessages;
@@ -790,13 +826,12 @@ const startConversation = useCallback(async () => {
 
     const nextMessages = [...messagesRef.current];
     for (const file of files) {
-      const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
       nextMessages.push({
         id: nextId(),
         sender: 'user',
         text: `Shared: ${file.name}`,
         timestamp: Date.now(),
-        attachment: { name: file.name, size: sizeStr }
+        attachment: createAttachment(file)
       });
     }
     messagesRef.current = nextMessages;
