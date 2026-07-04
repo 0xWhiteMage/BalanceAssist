@@ -19,7 +19,12 @@ export type ChatMessage = {
   timestamp: number;
   quickReplies?: QuickReply[];
   inlineCards?: InlineCard[];
-  attachment?: { name: string; size: string };
+  attachment?: {
+    name: string;
+    size: string;
+    previewUrl?: string;
+    mediaKind?: 'image' | 'video';
+  };
   isDisclaimer?: boolean;
   isTeamMessage?: boolean;
   isSystem?: boolean;
