@@ -377,3 +377,75 @@ export function HumanFooter({
     </div>
   );
 }
+
+export function ProjectBriefCard({
+  draft,
+  showNudge
+}: {
+  draft: {
+    projectScope: string;
+    service: string;
+    timelineBand: string;
+    budgetBand: string;
+    contactName: string;
+    contactCompany?: string;
+    contactEmail: string;
+  };
+  showNudge?: boolean;
+}) {
+  const rows = [
+    ['Project scope', draft.projectScope],
+    ['Service', draft.service],
+    ['Timeline', draft.timelineBand],
+    ['Budget', draft.budgetBand],
+    ['Contact name', draft.contactName],
+    ['Company', draft.contactCompany ?? ''],
+    ['Email', draft.contactEmail]
+  ] as const;
+
+  const completed = rows.filter(([, value]) => value.trim().length > 0).length;
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${brandTokens.colors.border}`,
+        background: 'rgba(255,255,255,0.03)',
+        borderRadius: '12px',
+        padding: '12px 14px',
+        display: 'grid',
+        gap: '8px'
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: '10px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
+            Project Brief
+          </div>
+          <div style={{ marginTop: '3px', fontSize: '12px', color: brandTokens.colors.mutedText }}>
+            {completed} of {rows.length} key fields captured
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: '6px' }}>
+        {rows.map(([label, value]) => {
+          const filled = value.trim().length > 0;
+          return (
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', fontSize: '12px' }}>
+              <span style={{ color: brandTokens.colors.mutedText }}>{label}</span>
+              <span style={{ color: filled ? brandTokens.colors.lightText : brandTokens.colors.mutedText, textAlign: 'right', maxWidth: '60%' }}>
+                {filled ? value : 'Unfilled'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {showNudge && completed < rows.length && (
+        <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
+          Tip: filling the missing fields helps Balance respond faster and more accurately.
+        </div>
+      )}
+    </div>
+  );
+}

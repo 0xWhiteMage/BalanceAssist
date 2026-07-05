@@ -70,7 +70,7 @@ const intents: LocalIntent[] = [
     response: "You can reach our team at hello@balancestudio.tv, or I can connect you directly through this chat. Would you like me to arrange that?"
   },
   {
-    patterns: [/^(hi|hello|hey|yo|sup|greetings|good\s*(morning|afternoon|evening))\b/i],
+    patterns: [/^(hi|hello|hey|yo|sup|greetings|good\s*(morning|afternoon|evening))(\s*!?\s*)?$/i],
     response: "Hello! I'm Balance Assist. How can I help you today?"
   },
   {
@@ -98,7 +98,7 @@ const intents: LocalIntent[] = [
     response: "I'm not able to advise on legal or contract terms. Our producers can walk you through that directly."
   },
   {
-    patterns: [/apply.*job|hire.*me|recruit|subscribe|sign.*in|password|login/i],
+    patterns: [/apply.*job|looking.*for.*job|need.*a.*job|hire.*me|recruit|career|vacancy|job.*opening|subscribe|sign.*in|password|login/i],
     response: "I'm Balance Assist and I only help with creative production briefs for the Balance team. For other requests, please contact hello@balancestudio.tv."
   },
   {

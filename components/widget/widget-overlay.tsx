@@ -8,6 +8,7 @@ import {
   BotAvatarSmall,
   FileRequestBanner,
   FileRequestInputHint,
+  ProjectBriefCard,
   HumanFooter,
   TeamTypingIndicator,
   UploadPolicyModal,
@@ -63,6 +64,10 @@ function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): s
   }
 
   return null;
+}
+
+function stripDraftLine(text: string) {
+  return text.replace(/:::draft:::[\s\S]*?:::/gi, '').trim();
 }
 
 function createAttachment(file: File) {
@@ -293,8 +298,10 @@ export function WidgetOverlay({
     ): Promise<void> => {
       if (cancelRef.current) return;
 
+      const visibleText = stripDraftLine(text);
+
       setIsTyping(true);
-      const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
+      const delay = options?.delay ?? Math.min(400 + visibleText.length * 6, 1800);
       await sleep(delay);
 
       if (cancelRef.current) return;
@@ -303,7 +310,7 @@ export function WidgetOverlay({
       const botMessage: ChatMessage = {
         id: nextId(),
         sender: 'bot',
-        text,
+        text: visibleText,
         timestamp: Date.now(),
         quickReplies: options?.quickReplies,
         inlineCards: options?.inlineCards,
@@ -928,6 +935,10 @@ const startConversation = useCallback(async () => {
               gap: '14px'
             }}
           >
+            {!isTeamConnected && (
+              <ProjectBriefCard draft={draft} showNudge />
+            )}
+
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} onQuickReply={handleSubmitQuickReply} onInlineCardClick={handleInlineCardClick} />
             ))}
