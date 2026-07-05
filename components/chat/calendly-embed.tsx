@@ -6,6 +6,7 @@ import { brandTokens } from '@/lib/brand-tokens';
 type CalendlyEmbedProps = {
   url: string;
   onBack: () => void;
+  onScheduled?: () => void;
 };
 
 declare global {
@@ -16,7 +17,7 @@ declare global {
   }
 }
 
-export function CalendlyEmbed({ url, onBack }: CalendlyEmbedProps) {
+export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -55,6 +56,21 @@ export function CalendlyEmbed({ url, onBack }: CalendlyEmbedProps) {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
+
+  useEffect(() => {
+    const listener = (event: MessageEvent) => {
+      if (typeof event.data?.event !== 'string') {
+        return;
+      }
+
+      if (event.data.event === 'calendly.event_scheduled') {
+        onScheduled?.();
+      }
+    };
+
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, [onScheduled]);
 
   return (
     <div

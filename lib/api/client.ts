@@ -107,6 +107,7 @@ export type TeamPollState = {
   messages: TeamMessage[];
   fileRequestOpen: boolean;
   fileRequestNote: string | null;
+  scheduleRequestOpen: boolean;
 };
 
 export async function relayUserMessage(sessionId: string, text: string): Promise<boolean> {
@@ -129,17 +130,18 @@ export async function fetchTeamMessages(
     });
 
     if (!response.ok) {
-      return { messages: [], fileRequestOpen: false, fileRequestNote: null };
+      return { messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false };
     }
 
     const data = (await response.json()) as TeamPollState;
     return {
       messages: data.messages ?? [],
       fileRequestOpen: Boolean(data.fileRequestOpen),
-      fileRequestNote: data.fileRequestNote ?? null
+      fileRequestNote: data.fileRequestNote ?? null,
+      scheduleRequestOpen: Boolean(data.scheduleRequestOpen)
     };
   } catch {
-    return { messages: [], fileRequestOpen: false, fileRequestNote: null };
+    return { messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false };
   }
 }
 
@@ -165,5 +167,24 @@ export async function uploadRequestedFiles(sessionId: string, files: File[]): Pr
     return { ok: data.ok === true };
   } catch {
     return { ok: false, error: 'Upload failed due to a network issue.' };
+  }
+}
+
+export async function notifyScheduleCompleted(sessionId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout('/api/telegram/schedule-complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId })
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = (await response.json()) as { ok?: boolean };
+    return data.ok === true;
+  } catch {
+    return false;
   }
 }

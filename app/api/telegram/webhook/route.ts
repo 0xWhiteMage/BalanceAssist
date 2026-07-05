@@ -81,6 +81,52 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ignored: 'help-command' });
   }
 
+  const scheduleMatch = message.text.match(/^\/schedule(?:@\w+)?\s*(.*)$/i);
+  if (scheduleMatch) {
+    const note = scheduleMatch[1]?.trim() || null;
+
+    console.log('[telegram-webhook] /schedule received', {
+      sessionId,
+      threadId: message.message_thread_id,
+      note
+    });
+
+    const { error: scheduleUpdateError } = await supabase
+      .from('sessions')
+      .update({ schedule_request_open: true })
+      .eq('id', sessionId);
+
+    if (scheduleUpdateError) {
+      console.error('[telegram-webhook] Failed to update schedule request state', {
+        sessionId,
+        error: scheduleUpdateError.message,
+        code: scheduleUpdateError.code
+      });
+      return NextResponse.json({ ok: false, error: scheduleUpdateError.message }, { status: 500 });
+    }
+
+    console.log('[telegram-webhook] Schedule request state updated', { sessionId });
+
+    const { error: scheduleMessageError } = await supabase.from('human_messages').insert({
+      session_id: sessionId,
+      sender: 'team',
+      text: note
+        ? `${senderName}: Please book a call using the calendar below. ${note}`
+        : `${senderName}: Please book a discovery call using the calendar that just appeared in your chat.`,
+      telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
+    });
+
+    if (scheduleMessageError) {
+      console.error('[telegram-webhook] Failed to insert schedule message', {
+        sessionId,
+        error: scheduleMessageError.message
+      });
+      return NextResponse.json({ ok: false, error: scheduleMessageError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, sessionId, scheduleRequestOpen: true });
+  }
+
   const requestFilesMatch = message.text.match(/^\/request_files(?:@\w+)?\s*(.*)$/i);
   if (requestFilesMatch) {
     const note = requestFilesMatch[1]?.trim() || null;

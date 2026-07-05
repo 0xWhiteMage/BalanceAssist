@@ -49,20 +49,25 @@ export async function GET(request: Request) {
   const { data, error } = await query;
 
   if (error) {
-    return jsonWithCors({ messages: [], fileRequestOpen: false, fileRequestNote: null });
+    return jsonWithCors({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
   }
 
   const { data: sessionRow } = await supabase
     .from('sessions')
-    .select('file_request_open, file_request_note')
+    .select('file_request_open, file_request_note, schedule_request_open')
     .eq('id', sessionId)
     .maybeSingle();
 
-  const sessionState = sessionRow as { file_request_open?: boolean; file_request_note?: string | null } | null;
+  const sessionState = sessionRow as {
+    file_request_open?: boolean;
+    file_request_note?: string | null;
+    schedule_request_open?: boolean;
+  } | null;
 
   return jsonWithCors({
     fileRequestOpen: Boolean(sessionState?.file_request_open),
     fileRequestNote: sessionState?.file_request_note ?? null,
+    scheduleRequestOpen: Boolean(sessionState?.schedule_request_open),
     messages: (data ?? []).map((row) => ({
       id: Number(row.id),
       sender: row.sender,

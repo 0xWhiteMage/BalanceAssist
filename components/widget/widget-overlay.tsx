@@ -19,7 +19,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
-import { createSession, fetchTeamMessages, finalizeLead, logEvent, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
@@ -118,6 +118,7 @@ export function WidgetOverlay({
   const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
   const [humanFileRequestOpen, setHumanFileRequestOpen] = useState(false);
   const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
+  const [humanScheduleRequestOpen, setHumanScheduleRequestOpen] = useState(false);
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
@@ -137,6 +138,7 @@ export function WidgetOverlay({
   const teamRef = useRef(isTeamConnected);
   const humanFileRequestOpenRef = useRef(humanFileRequestOpen);
   const humanFileRequestNoteRef = useRef(humanFileRequestNote);
+  const humanScheduleRequestOpenRef = useRef(humanScheduleRequestOpen);
 
   messagesRef.current = messages;
   draftRef.current = draft;
@@ -145,6 +147,7 @@ export function WidgetOverlay({
   sessionIdRef.current = sessionId;
   humanFileRequestOpenRef.current = humanFileRequestOpen;
   humanFileRequestNoteRef.current = humanFileRequestNote;
+  humanScheduleRequestOpenRef.current = humanScheduleRequestOpen;
 
   const pollTeamMessages = useCallback(async () => {
     if (isPollingRef.current) return;
@@ -160,6 +163,9 @@ export function WidgetOverlay({
       }
       if (pollState.fileRequestNote !== humanFileRequestNoteRef.current) {
         setHumanFileRequestNote(pollState.fileRequestNote);
+      }
+      if (pollState.scheduleRequestOpen !== humanScheduleRequestOpenRef.current) {
+        setHumanScheduleRequestOpen(pollState.scheduleRequestOpen);
       }
 
       const messages = pollState.messages;
@@ -261,6 +267,12 @@ export function WidgetOverlay({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
+
+  useEffect(() => {
+    if (isTeamConnected && humanScheduleRequestOpen && calendlyUrl && view === 'chat') {
+      setView('calendly');
+    }
+  }, [isTeamConnected, humanScheduleRequestOpen, calendlyUrl, view]);
 
   useEffect(() => {
     return () => {
@@ -384,6 +396,7 @@ const startConversation = useCallback(async () => {
     setIsOpen(false);
     setHumanFileRequestOpen(false);
     setHumanFileRequestNote(null);
+    setHumanScheduleRequestOpen(false);
     if (pollIntervalRef.current) {
       clearTimeout(pollIntervalRef.current);
       pollIntervalRef.current = null;
@@ -431,6 +444,7 @@ const startConversation = useCallback(async () => {
     setHumanStatus('idle');
     setHumanFileRequestOpen(false);
     setHumanFileRequestNote(null);
+    setHumanScheduleRequestOpen(false);
     setView('chat');
     setAllowAttachment(false);
     cancelRef.current = false;
@@ -884,7 +898,19 @@ const startConversation = useCallback(async () => {
         >
           {/* Calendly View Overlay */}
           {view === 'calendly' && calendlyUrl && (
-            <CalendlyEmbed url={calendlyUrl} onBack={() => setView('chat')} />
+            <CalendlyEmbed
+              url={calendlyUrl}
+              onBack={() => setView('chat')}
+              onScheduled={async () => {
+                if (sessionIdRef.current) {
+                  await notifyScheduleCompleted(sessionIdRef.current);
+                }
+                setHumanScheduleRequestOpen(false);
+                setHumanStatus('delivered');
+                setView('chat');
+                await botSay('Your booking has been sent to the Balance team. They have been notified automatically.');
+              }}
+            />
           )}
 
           {showUploadPolicy && <UploadPolicyModal onClose={() => setShowUploadPolicy(false)} />}

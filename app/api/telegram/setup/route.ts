@@ -160,6 +160,7 @@ export async function PUT() {
 
   const commandsResult = await callTelegram(botToken, 'setMyCommands', {
     commands: [
+      { command: 'schedule', description: 'Ask the user to book a Calendly call' },
       { command: 'request_files', description: 'Ask the user to upload files' },
       { command: 'help', description: 'Show available commands' }
     ],
