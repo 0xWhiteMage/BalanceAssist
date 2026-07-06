@@ -122,6 +122,51 @@ export async function sendTelegramDocument(
   return { messageId: data.result.message_id };
 }
 
+export type SendDocumentResponse = {
+  ok: boolean;
+  result?: {
+    message_id: number;
+    document?: { file_id: string; file_unique_id?: string };
+  };
+  description?: string;
+};
+
+export async function sendDocument(
+  threadId: number | null | undefined,
+  buffer: Buffer,
+  caption: string,
+  filename: string
+): Promise<SendDocumentResponse | null> {
+  const config = getTelegramConfig();
+
+  if (!config) {
+    return null;
+  }
+
+  const form = new FormData();
+  form.set('chat_id', config.chatId);
+  const blob = new Blob([new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)]);
+  form.set('document', blob, filename);
+  form.set('caption', caption);
+  form.set('parse_mode', 'HTML');
+
+  if (threadId) {
+    form.set('message_thread_id', String(threadId));
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
+    method: 'POST',
+    body: form
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as SendDocumentResponse;
+  return data;
+}
+
 export async function createForumTopic(
   name: string,
   options?: { iconColor?: number }
