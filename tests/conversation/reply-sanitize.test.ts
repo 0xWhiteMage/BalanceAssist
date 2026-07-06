@@ -56,3 +56,13 @@ test('passes through normal conversation', () => {
   expect(result.overridden).toBe(false);
   expect(result.reply).toBe('Sounds good, what timeline are you thinking?');
 });
+
+test('uses tool-call arguments over prose draft line when both present', () => {
+  const result = sanitizeReply(
+    'Visible reply.\n:::draft:::{"contactName":"Prose"}:::\n<<<END_REPLY>>>',
+    'hi',
+    { toolCallArguments: { contactName: 'Tool', contactEmail: 'tool@example.com' } }
+  );
+  expect(result.draft.contactName).toBe('Tool');
+  expect(result.draft.contactEmail).toBe('tool@example.com');
+});
