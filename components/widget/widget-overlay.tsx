@@ -90,10 +90,6 @@ function isBriefReadyForApproval(draft: LeadDraft) {
   return hasCore && hasTypeOrService && hasTimeline && hasBudget && hasContact;
 }
 
-function stripDraftLine(text: string) {
-  return text.replace(/:::draft:::[\s\S]*?:::/gi, '').trim();
-}
-
 function createAttachment(file: File) {
   const size =
     file.size > 1024 * 1024
@@ -331,10 +327,8 @@ export function WidgetOverlay({
     ): Promise<void> => {
       if (cancelRef.current) return;
 
-      const visibleText = stripDraftLine(text);
-
       setIsTyping(true);
-      const delay = options?.delay ?? Math.min(400 + visibleText.length * 6, 1800);
+      const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
       await sleep(delay);
 
       if (cancelRef.current) return;
@@ -343,7 +337,7 @@ export function WidgetOverlay({
       const botMessage: ChatMessage = {
         id: nextId(),
         sender: 'bot',
-        text: visibleText,
+        text,
         timestamp: Date.now(),
         quickReplies: options?.quickReplies,
         inlineCards: options?.inlineCards,
