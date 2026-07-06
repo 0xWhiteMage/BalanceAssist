@@ -12,7 +12,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
     botMessages: [
       'Hi! I\'m **Balance Assist** — Balance Studio\'s intelligent AI agent.',
       "I can help you explore services, share a project brief, or connect you with the right person on our team.\n\nJust so you know — I'm an AI assistant, not a human. Our team may review our conversation to serve you better.",
-      'Step 1 of 4: Tell me about your project, or ask me anything.'
+      'Tell me about your project, or ask me anything.'
     ],
     freeText: true,
     next: 'scope'
@@ -20,7 +20,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   scope: {
     id: 'scope',
-    botMessages: ['Step 1 of 4: Great choice. Tell me a bit about your project — what are you looking to create?'],
+    botMessages: ['Great choice. Tell me a bit about your project — what are you looking to create?'],
     freeText: true,
     field: 'projectScope',
     next: 'service'
@@ -28,14 +28,14 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   service: {
     id: 'service',
-    botMessages: ['Step 2 of 4: What kind of support do you think you need from Balance Studio? If you\'re unsure, just describe it in your own words.'],
+    botMessages: ['What kind of support do you think you need from Balance Studio? If you\'re unsure, just describe it in your own words.'],
     freeText: true,
     next: 'timeline'
   },
 
   timeline: {
     id: 'timeline',
-    botMessages: ['Step 3 of 4: What timeline are you working with? This helps us understand feasibility and planning.'],
+    botMessages: ['What timeline are you working with? This helps us understand feasibility and planning.'],
     quickReplies: timelineBandOptions.map((o) => ({ label: o.label, value: o.id })),
     field: 'timelineBand',
     next: 'budget'
@@ -43,7 +43,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   budget: {
     id: 'budget',
-    botMessages: ['Step 3 of 4: What budget range are you working with? Knowing your budget range helps us suggest realistic formats and timelines.'],
+    botMessages: ['What budget range are you working with? Knowing your budget range helps us suggest realistic formats and timelines.'],
     quickReplies: budgetBandOptions.map((o) => ({ label: o.label, value: o.id })),
     field: 'budgetBand',
     next: 'contact-name'
@@ -51,7 +51,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   'contact-name': {
     id: 'contact-name',
-    botMessages: ['Step 4 of 4: Almost there. How should I address you?'],
+    botMessages: ['Almost there. How should I address you?'],
     freeText: true,
     field: 'contactName',
     next: 'contact-email'
@@ -59,7 +59,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   'contact-email': {
     id: 'contact-email',
-    botMessages: ['Step 4 of 4: And what\'s the best email to reach you? This ensures a producer can follow up with the right next steps.'],
+    botMessages: ['And what\'s the best email to reach you? This ensures a producer can follow up with the right next steps.'],
     freeText: true,
     field: 'contactEmail',
     next: 'qualification'
