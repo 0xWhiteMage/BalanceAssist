@@ -23,3 +23,8 @@ test('caps long strings to 200 chars', () => {
   const result = sanitizeDraftUpdates({ projectScope: 'a'.repeat(500) });
   expect(result.projectScope?.length).toBe(200);
 });
+
+test('normalizes short timeline labels from the model', () => {
+  const result = sanitizeDraftUpdates({ timelineBand: 'under-1-month' });
+  expect(result.timelineBand).toBe('asap');
+});

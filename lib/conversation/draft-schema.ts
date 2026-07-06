@@ -48,6 +48,9 @@ function normalizeTimeline(value: string) {
   }
 
   const normalized = value.toLowerCase();
+  if (/under(?:\s|-)*1(?:\s|-)*month|less than(?:\s|-)*1(?:\s|-)*month|within(?:\s|-)*1(?:\s|-)*month|2(?:\s|-)*weeks?|two(?:\s|-)*weeks?|couple(?:\s|-)*weeks?/.test(normalized)) {
+    return 'asap';
+  }
   if (/1\s*week|one week|within a week|within 1 week|urgent|asap|immediate/.test(normalized)) return 'asap';
   if (/1\s*(to|-)?\s*2\s*months|2 months|one month|next month/.test(normalized)) return '1-2-months';
   if (/3\+?\s*months|three months|quarter|later this year/.test(normalized)) return '3-plus-months';

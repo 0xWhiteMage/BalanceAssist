@@ -26,3 +26,23 @@ test('refuses prompt-injection attempts', () => {
   });
   expect(reply).toMatch(/creative production brief|help with that/i);
 });
+
+test('does not reset greeting mid-brief', () => {
+  const reply = getLocalResponse('hello', {
+    draft: {
+      service: 'production',
+      projectType: '3D animation',
+      projectScope: '30-second animation for social media',
+      scopePolished: '30-second 3D animation for social media.',
+      timelineBand: '',
+      budgetBand: 'under-20k',
+      contactName: 'Jayden',
+      contactCompany: 'Samsung',
+      contactEmail: ''
+    },
+    step: 'timeline',
+    isTeamConnected: false
+  });
+  expect(reply).toMatch(/I'm here|timeline|missing|email|name|approve/i);
+  expect(reply).not.toMatch(/How can I help you today/i);
+});

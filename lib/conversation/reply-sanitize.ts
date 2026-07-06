@@ -1,6 +1,7 @@
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 
-const DRAFT_LINE_PATTERN = /:::draft:::\s*(\{[\s\S]*?\})\s*:::/i;
+const DRAFT_MARKER = ':::draft:::';
+const DRAFT_LINE_PATTERN = /:::draft:::\s*(?:<json>)?\s*(\{[\s\S]*?\})\s*(?:<\/json>)?\s*:::/i;
 
 const REFUSAL_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
   {
@@ -31,27 +32,53 @@ const REFUSAL_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
   }
 ];
 
+function parseDraftObject(text: string): Record<string, unknown> {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function extractDraftCandidate(reply: string) {
+  const matched = reply.match(DRAFT_LINE_PATTERN);
+  if (matched) {
+    return matched[1];
+  }
+
+  const markerIndex = reply.indexOf(DRAFT_MARKER);
+  if (markerIndex < 0) {
+    return null;
+  }
+
+  const tail = reply.slice(markerIndex + DRAFT_MARKER.length).trim();
+  const withoutJsonTag = tail.replace(/^<json>\s*/i, '').replace(/\s*<\/json>\s*$/i, '').trim();
+
+  if (!withoutJsonTag.startsWith('{')) {
+    return null;
+  }
+
+  return withoutJsonTag.endsWith('}') ? withoutJsonTag : `${withoutJsonTag}}`;
+}
+
 function parseAssistantReply(reply: string): {
   displayText: string;
   draft: Record<string, unknown>;
 } {
-  const match = reply.match(DRAFT_LINE_PATTERN);
   let draft: Record<string, unknown> = {};
 
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[1]) as Record<string, unknown>;
-      for (const [key, value] of Object.entries(parsed)) {
-        if (typeof value === 'string') {
-          draft[key] = value;
-        }
+  const candidate = extractDraftCandidate(reply);
+  if (candidate) {
+    const parsed = parseDraftObject(candidate);
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') {
+        draft[key] = value;
       }
-    } catch {
-      // ignore malformed JSON
     }
   }
 
-  const displayText = reply.replace(DRAFT_LINE_PATTERN, '').trim();
+  const markerIndex = reply.indexOf(DRAFT_MARKER);
+  const displayText = (markerIndex >= 0 ? reply.slice(0, markerIndex) : reply).trim();
 
   return { displayText, draft };
 }

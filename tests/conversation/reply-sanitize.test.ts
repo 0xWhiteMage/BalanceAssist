@@ -39,6 +39,18 @@ test('draft updates are sanitized', () => {
   expect(result.draft.contactEmail).toBe('');
 });
 
+test('recovers structured fields from a truncated draft line', () => {
+  const result = sanitizeReply(
+    'Thanks, Michael.\n:::draft:::{"contactName":"Michael","contactEmail":"michael@skype.com","timelineBand":"under-1-month"',
+    'yes michael. michael@skype.com'
+  );
+
+  expect(result.reply).toBe('Thanks, Michael.');
+  expect(result.draft.contactName).toBe('Michael');
+  expect(result.draft.contactEmail).toBe('michael@skype.com');
+  expect(result.draft.timelineBand).toBe('asap');
+});
+
 test('passes through normal conversation', () => {
   const result = sanitizeReply('Sounds good, what timeline are you thinking?', 'next month ideally');
   expect(result.overridden).toBe(false);
