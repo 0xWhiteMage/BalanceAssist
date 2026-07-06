@@ -13,15 +13,14 @@ The current widget (`components/widget/widget-overlay.tsx`) renders the brief in
 
 These three surfaces are visually distinct and fight for the same screen real estate. The user reports they only see the brief when they scroll up (because #1 is inline in chat scroll), and that the attachment popover `clashes` with the open review panel (because the slide-out panel at `z-index: 30` covers the popover at `z-index: 25`).
 
-The user pointed to the **reference image** showing the target layout:
-- **Left rail always visible during intake** — panels 02–05 of the reference show the rail open from the moment the welcome panel closes. There is no slide-out, no edge tab, no click-to-open.
-- **Two visual states in the rail**:
-  - "Guided Onboarding — Essentials" (panel 03): progress strip, the user's captured fields rendered as field rows with leading icons, and quick-reply chips for the next field to capture.
-  - "Summary & Next Steps" (panel 05): Project Summary at the top, At-a-Glance guidance on the right, with two CTAs at the bottom — "Book a call" and "Request human follow-up" — plus "Continue refining brief" to keep iterating. The Project Brief appears here ready-to-send.
-- **File upload + review screen** (panel 04) is rendered IN the chat scroll area, with the bottom showing "TALK TO A HUMAN".
-- **Mobile** (panel 06): full-width stack. The chat is at the top, the brief summary is at the bottom. Same left rail becomes a slide-up panel on mobile.
+### Reference image = visual direction only
 
-The previous, pre-tool-calling version of the widget had a single persistent `ProjectBriefCard` rendered beside the chat — the user wants that restored and improved, now also keeping the new "Approve & send to team" CTA from the `BriefReviewScreen`.
+The user provided a reference image showing the target look (panels 02–06). Per the user's latest direction, the image is **visual direction only**:
+- The brand tokens, two-column vibe, and overall feel are the model.
+- The exact split (rail-on-left vs. rail-on-right) and the modal vs. inline behavior are flexible.
+- The previously agreed behavior was "persistent rail during AI intake + the slide-out style for the Review-screen portion" — that's what we are now implementing.
+
+The previous, pre-tool-calling version of the widget had a single persistent `ProjectBriefCard` rendered beside the chat — the user wants that restored, while keeping the new "Approve & send to team" CTA from the `BriefReviewScreen`, and the slide-out behavior we agreed on in the conversation.
 
 ## Approved Product Direction
 
