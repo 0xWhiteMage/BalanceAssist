@@ -1,7 +1,7 @@
 import { finalizeLeadPayloadSchema } from '@/lib/api/contracts';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { editForumTopic } from '@/lib/telegram';
+import { editForumTopic, sendTelegramMessage } from '@/lib/telegram';
 import { buildTopicName, TOPIC_STATUS_COLOR, topicStatusFromQualification } from '@/lib/conversation/topic-status';
 
 export async function OPTIONS() {
@@ -136,6 +136,24 @@ export async function POST(request: Request) {
         });
       } else {
         console.warn('[leads-finalize] editForumTopic failed', { sessionId });
+      }
+
+      const referenceLinks = Array.isArray(leadDraft?.referenceLinks) ? leadDraft.referenceLinks : [];
+      const referenceFiles = Array.isArray(leadDraft?.referenceFiles) ? leadDraft.referenceFiles : [];
+      const linkLines = referenceLinks
+        .filter((value): value is { kind?: string; url?: string } => Boolean(value) && typeof value === 'object')
+        .map((link) => `• Link (${link.kind ?? 'other'}): ${link.url ?? ''}`);
+      const fileLines = referenceFiles
+        .filter((value): value is { name?: string } => Boolean(value) && typeof value === 'object')
+        .map((file) => `• File: ${file.name ?? ''}`);
+
+      if (linkLines.length || fileLines.length) {
+        const body = ['Attachments:', ...linkLines, ...fileLines].join('\n');
+        try {
+          await sendTelegramMessage(body, { threadId: snap.telegram_thread_id });
+        } catch (error) {
+          console.warn('[leads-finalize] failed to send attachment summary', { sessionId, error });
+        }
       }
     }
   } catch (error) {

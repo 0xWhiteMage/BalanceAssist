@@ -122,6 +122,72 @@ export async function sendTelegramDocument(
   return { messageId: data.result.message_id };
 }
 
+export type SendDocumentResponse = {
+  ok: boolean;
+  result?: {
+    message_id: number;
+    document?: { file_id: string; file_unique_id?: string };
+  };
+  description?: string;
+};
+
+export type SendDocumentResult =
+  | { ok: true; fileId: string | null; raw: SendDocumentResponse }
+  | { ok: false; status?: number; description?: string };
+
+export async function sendDocument(
+  threadId: number | null | undefined,
+  buffer: Buffer,
+  caption: string,
+  filename: string
+): Promise<SendDocumentResult> {
+  const config = getTelegramConfig();
+
+  if (!config) {
+    return { ok: false, description: 'Telegram bot token or chat id is not configured' };
+  }
+
+  const form = new FormData();
+  form.set('chat_id', config.chatId);
+  form.set('document', new Blob([buffer], { type: 'application/octet-stream' }), filename);
+  form.set('caption', caption);
+  form.set('parse_mode', 'HTML');
+
+  if (threadId) {
+    form.set('message_thread_id', String(threadId));
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
+      method: 'POST',
+      body: form
+    });
+  } catch (error) {
+    const description = error instanceof Error ? error.message : 'Network error contacting Telegram';
+    return { ok: false, description };
+  }
+
+  if (!response.ok) {
+    return { ok: false, status: response.status, description: `Telegram sendDocument HTTP ${response.status}` };
+  }
+
+  let data: SendDocumentResponse;
+  try {
+    data = (await response.json()) as SendDocumentResponse;
+  } catch (error) {
+    const description = error instanceof Error ? error.message : 'Failed to parse Telegram response';
+    return { ok: false, description };
+  }
+
+  if (!data.ok) {
+    return { ok: false, description: data.description ?? 'Telegram reported an error' };
+  }
+
+  const fileId = data.result?.document?.file_id ?? null;
+  return { ok: true, fileId, raw: data };
+}
+
 export async function createForumTopic(
   name: string,
   options?: { iconColor?: number }

@@ -14,13 +14,16 @@ import {
   UploadPolicyModal,
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
+import { BriefPanelTab } from '@/components/widget/brief-panel-tab';
+import { BriefReviewScreen } from '@/components/widget/brief-review-screen';
+import { AttachmentDropzone, type ReferenceFile, type ReferenceLink } from '@/components/widget/attachment-dropzone';
 import { brandTokens } from '@/lib/brand-tokens';
 import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
-import { createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
@@ -87,10 +90,6 @@ function isBriefReadyForApproval(draft: LeadDraft) {
   return hasCore && hasTypeOrService && hasTimeline && hasBudget && hasContact;
 }
 
-function stripDraftLine(text: string) {
-  return text.replace(/:::draft:::[\s\S]*?:::/gi, '').trim();
-}
-
 function createAttachment(file: File) {
   const size =
     file.size > 1024 * 1024
@@ -148,7 +147,12 @@ export function WidgetOverlay({
   const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
   const [humanScheduleRequestOpen, setHumanScheduleRequestOpen] = useState(false);
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
-  const [showBriefPanel, setShowBriefPanel] = useState(true);
+  const [briefPanelOpen, setBriefPanelOpen] = useState(false);
+  const [briefPanelFirstReady, setBriefPanelFirstReady] = useState(false);
+  const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
+  const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [attachmentOpen, setAttachmentOpen] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,6 +162,7 @@ export function WidgetOverlay({
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollImmediateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const briefPanelFirstReadyRef = useRef<boolean>(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -322,10 +327,8 @@ export function WidgetOverlay({
     ): Promise<void> => {
       if (cancelRef.current) return;
 
-      const visibleText = stripDraftLine(text);
-
       setIsTyping(true);
-      const delay = options?.delay ?? Math.min(400 + visibleText.length * 6, 1800);
+      const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
       await sleep(delay);
 
       if (cancelRef.current) return;
@@ -334,7 +337,7 @@ export function WidgetOverlay({
       const botMessage: ChatMessage = {
         id: nextId(),
         sender: 'bot',
-        text: visibleText,
+        text,
         timestamp: Date.now(),
         quickReplies: options?.quickReplies,
         inlineCards: options?.inlineCards,
@@ -478,7 +481,13 @@ const startConversation = useCallback(async () => {
     setHumanFileRequestOpen(false);
     setHumanFileRequestNote(null);
     setHumanScheduleRequestOpen(false);
-    setShowBriefPanel(true);
+    setBriefPanelOpen(false);
+    setBriefPanelFirstReady(false);
+    setReferenceLinks([]);
+    setReferenceFiles([]);
+    setMissingFields([]);
+    setAttachmentOpen(false);
+    briefPanelFirstReadyRef.current = false;
     setView('chat');
     setAllowAttachment(false);
     cancelRef.current = false;
@@ -527,6 +536,14 @@ const startConversation = useCallback(async () => {
 
       const replyText: string = data.message ?? getFallbackResponse();
       const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
+      const briefReady: boolean = Boolean(data.briefReady);
+      const missing: string[] = Array.isArray(data.missingFields) ? data.missingFields : [];
+
+      if (missing.length > 0) {
+        setMissingFields(missing);
+      } else {
+        setMissingFields([]);
+      }
 
       if (Object.keys(draftUpdates).length > 0) {
         const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
@@ -543,6 +560,11 @@ const startConversation = useCallback(async () => {
         if (nextStep !== stepRef.current) {
           setCurrentStep(nextStep);
         }
+      }
+
+      if (briefReady && !briefPanelFirstReadyRef.current) {
+        briefPanelFirstReadyRef.current = true;
+        setBriefPanelFirstReady(true);
       }
 
       await botSay(replyText);
@@ -579,6 +601,17 @@ const startConversation = useCallback(async () => {
     setMessages(next);
   }
 
+  async function appendReferenceLink(link: ReferenceLink) {
+    setReferenceLinks((prev) => [...prev, link]);
+    const id = sessionIdRef.current ?? (await ensureSession());
+    if (!id) return;
+    void addReferenceLink({ sessionId: id, url: link.url, kind: link.kind });
+  }
+
+  function appendReferenceFile(file: ReferenceFile) {
+    setReferenceFiles((prev) => [...prev, file]);
+  }
+
   async function handleApproveBrief() {
     await ensureSession();
     if (!sessionIdRef.current) return;
@@ -589,12 +622,17 @@ const startConversation = useCallback(async () => {
       qualificationStatus: result.status,
       score: result.score,
       recommendedNextStep: result.recommendedNextStep,
-      leadDraft: draftRef.current
+      leadDraft: {
+        ...draftRef.current,
+        referenceLinks,
+        referenceFiles
+      }
     } as const;
 
     await finalizeLead(payload);
     setBriefApproved(true);
     setCurrentStep('handoff');
+    setBriefPanelOpen(true);
     await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
     await advanceStep('handoff', draftRef.current);
   }
@@ -931,7 +969,7 @@ const startConversation = useCallback(async () => {
             position: 'absolute',
             bottom: '72px',
             right: '0px',
-            width: !isTeamConnected && hasProjectIntent && showBriefPanel ? 'min(760px, calc(100vw - 48px))' : 'min(380px, calc(100vw - 48px))',
+            width: !isTeamConnected && hasProjectIntent && briefPanelOpen ? 'min(760px, calc(100vw - 48px))' : 'min(380px, calc(100vw - 48px))',
             height: 'min(580px, calc(100vh - 120px))',
             display: 'flex',
             flexDirection: 'column',
@@ -965,46 +1003,63 @@ const startConversation = useCallback(async () => {
 
           <WidgetOverlayHeader isTeamConnected={isTeamConnected} onClose={handleClose} />
 
-          {!isTeamConnected && hasProjectIntent && (
-            <div style={{ padding: '8px 14px 0', background: 'rgba(16, 16, 16, 0.4)', flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={() => setShowBriefPanel((current) => !current)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: brandTokens.colors.warmGold,
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  textUnderlineOffset: '2px'
-                }}
-              >
-                {showBriefPanel ? 'Hide project brief' : 'Show project brief'}
-              </button>
-            </div>
-          )}
-
           <div
             style={{
               flex: 1,
               display: 'flex',
               gap: '0',
-              minHeight: 0
+              minHeight: 0,
+              position: 'relative'
             }}
           >
-            {!isTeamConnected && hasProjectIntent && showBriefPanel && (
-              <div
-                style={{
-                  width: '280px',
-                  borderRight: `1px solid ${brandTokens.colors.subtleBorder}`,
-                  padding: '16px 14px',
-                  overflowY: 'auto',
-                  flexShrink: 0,
-                  display: 'grid',
-                  gap: '14px'
-                }}
-              >
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+                minWidth: 0,
+                position: 'relative'
+              }}
+            >
+              {!isTeamConnected && missingFields.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 6,
+                    padding: '6px 10px',
+                    border: `1px solid ${brandTokens.colors.subtleBorder}`,
+                    borderRadius: 10,
+                    background: 'rgba(219, 181, 128, 0.06)',
+                    fontSize: 11,
+                    color: brandTokens.colors.mutedText
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10 }}>
+                    Missing
+                  </span>
+                  {missingFields.map((field) => (
+                    <span
+                      key={field}
+                      style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        background: 'rgba(219, 181, 128, 0.10)',
+                        border: `1px solid ${brandTokens.colors.subtleBorder}`,
+                        color: brandTokens.colors.lightText
+                      }}
+                    >
+                      {field}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {!isTeamConnected && hasProjectIntent && (
                 <ProjectBriefCard
                   draft={draft}
                   showNudge
@@ -1014,20 +1069,8 @@ const startConversation = useCallback(async () => {
                   onApprove={handleApproveBrief}
                   onContinueRefining={() => setBriefApproved(false)}
                 />
-              </div>
-            )}
+              )}
 
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '16px 14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px',
-                minWidth: 0
-              }}
-            >
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} onQuickReply={handleSubmitQuickReply} onInlineCardClick={handleInlineCardClick} />
               ))}
@@ -1044,7 +1087,46 @@ const startConversation = useCallback(async () => {
               {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
 
               <div ref={messagesEndRef} />
+
+              {!isTeamConnected && (
+                <BriefPanelTab
+                  open={briefPanelOpen}
+                  pulse={briefPanelFirstReady}
+                  onToggle={() => setBriefPanelOpen((o) => !o)}
+                  onFirstReady={() => setBriefPanelFirstReady(false)}
+                />
+              )}
             </div>
+
+            {!isTeamConnected && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: 'min(380px, calc(100% - 28px))',
+                  transform: briefPanelOpen ? 'translateX(0)' : 'translateX(100%)',
+                  transition: 'transform 0.28s ease',
+                  background: brandTokens.gradients.panel,
+                  borderLeft: `1px solid ${brandTokens.colors.subtleBorder}`,
+                  boxShadow: briefPanelOpen ? '-12px 0 32px rgba(0,0,0,0.35)' : 'none',
+                  padding: '16px 14px',
+                  overflowY: 'auto',
+                  zIndex: 30,
+                  pointerEvents: briefPanelOpen ? 'auto' : 'none'
+                }}
+                aria-hidden={!briefPanelOpen}
+              >
+                <BriefReviewScreen
+                  draft={draft}
+                  referenceLinks={referenceLinks}
+                  referenceFiles={referenceFiles}
+                  onSend={handleApproveBrief}
+                  onRefine={() => setBriefPanelOpen(false)}
+                />
+              </div>
+            )}
           </div>
 
           {/* Input Bar */}
@@ -1083,9 +1165,57 @@ const startConversation = useCallback(async () => {
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              background: 'rgba(16, 16, 16, 0.4)'
+              background: 'rgba(16, 16, 16, 0.4)',
+              position: 'relative'
             }}
           >
+            {!isTeamConnected && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Attach references"
+                  aria-expanded={attachmentOpen}
+                  onClick={() => setAttachmentOpen((o) => !o)}
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    border: `1px solid ${brandTokens.colors.border}`,
+                    background: attachmentOpen ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    flexShrink: 0
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                {attachmentOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 12,
+                      right: 12,
+                      bottom: 'calc(100% + 6px)',
+                      padding: 12,
+                      borderRadius: 12,
+                      border: `1px solid ${brandTokens.colors.border}`,
+                      background: brandTokens.gradients.panel,
+                      boxShadow: '0 -10px 30px rgba(0,0,0,0.45)',
+                      zIndex: 25
+                    }}
+                  >
+                    <AttachmentDropzone
+                      onAddLink={appendReferenceLink}
+                      onAddFile={appendReferenceFile}
+                    />
+                  </div>
+                )}
+              </>
+            )}
             {showAttachmentButton && (
               <label
                 style={{

@@ -101,17 +101,14 @@ const MAX_REPLY_LENGTH = 600;
 
 export function sanitizeReply(
   rawReply: string,
-  userMessage: string
+  userMessage: string,
+  options?: { toolCallArguments?: Record<string, unknown> }
 ): { reply: string; draft: Record<string, unknown>; overridden: boolean } {
-  const { displayText, draft } = parseAssistantReply(rawReply);
+  const { displayText, draft: proseDraft } = parseAssistantReply(rawReply);
   const refusal = matchesRefusal(displayText, userMessage);
-  if (refusal) {
-    return { reply: refusal, draft: {}, overridden: true };
-  }
+  if (refusal) return { reply: refusal, draft: {}, overridden: true };
 
-  const truncated = displayText.length > MAX_REPLY_LENGTH
-    ? displayText.slice(0, MAX_REPLY_LENGTH)
-    : displayText;
-
-  return { reply: truncated, draft: sanitizeDraftUpdates(draft), overridden: false };
+  const truncated = displayText.length > MAX_REPLY_LENGTH ? displayText.slice(0, MAX_REPLY_LENGTH) : displayText;
+  const source = options?.toolCallArguments ?? proseDraft;
+  return { reply: truncated, draft: sanitizeDraftUpdates(source), overridden: false };
 }

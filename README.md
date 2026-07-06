@@ -1,6 +1,6 @@
 # Balance Assist
 
-AI-assisted project onboarding chatbot for Balance Studio. Embeds as a floating widget on the live site, talks to leads via Deepseek, and relays human handoff to Telegram in real time.
+AI-assisted project onboarding chatbot for Balance Studio. Embeds as a floating widget on the live site, talks to leads via Deepseek via tool calling, captures a structured brief behind a review screen, and relays human handoff to Telegram in real time.
 
 ## Commands
 
@@ -28,6 +28,8 @@ AI-assisted project onboarding chatbot for Balance Studio. Embeds as a floating 
 - `POST /api/telegram/webhook` — Telegram sends replies here
 - `POST /api/telegram/setup` — one-call bot verification + webhook setup
 - `POST /api/telegram/simulate` — dev-only: simulate a team reply
+- `POST /api/telegram/upload` — file upload metadata only; the file itself is hosted by Telegram and referenced by `telegram_file_id`
+- `POST /api/attachments/link` — persist a reference link (YouTube, Vimeo, Figma, Loom, Google Drive, other) for the current session
 
 ## Environment variables
 
@@ -135,3 +137,22 @@ curl -X POST http://127.0.0.1:3000/api/telegram/simulate \
 Run the SQL files in `supabase/migrations/` in order, in the Supabase SQL editor:
 1. `001_initial_schema.sql` — sessions, events, leads
 2. `002_human_messages.sql` — handoff messages
+3. `003_telegram_topics.sql` — Telegram forum-topic tracking
+4. `004_contact_capture.sql` — captured contact fields on sessions
+5. `006_human_file_request_state.sql` — human-side file-request flag
+6. `007_uploaded_files.sql` — uploaded-files registry
+7. `008_schedule_request.sql` — schedule-request flag
+8. `009_brief_attachments.sql` — denormalised reference link/file columns on leads and sessions
+9. `010_uploaded_files_telegram_metadata.sql` — Telegram file-id + filename/mime/kind on uploaded_files
+10. `011_reference_links_table.sql` — normalised `reference_links` table for the dropzone
+
+## Intake flow
+
+The widget captures a project brief behind a deliberate two-step gate so leads see exactly what the team will receive before anything is sent.
+
+- The chat surface walks the visitor through free-text and option steps. As soon as the Deepseek-backed `/api/chat` route confirms the draft is complete (via the `record_brief_updates` tool call), it returns `{ message, draftUpdates, briefReady, reviewPrompt }` and the widget merges the structured fields into the in-memory draft.
+- An edge tab (`BriefPanelTab`) pulses on the right edge of the chat when `briefReady` first flips true. Clicking it slides a `BriefReviewScreen` panel out from the right, showing the captured project scope, type, service, timeline, budget, contact name, company, email, and any attachments.
+- Inside the review screen, the lead can add reference links (paste a YouTube / Vimeo / Figma / Loom / Google Drive URL, persisted via `POST /api/attachments/link` into `reference_links`) or upload reference files (the widget uploads metadata only to `POST /api/telegram/upload`; Telegram hosts the file and we keep the `telegram_file_id`).
+- The primary CTA — **Send to Balance team** — is the only thing that hits `POST /api/leads/finalize`. Until the lead clicks it, nothing is persisted as a lead. After send, the widget confirms the brief is approved and offers options to continue refining, book a call, or talk to the team directly.
+
+Attachments are not required; the dropzone is opt-in and the review screen still shows a clean "no attachments yet" hint. The tool-calling path lets the LLM keep extracting structured fields across multiple turns without re-prompting the visitor for fields it already has.

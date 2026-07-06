@@ -1,21 +1,34 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { sendTelegramDocument, sendTelegramMessage } from '@/lib/telegram';
-import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_BUCKET_NAME, validateUploadFile } from '@/lib/uploads/file-policy';
+import { sendDocument } from '@/lib/telegram';
+import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-policy';
 
 type SupabaseClient = NonNullable<ReturnType<typeof createServerSupabaseClient>>;
+
+const ALLOWED_KINDS = ['reference', 'brief', 'deliverable'] as const;
+type AllowedKind = (typeof ALLOWED_KINDS)[number];
+const MAX_KIND_LENGTH = 32;
+
+function coerceKind(raw: unknown): AllowedKind {
+  const value = typeof raw === 'string' ? raw.trim().slice(0, MAX_KIND_LENGTH) : '';
+  return (ALLOWED_KINDS as readonly string[]).includes(value) ? (value as AllowedKind) : 'reference';
+}
 
 export async function OPTIONS() {
   return corsOptionsResponse();
 }
 
 export async function POST(request: Request) {
-  const form = await request.formData().catch(() => null);
-  if (!form) {
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch (error) {
+    console.warn('[telegram-upload] failed to parse form data', error);
     return jsonWithCors({ ok: false, error: 'Invalid form data' }, { status: 400 });
   }
 
   const sessionId = String(form.get('sessionId') ?? '').trim();
+  const kind = coerceKind(form.get('kind'));
   const files = form
     .getAll('files')
     .concat(form.getAll('file'))
@@ -28,9 +41,10 @@ export async function POST(request: Request) {
   for (const file of files) {
     const validation = validateUploadFile(file);
     if (!validation.ok) {
+      const isSizeCap = validation.reason?.includes('too large') ?? false;
       return jsonWithCors(
         { ok: false, error: validation.reason, guidance: HUMAN_UPLOAD_GUIDANCE },
-        { status: 415 }
+        { status: isSizeCap ? 400 : 415 }
       );
     }
   }
@@ -59,99 +73,62 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'File upload has not been requested by the team' }, { status: 403 });
   }
 
-  await ensureUploadBucket(supabase);
-
-  const shortId = sessionId.slice(0, 8);
-  const uploaded: Array<{ fileName: string; sent: boolean; storagePath: string | null }> = [];
+  let lastTelegramFileId: string | null = null;
+  let uploadedCount = 0;
 
   for (const file of files) {
-    const storagePath = `${sessionId}/${Date.now()}-${safeFilename(file.name)}`;
-    const { error: storageError } = await supabase.storage
-      .from(UPLOAD_BUCKET_NAME)
-      .upload(storagePath, file, {
-        upsert: false,
-        contentType: file.type || undefined
-      });
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const caption = `${file.name} (${kind})`;
+    const result = await sendDocument(session.telegram_thread_id ?? null, buffer, caption, file.name);
 
-    if (storageError) {
-      return jsonWithCors({ ok: false, error: storageError.message }, { status: 500 });
+    if (!result.ok) {
+      return jsonWithCors(
+        {
+          ok: false,
+          error: result.description ?? 'Failed to forward file to Telegram',
+          telegramStatus: result.status
+        },
+        { status: 502 }
+      );
     }
 
-    const caption = `<b>📎 File upload</b>\n<code>${shortId}</code>\n${escapeHtml(file.name)}`;
+    if (result.fileId === null) {
+      return jsonWithCors(
+        { ok: false, error: 'Telegram accepted the upload but did not return a file_id' },
+        { status: 502 }
+      );
+    }
 
-    const sent = await sendTelegramDocument(file, {
-      caption,
-      threadId: session.telegram_thread_id ?? undefined
-    });
+    lastTelegramFileId = result.fileId;
 
-    const { error: insertError } = await supabase.from('human_messages').insert({
+    const { error: insertError } = await supabase.from('uploaded_files').insert({
       session_id: sessionId,
-      sender: 'user',
-      text: `[File] ${file.name}`,
-      telegram_message_id: sent?.messageId ?? null,
-      telegram_thread_id: session.telegram_thread_id ?? null
+      telegram_file_id: result.fileId,
+      name: file.name,
+      size_bytes: file.size,
+      mime: file.type || null,
+      kind
     });
 
     if (insertError) {
       return jsonWithCors({ ok: false, error: insertError.message }, { status: 500 });
     }
 
-    const { error: metadataError } = await supabase.from('uploaded_files').insert({
-      session_id: sessionId,
-      storage_path: storagePath,
-      original_name: file.name,
-      mime_type: file.type || null,
-      size_bytes: file.size,
-      telegram_message_id: sent?.messageId ?? null
-    });
-
-    if (metadataError) {
-      return jsonWithCors({ ok: false, error: metadataError.message }, { status: 500 });
-    }
-
-    uploaded.push({ fileName: file.name, sent: sent !== null, storagePath });
+    uploadedCount += 1;
   }
 
-  if (files.length > 1) {
-    const summary = `<b>📦 Upload batch</b>\n<code>${shortId}</code>\n${files
-      .map((file) => `• ${escapeHtml(file.name)}`)
-      .join('\n')}`;
-    await sendTelegramMessage(summary, {
-      threadId: session.telegram_thread_id ?? undefined
-    });
-  }
-
-  await supabase
+  const { error: closeError } = await supabase
     .from('sessions')
     .update({ file_request_open: false, file_request_note: null })
     .eq('id', sessionId);
 
-  return jsonWithCors({ ok: true, files: uploaded, count: uploaded.length });
-}
-
-async function ensureUploadBucket(supabase: SupabaseClient) {
-  const { data: buckets, error } = await supabase.storage.listBuckets();
-  if (error) {
-    throw new Error(error.message);
+  if (closeError) {
+    console.warn('[telegram-upload] failed to reset file_request_open', closeError);
   }
 
-  if (buckets.some((bucket) => bucket.name === UPLOAD_BUCKET_NAME)) {
-    return;
-  }
-
-  const { error: createError } = await supabase.storage.createBucket(UPLOAD_BUCKET_NAME, {
-    public: false,
-    fileSizeLimit: `${Math.floor(50)}MB`
+  return jsonWithCors({
+    ok: true,
+    telegramFileId: lastTelegramFileId,
+    count: uploadedCount
   });
-  if (createError) {
-    throw new Error(createError.message);
-  }
-}
-
-function safeFilename(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
