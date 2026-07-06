@@ -29,4 +29,29 @@ describe('BriefPanelTab', () => {
     rerender(<BriefPanelTab open={false} pulse={true} onToggle={() => {}} onFirstReady={onFirstReady} />);
     expect(onFirstReady).toHaveBeenCalledOnce();
   });
+
+  test('renders an inline-SVG fallback so the chevron is visible without webfonts', () => {
+    const { container } = render(<BriefPanelTab open={false} onToggle={() => {}} />);
+    const btn = screen.getByRole('button', { name: /project brief/i });
+    const svg = btn.querySelector('svg');
+    expect(svg).toBeInTheDocument();
+    expect(container.querySelector('button svg')).toBeInTheDocument();
+  });
+
+  test('does not render the "Review brief" tooltip when pulse is inactive', () => {
+    render(<BriefPanelTab open={false} pulse={false} onToggle={() => {}} />);
+    expect(screen.queryByText(/review brief/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  test('renders the "Review brief" tooltip only while pulse is active', () => {
+    const onFirstReady = vi.fn();
+    const { rerender } = render(
+      <BriefPanelTab open={false} pulse={false} onToggle={() => {}} onFirstReady={onFirstReady} />
+    );
+    expect(screen.queryByText(/review brief/i)).not.toBeInTheDocument();
+    rerender(<BriefPanelTab open={false} pulse={true} onToggle={() => {}} onFirstReady={onFirstReady} />);
+    expect(screen.getByRole('tooltip', { name: /review brief/i })).toBeInTheDocument();
+    expect(screen.getByText(/review brief/i)).toBeInTheDocument();
+  });
 });
