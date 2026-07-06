@@ -5,6 +5,7 @@ export function createDefaultLeadDraft(): LeadDraft {
     service: '',
     projectType: '',
     projectScope: '',
+    scopePolished: '',
     timelineBand: '',
     budgetBand: '',
     contactName: '',

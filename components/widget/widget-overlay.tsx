@@ -148,6 +148,7 @@ export function WidgetOverlay({
   const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
   const [humanScheduleRequestOpen, setHumanScheduleRequestOpen] = useState(false);
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
+  const [showBriefPanel, setShowBriefPanel] = useState(true);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -477,6 +478,7 @@ const startConversation = useCallback(async () => {
     setHumanFileRequestOpen(false);
     setHumanFileRequestNote(null);
     setHumanScheduleRequestOpen(false);
+    setShowBriefPanel(true);
     setView('chat');
     setAllowAttachment(false);
     cancelRef.current = false;
@@ -929,7 +931,7 @@ const startConversation = useCallback(async () => {
             position: 'absolute',
             bottom: '72px',
             right: '0px',
-            width: 'min(380px, calc(100vw - 48px))',
+            width: !isTeamConnected && hasProjectIntent && showBriefPanel ? 'min(760px, calc(100vw - 48px))' : 'min(380px, calc(100vw - 48px))',
             height: 'min(580px, calc(100vh - 120px))',
             display: 'flex',
             flexDirection: 'column',
@@ -963,44 +965,86 @@ const startConversation = useCallback(async () => {
 
           <WidgetOverlayHeader isTeamConnected={isTeamConnected} onClose={handleClose} />
 
-          {/* Messages */}
+          {!isTeamConnected && hasProjectIntent && (
+            <div style={{ padding: '8px 14px 0', background: 'rgba(16, 16, 16, 0.4)', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setShowBriefPanel((current) => !current)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: brandTokens.colors.warmGold,
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px'
+                }}
+              >
+                {showBriefPanel ? 'Hide project brief' : 'Show project brief'}
+              </button>
+            </div>
+          )}
+
           <div
             style={{
               flex: 1,
-              overflowY: 'auto',
-              padding: '16px 14px',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '14px'
+              gap: '0',
+              minHeight: 0
             }}
           >
-            {!isTeamConnected && hasProjectIntent && (
-              <ProjectBriefCard
-                draft={draft}
-                showNudge
-                readyForApproval={isBriefReadyForApproval(draft)}
-                approved={briefApproved}
-                onApprove={handleApproveBrief}
-                onContinueRefining={() => setBriefApproved(false)}
-              />
-            )}
-
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} onQuickReply={handleSubmitQuickReply} onInlineCardClick={handleInlineCardClick} />
-            ))}
-
-            {isTyping && (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                <BotAvatarSmall />
-                <TypingDots />
+            {!isTeamConnected && hasProjectIntent && showBriefPanel && (
+              <div
+                style={{
+                  width: '280px',
+                  borderRight: `1px solid ${brandTokens.colors.subtleBorder}`,
+                  padding: '16px 14px',
+                  overflowY: 'auto',
+                  flexShrink: 0,
+                  display: 'grid',
+                  gap: '14px'
+                }}
+              >
+                <ProjectBriefCard
+                  draft={draft}
+                  showNudge
+                  title="Project Brief"
+                  readyForApproval={isBriefReadyForApproval(draft)}
+                  approved={briefApproved}
+                  onApprove={handleApproveBrief}
+                  onContinueRefining={() => setBriefApproved(false)}
+                />
               </div>
             )}
 
-            {!isTyping && isTeamConnected && teamWaitingForReply && <TeamTypingIndicator />}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+                minWidth: 0
+              }}
+            >
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} onQuickReply={handleSubmitQuickReply} onInlineCardClick={handleInlineCardClick} />
+              ))}
 
-            {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
+              {isTyping && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                  <BotAvatarSmall />
+                  <TypingDots />
+                </div>
+              )}
 
-            <div ref={messagesEndRef} />
+              {!isTyping && isTeamConnected && teamWaitingForReply && <TeamTypingIndicator />}
+
+              {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
+
+              <div ref={messagesEndRef} />
+            </div>
           </div>
 
           {/* Input Bar */}

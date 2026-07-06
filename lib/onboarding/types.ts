@@ -15,6 +15,7 @@ export type LeadDraft = {
   service: ServiceOptionId | '';
   projectType?: string;
   projectScope: string;
+  scopePolished?: string;
   timelineBand: TimelineBandId | '';
   budgetBand: BudgetBandId | '';
   contactName: string;

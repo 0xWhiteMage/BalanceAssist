@@ -22,6 +22,7 @@ export const finalizeLeadPayloadSchema = z.object({
       service: z.string().optional(),
       projectType: z.string().optional(),
       projectScope: z.string().optional(),
+      scopePolished: z.string().optional(),
       timelineBand: z.string().optional(),
       budgetBand: z.string().optional(),
       contactName: z.string().optional(),

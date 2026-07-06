@@ -2,6 +2,7 @@ const ALLOWED_KEYS = [
   'service',
   'projectType',
   'projectScope',
+  'scopePolished',
   'timelineBand',
   'budgetBand',
   'contactName',

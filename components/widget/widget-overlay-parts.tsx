@@ -383,11 +383,13 @@ export function ProjectBriefCard({
   showNudge,
   readyForApproval,
   approved,
+  title,
   onApprove,
   onContinueRefining
 }: {
   draft: {
     projectScope: string;
+    scopePolished?: string;
     projectType?: string;
     service: string;
     timelineBand: string;
@@ -399,11 +401,12 @@ export function ProjectBriefCard({
   showNudge?: boolean;
   readyForApproval?: boolean;
   approved?: boolean;
+  title?: string;
   onApprove?: () => void;
   onContinueRefining?: () => void;
 }) {
   const rows = [
-    ['Project scope', draft.projectScope],
+    ['Project scope', draft.scopePolished ?? draft.projectScope],
     ['Project type', draft.projectType ?? ''],
     ['Service', draft.service],
     ['Timeline', draft.timelineBand],
@@ -429,7 +432,7 @@ export function ProjectBriefCard({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
         <div>
           <div style={{ fontSize: '10px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
-            Project Brief
+            {title ?? 'Project Brief'}
           </div>
           <div style={{ marginTop: '3px', fontSize: '12px', color: brandTokens.colors.mutedText }}>
             {completed} of {rows.length} key fields captured
