@@ -12,6 +12,29 @@ type ConversationContext = {
   isTeamConnected: boolean;
 };
 
+function getNextMissingFieldPrompt(draft: LeadDraft): string {
+  if (!draft.projectScope.trim()) return 'Tell me a bit about the project you want to create.';
+  if (!(draft.projectType ?? '').trim() && !draft.service) return 'What type of creative output are you looking for — for example 2D animation, motion graphics, or a brand film?';
+  if (!draft.timelineBand) return 'What timeline are you working with?';
+  if (!draft.budgetBand) return 'What budget range are you working with?';
+  if (!draft.contactName.trim()) return 'What name should I put on the brief?';
+  if (!draft.contactEmail.trim()) return 'What email should the Balance team use to follow up?';
+  return 'Would you like to approve the brief for the team or continue refining it?';
+}
+
+function hasAnyProjectContext(draft: LeadDraft) {
+  return Boolean(
+    draft.projectScope.trim() ||
+      (draft.projectType ?? '').trim() ||
+      draft.service ||
+      draft.timelineBand ||
+      draft.budgetBand ||
+      draft.contactName.trim() ||
+      draft.contactEmail.trim() ||
+      (draft.contactCompany ?? '').trim()
+  );
+}
+
 const intents: LocalIntent[] = [
   {
     patterns: [/what.*do.*you.*remember|what.*have.*i.*shared|what.*do.*you.*know.*about.*my.*project/i],
@@ -71,7 +94,10 @@ const intents: LocalIntent[] = [
   },
   {
     patterns: [/^(hi|hello|hey|yo|sup|greetings|good\s*(morning|afternoon|evening))(\s*!?\s*)?$/i],
-    response: "Hello! I'm Balance Assist. How can I help you today?"
+    response: (ctx) =>
+      hasAnyProjectContext(ctx.draft)
+        ? `I'm here. ${getNextMissingFieldPrompt(ctx.draft)}`
+        : "Hello! I'm Balance Assist. How can I help you today?"
   },
   {
     patterns: [/thank|thanks|appreciate|cheers|great|awesome|cool|nice/i],
