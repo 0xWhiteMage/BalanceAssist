@@ -47,6 +47,21 @@ function detectService(text: string): ServiceOptionId | null {
   return null;
 }
 
+function detectProjectType(text: string): string | null {
+  const normalized = normalize(text);
+
+  if (/2d animation|2d animated|2d video/.test(normalized)) return '2D animation';
+  if (/3d animation|3d video/.test(normalized)) return '3D animation';
+  if (/motion graphics|motion graphic/.test(normalized)) return 'Motion graphics';
+  if (/brand film/.test(normalized)) return 'Brand film';
+  if (/explainer/.test(normalized)) return 'Explainer video';
+  if (/social/.test(normalized) && /video|animation/.test(normalized)) return 'Social video';
+  if (/video/.test(normalized)) return 'Video';
+  if (/animation/.test(normalized)) return 'Animation';
+
+  return null;
+}
+
 function detectTimeline(text: string): TimelineBandId | null {
   const normalized = normalize(text);
 
@@ -146,6 +161,7 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
   const overwrite = shouldOverwriteExistingValue(text);
 
   const detectedService = detectService(text);
+  const detectedProjectType = detectProjectType(text);
   const detectedTimeline = detectTimeline(text);
   const detectedBudget = detectBudget(text);
   const detectedEmail = text.match(emailPattern)?.[0] ?? null;
@@ -153,6 +169,7 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
   const detectedCompany = detectCompany(text);
 
   if (detectedService && (!currentDraft.service || overwrite)) updates.service = detectedService;
+  if (detectedProjectType && (!(currentDraft.projectType ?? '') || overwrite)) updates.projectType = detectedProjectType;
   if (detectedTimeline && (!currentDraft.timelineBand || overwrite)) updates.timelineBand = detectedTimeline;
   if (detectedBudget && (!currentDraft.budgetBand || overwrite)) updates.budgetBand = detectedBudget;
   if (detectedEmail && (!currentDraft.contactEmail || overwrite)) updates.contactEmail = detectedEmail;
@@ -208,6 +225,9 @@ export function getDraftSummaryLines(draft: LeadDraft): string[] {
 
   if (draft.service) {
     lines.push(`Service: ${draft.service.replace(/-/g, ' ')}`);
+  }
+  if (draft.projectType) {
+    lines.push(`Project type: ${draft.projectType}`);
   }
   if (draft.projectScope) {
     lines.push(`Project scope: ${draft.projectScope}`);

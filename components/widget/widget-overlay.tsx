@@ -66,6 +66,27 @@ function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): s
   return null;
 }
 
+function detectProjectIntent(text: string, draft: LeadDraft) {
+  const normalized = text.toLowerCase();
+  return Boolean(
+    draft.projectScope ||
+      draft.projectType ||
+      draft.service ||
+      draft.timelineBand ||
+      draft.budgetBand ||
+      /project|campaign|brief|animation|video|film|motion|production|edit|social media|brand/i.test(normalized)
+  );
+}
+
+function isBriefReadyForApproval(draft: LeadDraft) {
+  const hasCore = Boolean(draft.projectScope.trim());
+  const hasTypeOrService = Boolean((draft.projectType ?? '').trim() || draft.service);
+  const hasTimeline = Boolean(draft.timelineBand);
+  const hasBudget = Boolean(draft.budgetBand);
+  const hasContact = Boolean(draft.contactEmail.trim() || draft.contactName.trim());
+  return hasCore && hasTypeOrService && hasTimeline && hasBudget && hasContact;
+}
+
 function stripDraftLine(text: string) {
   return text.replace(/:::draft:::[\s\S]*?:::/gi, '').trim();
 }
@@ -113,6 +134,8 @@ export function WidgetOverlay({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
   const [draft, setDraft] = useState<LeadDraft>(createDefaultLeadDraft());
+  const [hasProjectIntent, setHasProjectIntent] = useState(false);
+  const [briefApproved, setBriefApproved] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [allowAttachment, setAllowAttachment] = useState(false);
@@ -445,6 +468,8 @@ const startConversation = useCallback(async () => {
     messagesRef.current = [];
     setMessages([]);
     setDraft(createDefaultLeadDraft());
+    setHasProjectIntent(false);
+    setBriefApproved(false);
     setCurrentStep('intro');
     setHasStarted(false);
     setIsTeamConnected(false);
@@ -509,11 +534,12 @@ const startConversation = useCallback(async () => {
           }
         }
         setDraft(merged);
+        setHasProjectIntent(detectProjectIntent(latestUserText, merged));
+        setBriefApproved(false);
 
         const nextStep = getNextConversationStep(merged);
         if (nextStep !== stepRef.current) {
           setCurrentStep(nextStep);
-          advanceStep(nextStep, merged).catch(() => undefined);
         }
       }
 
@@ -551,6 +577,26 @@ const startConversation = useCallback(async () => {
     setMessages(next);
   }
 
+  async function handleApproveBrief() {
+    await ensureSession();
+    if (!sessionIdRef.current) return;
+
+    const result = scoreLead(draftRef.current);
+    const payload = {
+      sessionId: sessionIdRef.current,
+      qualificationStatus: result.status,
+      score: result.score,
+      recommendedNextStep: result.recommendedNextStep,
+      leadDraft: draftRef.current
+    } as const;
+
+    await finalizeLead(payload);
+    setBriefApproved(true);
+    setCurrentStep('handoff');
+    await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
+    await advanceStep('handoff', draftRef.current);
+  }
+
   async function processFlowAnswer(value: string, displayLabel?: string) {
     const step = conversationSteps[currentStep];
     const userMsg: ChatMessage = {
@@ -568,9 +614,13 @@ const startConversation = useCallback(async () => {
     if (step.freeText || currentStep === 'intro') {
       updatedDraft = applyTextToDraft(value, draft, currentStep);
       setDraft(updatedDraft);
+      setHasProjectIntent(detectProjectIntent(value, updatedDraft));
+      setBriefApproved(false);
     } else if (step.field) {
       updatedDraft = { ...draft, [step.field]: value };
       setDraft(updatedDraft);
+      setHasProjectIntent(detectProjectIntent(value, updatedDraft));
+      setBriefApproved(false);
     }
 
     const isFreeTextIntakeStep =
@@ -603,21 +653,8 @@ const startConversation = useCallback(async () => {
       nextStepId = step.next;
     }
 
-    const reachedQualification = nextStepId === 'qualification';
-
-    if (reachedQualification || nextStepId) {
+    if (nextStepId) {
       await ensureSession();
-    }
-
-    if (reachedQualification && sessionIdRef.current) {
-      const result = scoreLead(updatedDraft);
-      void finalizeLead({
-        sessionId: sessionIdRef.current,
-        qualificationStatus: result.status,
-        score: result.score,
-        recommendedNextStep: result.recommendedNextStep,
-        leadDraft: updatedDraft
-      });
     }
 
     if (sessionIdRef.current && nextStepId) {
@@ -678,6 +715,8 @@ const startConversation = useCallback(async () => {
       if (!isTeamConnected && memoryUpdatePattern.test(trimmed)) {
         const updatedDraft = applyTextToDraft(trimmed, draft, currentStep);
         setDraft(updatedDraft);
+        setHasProjectIntent(detectProjectIntent(trimmed, updatedDraft));
+        setBriefApproved(false);
         appendUserMessage(trimmed);
         const lines = getDraftSummaryLines(updatedDraft);
         await botSay(
@@ -935,8 +974,15 @@ const startConversation = useCallback(async () => {
               gap: '14px'
             }}
           >
-            {!isTeamConnected && (
-              <ProjectBriefCard draft={draft} showNudge />
+            {!isTeamConnected && hasProjectIntent && (
+              <ProjectBriefCard
+                draft={draft}
+                showNudge
+                readyForApproval={isBriefReadyForApproval(draft)}
+                approved={briefApproved}
+                onApprove={handleApproveBrief}
+                onContinueRefining={() => setBriefApproved(false)}
+              />
             )}
 
             {messages.map((msg) => (

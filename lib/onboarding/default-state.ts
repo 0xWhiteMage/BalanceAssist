@@ -3,6 +3,7 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 export function createDefaultLeadDraft(): LeadDraft {
   return {
     service: '',
+    projectType: '',
     projectScope: '',
     timelineBand: '',
     budgetBand: '',

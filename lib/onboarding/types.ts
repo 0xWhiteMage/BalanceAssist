@@ -13,6 +13,7 @@ export type BudgetBandId = 'under-20k' | '20k-50k' | '50k-150k' | '150k-plus' | 
 
 export type LeadDraft = {
   service: ServiceOptionId | '';
+  projectType?: string;
   projectScope: string;
   timelineBand: TimelineBandId | '';
   budgetBand: BudgetBandId | '';

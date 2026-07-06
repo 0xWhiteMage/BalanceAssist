@@ -271,7 +271,7 @@ export async function POST(request: Request) {
   }
 }
 
-const DRAFT_LINE_PATTERN = /:::draft:::\s*(\{[\s\S]*?\})\s*:::/i;
+const DRAFT_LINE_PATTERN = /:::draft:::\s*(?:<json>)?\s*(\{[\s\S]*?\})\s*(?:<\/json>)?\s*:::/i;
 
 function parseAssistantReply(reply: string): {
   displayText: string;
