@@ -99,7 +99,7 @@ async function callOpenAICompatible(
   apiKey: string,
   model: string,
   messages: OpenAIMessage[],
-  options?: { useTools?: boolean }
+  options?: { useTools?: boolean; sessionId?: string }
 ): Promise<ProviderResult> {
   const useTools = options?.useTools ?? false;
   const body: Record<string, unknown> = {
@@ -145,10 +145,17 @@ async function callOpenAICompatible(
         const parsed = JSON.parse(firstCall.function.arguments);
         const result = recordBriefUpdatesSchema.safeParse(parsed);
         if (result.success) {
-          return { content, toolArguments: result.data as Record<string, unknown> };
+          return { content, toolArguments: result.data };
         }
-      } catch {
-        // fall through to content-only path
+        console.warn('[chat] record_brief_updates tool arguments failed schema validation', {
+          sessionId: options?.sessionId,
+          issues: result.error.issues
+        });
+      } catch (error) {
+        console.warn('[chat] record_brief_updates tool arguments failed to parse as JSON', {
+          sessionId: options?.sessionId,
+          message: error instanceof Error ? error.message : 'unknown'
+        });
       }
     }
   }
@@ -232,6 +239,25 @@ function parsePriorDraft(raw: string | undefined): Record<string, string> {
   }
 }
 
+type ChatContext = {
+  step?: string;
+  isTeamConnected?: boolean;
+  draft?: string;
+  sessionId?: string;
+} | undefined;
+
+function buildLlmContext(context: ChatContext) {
+  const priorDraft = parsePriorDraft(context?.draft);
+  const briefReady = isBriefReadyForApproval(priorDraft);
+  const systemPrompt = buildSystemPrompt({
+    isTeamConnected: context?.isTeamConnected,
+    step: context?.step,
+    draft: context?.draft,
+    briefReady
+  });
+  return { priorDraft, briefReady, systemPrompt };
+}
+
 export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, chatRequestSchema);
 
@@ -264,14 +290,8 @@ export async function POST(request: Request) {
 
   try {
     if (env.DEEPSEEK_API_KEY) {
-      const priorDraft = parsePriorDraft(context?.draft);
-      const briefReady = isBriefReadyForApproval(priorDraft);
-      const systemPrompt = buildSystemPrompt({
-        isTeamConnected: context?.isTeamConnected,
-        step: context?.step,
-        draft: context?.draft,
-        briefReady
-      });
+      const ctx = buildLlmContext(context);
+      const systemPrompt = ctx.systemPrompt;
       const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
       const model = env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
       const providerResult = await callOpenAICompatible(
@@ -279,30 +299,18 @@ export async function POST(request: Request) {
         env.DEEPSEEK_API_KEY,
         model,
         llmMessages,
-        { useTools: true }
+        { useTools: true, sessionId }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
     } else if (env.MINIMAX_API_KEY) {
-      const priorDraft = parsePriorDraft(context?.draft);
-      const briefReady = isBriefReadyForApproval(priorDraft);
-      const systemPrompt = buildSystemPrompt({
-        isTeamConnected: context?.isTeamConnected,
-        step: context?.step,
-        draft: context?.draft,
-        briefReady
-      });
+      const ctx = buildLlmContext(context);
+      const systemPrompt = ctx.systemPrompt;
       const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
       visibleContent = await callMinimax(env.MINIMAX_API_KEY, llmMessages);
     } else if (env.OPENAI_API_KEY) {
-      const priorDraft = parsePriorDraft(context?.draft);
-      const briefReady = isBriefReadyForApproval(priorDraft);
-      const systemPrompt = buildSystemPrompt({
-        isTeamConnected: context?.isTeamConnected,
-        step: context?.step,
-        draft: context?.draft,
-        briefReady
-      });
+      const ctx = buildLlmContext(context);
+      const systemPrompt = ctx.systemPrompt;
       const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
       const endpoint = env.OPENAI_API_ENDPOINT ?? 'https://api.openai.com/v1/chat/completions';
       const model = env.OPENAI_MODEL ?? 'gpt-4o-mini';
@@ -311,7 +319,7 @@ export async function POST(request: Request) {
         env.OPENAI_API_KEY,
         model,
         llmMessages,
-        { useTools: true }
+        { useTools: true, sessionId }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
@@ -340,7 +348,7 @@ export async function POST(request: Request) {
       category = 'refusal';
     }
 
-    const draftUpdates = sanitizeDraftUpdates(sanitized.draft as Record<string, unknown>);
+    const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
     const priorDraft = parsePriorDraft(context?.draft);
     const mergedDraft = { ...priorDraft, ...draftUpdates };
     const briefReady = isBriefReadyForApproval(mergedDraft);

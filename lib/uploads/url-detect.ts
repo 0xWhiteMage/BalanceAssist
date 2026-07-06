@@ -17,7 +17,7 @@ export function classifyUrl(input: string): LinkKind | null {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   for (const [pattern, kind] of PATTERNS) {
-    if (pattern.test(url.hostname + url.pathname)) return kind;
+    if (pattern.test(url.hostname)) return kind;
   }
   return 'other';
 }
