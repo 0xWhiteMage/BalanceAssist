@@ -91,7 +91,7 @@ export async function finalizeLead(payload: {
   qualificationStatus: 'qualified' | 'needs_review' | 'misfit' | 'unqualified';
   score?: number;
   recommendedNextStep?: string;
-  leadDraft?: Record<string, string | undefined>;
+  leadDraft?: Record<string, unknown>;
 }): Promise<FinalizeLeadResponse | null> {
   return postJson<FinalizeLeadResponse>('/api/leads/finalize', payload);
 }
@@ -187,4 +187,15 @@ export async function notifyScheduleCompleted(sessionId: string): Promise<boolea
   } catch {
     return false;
   }
+}
+
+export type ReferenceLinkPayload = {
+  sessionId: string;
+  url: string;
+  kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other';
+};
+
+export async function addReferenceLink(payload: ReferenceLinkPayload): Promise<boolean> {
+  const result = await postJson<{ ok?: boolean; persisted?: boolean }>('/api/attachments/link', payload);
+  return Boolean(result?.ok);
 }

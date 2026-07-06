@@ -27,7 +27,10 @@ export const finalizeLeadPayloadSchema = z.object({
       budgetBand: z.string().optional(),
       contactName: z.string().optional(),
       contactEmail: z.string().optional(),
-      contactCompany: z.string().optional()
+      contactCompany: z.string().optional(),
+      referenceLinks: z.array(z.unknown()).optional(),
+      referenceFiles: z.array(z.unknown()).optional()
     })
+    .passthrough()
     .optional()
 });
