@@ -1,71 +1,39 @@
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
-export const referenceLinkSchema = z.object({
-  kind: z.enum(['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other']),
-  url: z.string().url()
-});
+const TEXT_FIELD_DESCRIPTION =
+  "Use '' (empty string) when the field is unknown; do NOT omit the key.";
 
-export const referenceFileSchema = z.object({
-  kind: z.string().min(1),
-  name: z.string().min(1),
-  url: z.string().min(1).optional(),
-  telegramFileId: z.string().min(1).optional(),
-  sizeBytes: z.number().int().nonnegative(),
-  mime: z.string().min(1)
-});
+export const recordBriefUpdatesSchema = z
+  .object({
+    service: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    projectType: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    projectScope: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    scopePolished: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    timelineBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    budgetBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    contactName: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    contactCompany: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    contactEmail: z
+      .union([z.literal(''), z.string().email()])
+      .optional()
+      .describe("Either '' or a valid email address; do NOT omit the key.")
+  })
+  .strict();
 
-export const recordBriefUpdatesSchema = z.object({
-  service: z.string().default(''),
-  projectType: z.string().default(''),
-  projectScope: z.string().default(''),
-  scopePolished: z.string().default(''),
-  timelineBand: z.string().default(''),
-  budgetBand: z.string().default(''),
-  contactName: z.string().default(''),
-  contactCompany: z.string().default(''),
-  contactEmail: z.string().email().optional().or(z.literal('')),
-  referenceLinks: z.array(referenceLinkSchema).default([]),
-  referenceFiles: z.array(referenceFileSchema).default([])
-}).strict();
+// Length caps are enforced by sanitizeDraftUpdates (200 chars); this schema trusts that layer.
 
-export const recordBriefUpdatesJsonSchema = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    service: { type: 'string' },
-    projectType: { type: 'string' },
-    projectScope: { type: 'string' },
-    scopePolished: { type: 'string' },
-    timelineBand: { type: 'string' },
-    budgetBand: { type: 'string' },
-    contactName: { type: 'string' },
-    contactCompany: { type: 'string' },
-    contactEmail: { type: 'string' },
-    referenceLinks: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          kind: { type: 'string', enum: ['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other'] },
-          url: { type: 'string' }
-        },
-        required: ['kind', 'url']
-      }
-    },
-    referenceFiles: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          kind: { type: 'string' },
-          name: { type: 'string' },
-          url: { type: 'string' },
-          telegramFileId: { type: 'string' },
-          sizeBytes: { type: 'integer' },
-          mime: { type: 'string' }
-        },
-        required: ['kind', 'name', 'sizeBytes', 'mime']
-      }
-    }
-  }
-};
+const generated = zodToJsonSchema(recordBriefUpdatesSchema, {
+  target: 'jsonSchema7',
+  $refStrategy: 'none'
+}) as Record<string, unknown>;
+
+// The LLM must always send every key (using '' as the unknown sentinel), even though
+// Zod treats defaulted fields as optional. List every property in `required` so the
+// tool-call contract enforces completeness regardless of JSON Schema's default semantics.
+{
+  const properties = (generated.properties ?? {}) as Record<string, unknown>;
+  generated.required = Object.keys(properties).sort();
+}
+
+export const recordBriefUpdatesJsonSchema = generated;
