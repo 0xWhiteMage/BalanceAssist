@@ -8,6 +8,11 @@ import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-
 import { conversationSteps } from '@/lib/conversation/flow';
 import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
 import { checkRateLimit } from '@/lib/conversation/rate-limit';
+import { isBriefReadyForApproval, missingReviewFields, REVIEW_PROMPT } from '@/lib/conversation/review-state';
+import {
+  recordBriefUpdatesJsonSchema,
+  recordBriefUpdatesSchema
+} from '@/lib/conversation/tool-schema';
 import type { ConversationStepId } from '@/lib/conversation/types';
 
 const chatMessageSchema = z.object({
@@ -33,6 +38,7 @@ export async function OPTIONS() {
 
 type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 const PROVIDER_TIMEOUT_MS = 15000;
+const TOOL_NAME = 'record_brief_updates';
 
 async function fetchProvider(input: string, init: RequestInit) {
   const controller = new AbortController();
@@ -83,19 +89,45 @@ function readMinimaxContent(data: unknown): string | null {
   return null;
 }
 
+type ProviderResult = {
+  content: string;
+  toolArguments: Record<string, unknown> | null;
+};
+
 async function callOpenAICompatible(
   endpoint: string,
   apiKey: string,
   model: string,
-  messages: OpenAIMessage[]
-): Promise<string> {
+  messages: OpenAIMessage[],
+  options?: { useTools?: boolean }
+): Promise<ProviderResult> {
+  const useTools = options?.useTools ?? false;
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    max_tokens: useTools ? 1024 : 512,
+    temperature: useTools ? 0.4 : 0.6
+  };
+  if (useTools) {
+    body.tools = [
+      {
+        type: 'function',
+        function: {
+          name: TOOL_NAME,
+          parameters: recordBriefUpdatesJsonSchema
+        }
+      }
+    ];
+    body.tool_choice = 'auto';
+  }
+
   const response = await fetchProvider(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify({ model, messages, max_tokens: 512, temperature: 0.6 })
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) {
@@ -103,7 +135,25 @@ async function callOpenAICompatible(
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content ?? getFallbackResponse();
+  const message = data?.choices?.[0]?.message;
+  const content = typeof message?.content === 'string' ? message.content : getFallbackResponse();
+
+  if (useTools && Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+    const firstCall = message.tool_calls[0];
+    if (firstCall?.function?.name === TOOL_NAME && typeof firstCall.function.arguments === 'string') {
+      try {
+        const parsed = JSON.parse(firstCall.function.arguments);
+        const result = recordBriefUpdatesSchema.safeParse(parsed);
+        if (result.success) {
+          return { content, toolArguments: result.data as Record<string, unknown> };
+        }
+      } catch {
+        // fall through to content-only path
+      }
+    }
+  }
+
+  return { content, toolArguments: null };
 }
 
 async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<string> {
@@ -167,6 +217,21 @@ async function logLlmEvent(
   }
 }
 
+function parsePriorDraft(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') result[key] = value;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, chatRequestSchema);
 
@@ -193,42 +258,63 @@ export async function POST(request: Request) {
     }
   }
 
-  let response: string;
+  let visibleContent: string;
+  let toolArguments: Record<string, unknown> | null = null;
   let category: 'reply' | 'refusal' | 'local_fallback' = 'reply';
 
   try {
     if (env.DEEPSEEK_API_KEY) {
+      const priorDraft = parsePriorDraft(context?.draft);
+      const briefReady = isBriefReadyForApproval(priorDraft);
       const systemPrompt = buildSystemPrompt({
         isTeamConnected: context?.isTeamConnected,
         step: context?.step,
-        draft: context?.draft
+        draft: context?.draft,
+        briefReady
       });
       const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
       const model = env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
-      response = await callOpenAICompatible(
+      const providerResult = await callOpenAICompatible(
         'https://api.deepseek.com/v1/chat/completions',
         env.DEEPSEEK_API_KEY,
         model,
-        llmMessages
+        llmMessages,
+        { useTools: true }
       );
+      visibleContent = providerResult.content;
+      toolArguments = providerResult.toolArguments;
     } else if (env.MINIMAX_API_KEY) {
+      const priorDraft = parsePriorDraft(context?.draft);
+      const briefReady = isBriefReadyForApproval(priorDraft);
       const systemPrompt = buildSystemPrompt({
         isTeamConnected: context?.isTeamConnected,
         step: context?.step,
-        draft: context?.draft
+        draft: context?.draft,
+        briefReady
       });
       const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
-      response = await callMinimax(env.MINIMAX_API_KEY, llmMessages);
+      visibleContent = await callMinimax(env.MINIMAX_API_KEY, llmMessages);
     } else if (env.OPENAI_API_KEY) {
+      const priorDraft = parsePriorDraft(context?.draft);
+      const briefReady = isBriefReadyForApproval(priorDraft);
       const systemPrompt = buildSystemPrompt({
         isTeamConnected: context?.isTeamConnected,
         step: context?.step,
-        draft: context?.draft
+        draft: context?.draft,
+        briefReady
       });
       const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
       const endpoint = env.OPENAI_API_ENDPOINT ?? 'https://api.openai.com/v1/chat/completions';
       const model = env.OPENAI_MODEL ?? 'gpt-4o-mini';
-      response = await callOpenAICompatible(endpoint, env.OPENAI_API_KEY, model, llmMessages);
+      const providerResult = await callOpenAICompatible(
+        endpoint,
+        env.OPENAI_API_KEY,
+        model,
+        llmMessages,
+        { useTools: true }
+      );
+      visibleContent = providerResult.content;
+      toolArguments = providerResult.toolArguments;
     } else {
       category = 'local_fallback';
       const localResponse = getLocalResponse(lastUserMessage, {
@@ -238,90 +324,41 @@ export async function POST(request: Request) {
       });
 
       if (localResponse) {
-        response = localResponse;
+        visibleContent = localResponse;
       } else if (context?.step && conversationSteps[context.step as ConversationStepId]?.quickReplies) {
-        response = "I didn't quite catch that — could you pick one of the options above, or tell me about your project?";
+        visibleContent = "I didn't quite catch that — could you pick one of the options above, or tell me about your project?";
       } else {
-        response = getFallbackResponse();
+        visibleContent = getFallbackResponse();
       }
 
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    const sanitized = sanitizeReply(response, lastUserMessage);
-    response = sanitized.reply;
+    const sanitized = sanitizeReply(visibleContent, lastUserMessage, { toolCallArguments: toolArguments ?? undefined });
+    const replyText = sanitized.reply;
     if (sanitized.overridden) {
       category = 'refusal';
     }
 
-    const rawDraft = sanitized.draft;
-    const draftUpdates = sanitizeDraftUpdates(rawDraft as Record<string, unknown>);
+    const draftUpdates = sanitizeDraftUpdates(sanitized.draft as Record<string, unknown>);
+    const priorDraft = parsePriorDraft(context?.draft);
+    const mergedDraft = { ...priorDraft, ...draftUpdates };
+    const briefReady = isBriefReadyForApproval(mergedDraft);
+    const missingFields = missingReviewFields(mergedDraft);
 
     if (sessionId) {
       void logLlmEvent(baseUrl, sessionId, category, Object.keys(draftUpdates).length > 0);
     }
 
     return jsonWithCors({
-      message: response,
-      draftUpdates
+      message: replyText,
+      draftUpdates,
+      briefReady,
+      reviewPrompt: briefReady ? REVIEW_PROMPT : null,
+      missingFields
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return jsonWithCors({ error: 'Chat service error', detail: message }, { status: 500 });
   }
-}
-
-const DRAFT_MARKER = ':::draft:::';
-const DRAFT_LINE_PATTERN = /:::draft:::\s*(?:<json>)?\s*(\{[\s\S]*?\})\s*(?:<\/json>)?\s*:::/i;
-
-function parseDraftObject(text: string): Record<string, unknown> {
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-function extractDraftCandidate(reply: string) {
-  const matched = reply.match(DRAFT_LINE_PATTERN);
-  if (matched) {
-    return matched[1];
-  }
-
-  const markerIndex = reply.indexOf(DRAFT_MARKER);
-  if (markerIndex < 0) {
-    return null;
-  }
-
-  const tail = reply.slice(markerIndex + DRAFT_MARKER.length).trim();
-  const withoutJsonTag = tail.replace(/^<json>\s*/i, '').replace(/\s*<\/json>\s*$/i, '').trim();
-
-  if (!withoutJsonTag.startsWith('{')) {
-    return null;
-  }
-
-  const closedTail = withoutJsonTag.endsWith('}') ? withoutJsonTag : `${withoutJsonTag}}`;
-  return closedTail;
-}
-
-function parseAssistantReply(reply: string): {
-  displayText: string;
-  draft: Record<string, unknown>;
-} {
-  let draft: Record<string, unknown> = {};
-
-  const candidate = extractDraftCandidate(reply);
-  if (candidate) {
-    const parsed = parseDraftObject(candidate);
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === 'string') {
-        draft[key] = value;
-      }
-    }
-  }
-
-  const markerIndex = reply.indexOf(DRAFT_MARKER);
-  const displayText = (markerIndex >= 0 ? reply.slice(0, markerIndex) : reply).trim();
-
-  return { displayText, draft };
 }
