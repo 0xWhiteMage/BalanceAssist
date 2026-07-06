@@ -8,14 +8,12 @@ import {
   BotAvatarSmall,
   FileRequestBanner,
   FileRequestInputHint,
-  ProjectBriefCard,
   HumanFooter,
   TeamTypingIndicator,
   UploadPolicyModal,
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
-import { BriefPanelTab } from '@/components/widget/brief-panel-tab';
-import { BriefReviewScreen } from '@/components/widget/brief-review-screen';
+import { ReviewPanel } from '@/components/widget/review-panel';
 import { AttachmentDropzone, type ReferenceFile, type ReferenceLink } from '@/components/widget/attachment-dropzone';
 import { brandTokens } from '@/lib/brand-tokens';
 import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from '@/lib/conversation/extract';
@@ -25,6 +23,7 @@ import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/con
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
 import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
+import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 
@@ -67,27 +66,6 @@ function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): s
   }
 
   return null;
-}
-
-function detectProjectIntent(text: string, draft: LeadDraft) {
-  const normalized = text.toLowerCase();
-  return Boolean(
-    draft.projectScope ||
-      draft.projectType ||
-      draft.service ||
-      draft.timelineBand ||
-      draft.budgetBand ||
-      /project|campaign|brief|animation|video|film|motion|production|edit|social media|brand/i.test(normalized)
-  );
-}
-
-function isBriefReadyForApproval(draft: LeadDraft) {
-  const hasCore = Boolean(draft.projectScope.trim());
-  const hasTypeOrService = Boolean((draft.projectType ?? '').trim() || draft.service);
-  const hasTimeline = Boolean(draft.timelineBand);
-  const hasBudget = Boolean(draft.budgetBand);
-  const hasContact = Boolean(draft.contactEmail.trim() || draft.contactName.trim());
-  return hasCore && hasTypeOrService && hasTimeline && hasBudget && hasContact;
 }
 
 function createAttachment(file: File) {
@@ -133,7 +111,6 @@ export function WidgetOverlay({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
   const [draft, setDraft] = useState<LeadDraft>(createDefaultLeadDraft());
-  const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -147,8 +124,7 @@ export function WidgetOverlay({
   const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
   const [humanScheduleRequestOpen, setHumanScheduleRequestOpen] = useState(false);
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
-  const [briefPanelOpen, setBriefPanelOpen] = useState(false);
-  const [briefPanelFirstReady, setBriefPanelFirstReady] = useState(false);
+  const [railMode, setRailMode] = useState<'essentials' | 'summary'>('essentials');
   const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [missingFields, setMissingFields] = useState<string[]>([]);
@@ -162,7 +138,6 @@ export function WidgetOverlay({
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollImmediateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const briefPanelFirstReadyRef = useRef<boolean>(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -307,6 +282,13 @@ export function WidgetOverlay({
       setView('calendly');
     }
   }, [isTeamConnected, humanScheduleRequestOpen, calendlyUrl, view]);
+
+  useEffect(() => {
+    if (isTeamConnected || briefApproved) return;
+    if (isBriefReadyForApproval(draft) && railMode === 'essentials') {
+      setRailMode('summary');
+    }
+  }, [draft, isTeamConnected, briefApproved, railMode]);
 
   useEffect(() => {
     return () => {
@@ -472,7 +454,6 @@ const startConversation = useCallback(async () => {
     messagesRef.current = [];
     setMessages([]);
     setDraft(createDefaultLeadDraft());
-    setHasProjectIntent(false);
     setBriefApproved(false);
     setCurrentStep('intro');
     setHasStarted(false);
@@ -481,13 +462,11 @@ const startConversation = useCallback(async () => {
     setHumanFileRequestOpen(false);
     setHumanFileRequestNote(null);
     setHumanScheduleRequestOpen(false);
-    setBriefPanelOpen(false);
-    setBriefPanelFirstReady(false);
+    setRailMode('essentials');
     setReferenceLinks([]);
     setReferenceFiles([]);
     setMissingFields([]);
     setAttachmentOpen(false);
-    briefPanelFirstReadyRef.current = false;
     setView('chat');
     setAllowAttachment(false);
     cancelRef.current = false;
@@ -553,18 +532,12 @@ const startConversation = useCallback(async () => {
           }
         }
         setDraft(merged);
-        setHasProjectIntent(detectProjectIntent(latestUserText, merged));
         setBriefApproved(false);
 
         const nextStep = getNextConversationStep(merged);
         if (nextStep !== stepRef.current) {
           setCurrentStep(nextStep);
         }
-      }
-
-      if (briefReady && !briefPanelFirstReadyRef.current) {
-        briefPanelFirstReadyRef.current = true;
-        setBriefPanelFirstReady(true);
       }
 
       await botSay(replyText);
@@ -632,7 +605,6 @@ const startConversation = useCallback(async () => {
     await finalizeLead(payload);
     setBriefApproved(true);
     setCurrentStep('handoff');
-    setBriefPanelOpen(true);
     await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
     await advanceStep('handoff', draftRef.current);
   }
@@ -654,12 +626,10 @@ const startConversation = useCallback(async () => {
     if (step.freeText || currentStep === 'intro') {
       updatedDraft = applyTextToDraft(value, draft, currentStep);
       setDraft(updatedDraft);
-      setHasProjectIntent(detectProjectIntent(value, updatedDraft));
       setBriefApproved(false);
     } else if (step.field) {
       updatedDraft = { ...draft, [step.field]: value };
       setDraft(updatedDraft);
-      setHasProjectIntent(detectProjectIntent(value, updatedDraft));
       setBriefApproved(false);
     }
 
@@ -755,7 +725,6 @@ const startConversation = useCallback(async () => {
       if (!isTeamConnected && memoryUpdatePattern.test(trimmed)) {
         const updatedDraft = applyTextToDraft(trimmed, draft, currentStep);
         setDraft(updatedDraft);
-        setHasProjectIntent(detectProjectIntent(trimmed, updatedDraft));
         setBriefApproved(false);
         appendUserMessage(trimmed);
         const lines = getDraftSummaryLines(updatedDraft);
@@ -969,7 +938,7 @@ const startConversation = useCallback(async () => {
             position: 'absolute',
             bottom: '72px',
             right: '0px',
-            width: !isTeamConnected && hasProjectIntent && briefPanelOpen ? 'min(760px, calc(100vw - 48px))' : 'min(380px, calc(100vw - 48px))',
+            width: !isTeamConnected ? 'min(820px, calc(100vw - 48px))' : 'min(380px, calc(100vw - 48px))',
             height: 'min(580px, calc(100vh - 120px))',
             display: 'flex',
             flexDirection: 'column',
@@ -1012,6 +981,30 @@ const startConversation = useCallback(async () => {
               position: 'relative'
             }}
           >
+            {!isTeamConnected && (
+              <div
+                data-testid="review-rail"
+                style={{
+                  width: 280,
+                  flexShrink: 0,
+                  borderRight: `1px solid ${brandTokens.colors.subtleBorder}`,
+                  overflowY: 'auto',
+                  background: 'rgba(16, 16, 16, 0.35)'
+                }}
+              >
+                <ReviewPanel
+                  draft={draft}
+                  approved={briefApproved}
+                  mode={railMode}
+                  onApprove={handleApproveBrief}
+                  onContinueRefining={() => {
+                    setBriefApproved(false);
+                    setRailMode('essentials');
+                  }}
+                />
+              </div>
+            )}
+
             <div
               style={{
                 flex: 1,
@@ -1059,18 +1052,6 @@ const startConversation = useCallback(async () => {
                 </div>
               )}
 
-              {!isTeamConnected && hasProjectIntent && (
-                <ProjectBriefCard
-                  draft={draft}
-                  showNudge
-                  title="Project Brief"
-                  readyForApproval={isBriefReadyForApproval(draft)}
-                  approved={briefApproved}
-                  onApprove={handleApproveBrief}
-                  onContinueRefining={() => setBriefApproved(false)}
-                />
-              )}
-
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} onQuickReply={handleSubmitQuickReply} onInlineCardClick={handleInlineCardClick} />
               ))}
@@ -1087,46 +1068,7 @@ const startConversation = useCallback(async () => {
               {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
 
               <div ref={messagesEndRef} />
-
-              {!isTeamConnected && (
-                <BriefPanelTab
-                  open={briefPanelOpen}
-                  pulse={briefPanelFirstReady}
-                  onToggle={() => setBriefPanelOpen((o) => !o)}
-                  onFirstReady={() => setBriefPanelFirstReady(false)}
-                />
-              )}
             </div>
-
-            {!isTeamConnected && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  right: 0,
-                  bottom: 0,
-                  width: 'min(380px, calc(100% - 28px))',
-                  transform: briefPanelOpen ? 'translateX(0)' : 'translateX(100%)',
-                  transition: 'transform 0.28s ease',
-                  background: brandTokens.gradients.panel,
-                  borderLeft: `1px solid ${brandTokens.colors.subtleBorder}`,
-                  boxShadow: briefPanelOpen ? '-12px 0 32px rgba(0,0,0,0.35)' : 'none',
-                  padding: '16px 14px',
-                  overflowY: 'auto',
-                  zIndex: 30,
-                  pointerEvents: briefPanelOpen ? 'auto' : 'none'
-                }}
-                aria-hidden={!briefPanelOpen}
-              >
-                <BriefReviewScreen
-                  draft={draft}
-                  referenceLinks={referenceLinks}
-                  referenceFiles={referenceFiles}
-                  onSend={handleApproveBrief}
-                  onRefine={() => setBriefPanelOpen(false)}
-                />
-              </div>
-            )}
           </div>
 
           {/* Input Bar */}
