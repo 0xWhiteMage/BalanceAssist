@@ -93,7 +93,8 @@ describe('POST /api/telegram/upload', () => {
 
     sendDocumentMock.mockResolvedValue({
       ok: true,
-      result: { document: { file_id: 'mock-telegram-file-id' } }
+      fileId: 'mock-telegram-file-id',
+      raw: { ok: true, result: { message_id: 1, document: { file_id: 'mock-telegram-file-id' } } }
     });
 
     const form = buildFakeFormData(
@@ -163,5 +164,59 @@ describe('POST /api/telegram/upload', () => {
 
     expect(res.status).toBe(415);
     expect(sendDocumentMock).not.toHaveBeenCalled();
+  });
+
+  test('returns 502 without inserting when sendDocument returns ok:false (no Supabase write)', async () => {
+    const { client, inserts } = buildMockSupabase();
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    sendDocumentMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      description: 'Telegram sendDocument HTTP 502'
+    });
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pdf', 12_345, 'application/pdf')]
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.ok).toBe(false);
+    expect(data.telegramStatus).toBe(502);
+
+    expect(sendDocumentMock).toHaveBeenCalledTimes(1);
+
+    const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
+    expect(fileInserts).toHaveLength(0);
+  });
+
+  test('coerces unexpected kind values to "reference"', async () => {
+    const { client, inserts } = buildMockSupabase();
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    sendDocumentMock.mockResolvedValue({
+      ok: true,
+      fileId: 'mock-telegram-file-id',
+      raw: { ok: true, result: { message_id: 1, document: { file_id: 'mock-telegram-file-id' } } }
+    });
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'something-unexpected' },
+      [makeFile('deck.pdf', 12_345, 'application/pdf')]
+    );
+
+    const res = await callUploadRoute(form);
+    expect(res.status).toBe(200);
+
+    const [, , caption] = sendDocumentMock.mock.calls[0];
+    expect(caption).toContain('(reference)');
+
+    const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
+    expect(fileInserts).toHaveLength(1);
+    expect(fileInserts[0].row.kind).toBe('reference');
   });
 });

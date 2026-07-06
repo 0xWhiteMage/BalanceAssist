@@ -5,18 +5,30 @@ import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-po
 
 type SupabaseClient = NonNullable<ReturnType<typeof createServerSupabaseClient>>;
 
+const ALLOWED_KINDS = ['reference', 'brief', 'deliverable'] as const;
+type AllowedKind = (typeof ALLOWED_KINDS)[number];
+const MAX_KIND_LENGTH = 32;
+
+function coerceKind(raw: unknown): AllowedKind {
+  const value = typeof raw === 'string' ? raw.trim().slice(0, MAX_KIND_LENGTH) : '';
+  return (ALLOWED_KINDS as readonly string[]).includes(value) ? (value as AllowedKind) : 'reference';
+}
+
 export async function OPTIONS() {
   return corsOptionsResponse();
 }
 
 export async function POST(request: Request) {
-  const form = await request.formData().catch(() => null);
-  if (!form) {
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch (error) {
+    console.warn('[telegram-upload] failed to parse form data', error);
     return jsonWithCors({ ok: false, error: 'Invalid form data' }, { status: 400 });
   }
 
   const sessionId = String(form.get('sessionId') ?? '').trim();
-  const kind = String(form.get('kind') ?? 'reference').trim() || 'reference';
+  const kind = coerceKind(form.get('kind'));
   const files = form
     .getAll('files')
     .concat(form.getAll('file'))
@@ -68,12 +80,30 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const caption = `${file.name} (${kind})`;
     const result = await sendDocument(session.telegram_thread_id ?? null, buffer, caption, file.name);
-    const telegramFileId = result?.result?.document?.file_id ?? null;
-    lastTelegramFileId = telegramFileId;
+
+    if (!result.ok) {
+      return jsonWithCors(
+        {
+          ok: false,
+          error: result.description ?? 'Failed to forward file to Telegram',
+          telegramStatus: result.status
+        },
+        { status: 502 }
+      );
+    }
+
+    if (result.fileId === null) {
+      return jsonWithCors(
+        { ok: false, error: 'Telegram accepted the upload but did not return a file_id' },
+        { status: 502 }
+      );
+    }
+
+    lastTelegramFileId = result.fileId;
 
     const { error: insertError } = await supabase.from('uploaded_files').insert({
       session_id: sessionId,
-      telegram_file_id: telegramFileId,
+      telegram_file_id: result.fileId,
       name: file.name,
       size_bytes: file.size,
       mime: file.type || null,
@@ -87,10 +117,14 @@ export async function POST(request: Request) {
     uploadedCount += 1;
   }
 
-  await supabase
+  const { error: closeError } = await supabase
     .from('sessions')
     .update({ file_request_open: false, file_request_note: null })
     .eq('id', sessionId);
+
+  if (closeError) {
+    console.warn('[telegram-upload] failed to reset file_request_open', closeError);
+  }
 
   return jsonWithCors({
     ok: true,

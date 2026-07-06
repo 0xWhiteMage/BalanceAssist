@@ -131,22 +131,25 @@ export type SendDocumentResponse = {
   description?: string;
 };
 
+export type SendDocumentResult =
+  | { ok: true; fileId: string | null; raw: SendDocumentResponse }
+  | { ok: false; status?: number; description?: string };
+
 export async function sendDocument(
   threadId: number | null | undefined,
   buffer: Buffer,
   caption: string,
   filename: string
-): Promise<SendDocumentResponse | null> {
+): Promise<SendDocumentResult> {
   const config = getTelegramConfig();
 
   if (!config) {
-    return null;
+    return { ok: false, description: 'Telegram bot token or chat id is not configured' };
   }
 
   const form = new FormData();
   form.set('chat_id', config.chatId);
-  const blob = new Blob([new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)]);
-  form.set('document', blob, filename);
+  form.set('document', new Blob([buffer], { type: 'application/octet-stream' }), filename);
   form.set('caption', caption);
   form.set('parse_mode', 'HTML');
 
@@ -154,17 +157,35 @@ export async function sendDocument(
     form.set('message_thread_id', String(threadId));
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
-    method: 'POST',
-    body: form
-  });
-
-  if (!response.ok) {
-    return null;
+  let response: Response;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
+      method: 'POST',
+      body: form
+    });
+  } catch (error) {
+    const description = error instanceof Error ? error.message : 'Network error contacting Telegram';
+    return { ok: false, description };
   }
 
-  const data = (await response.json()) as SendDocumentResponse;
-  return data;
+  if (!response.ok) {
+    return { ok: false, status: response.status, description: `Telegram sendDocument HTTP ${response.status}` };
+  }
+
+  let data: SendDocumentResponse;
+  try {
+    data = (await response.json()) as SendDocumentResponse;
+  } catch (error) {
+    const description = error instanceof Error ? error.message : 'Failed to parse Telegram response';
+    return { ok: false, description };
+  }
+
+  if (!data.ok) {
+    return { ok: false, description: data.description ?? 'Telegram reported an error' };
+  }
+
+  const fileId = data.result?.document?.file_id ?? null;
+  return { ok: true, fileId, raw: data };
 }
 
 export async function createForumTopic(
