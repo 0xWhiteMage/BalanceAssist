@@ -291,6 +291,30 @@ export function WidgetOverlay({
   }, [draft, isTeamConnected, briefApproved, railMode]);
 
   useEffect(() => {
+    if (!attachmentOpen) return undefined;
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-testid="attachment-popover"]')) return;
+      if (target.closest('button[aria-label="Attach references"]')) return;
+      setAttachmentOpen(false);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [attachmentOpen]);
+
+  useEffect(() => {
+    if (!attachmentOpen) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setAttachmentOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [attachmentOpen]);
+
+  useEffect(() => {
     return () => {
       cleanupAttachmentPreviews(messagesRef.current);
     };
@@ -1137,6 +1161,7 @@ const startConversation = useCallback(async () => {
                 </button>
                 {attachmentOpen && (
                   <div
+                    data-testid="attachment-popover"
                     style={{
                       position: 'absolute',
                       left: 12,
@@ -1147,7 +1172,7 @@ const startConversation = useCallback(async () => {
                       border: `1px solid ${brandTokens.colors.border}`,
                       background: brandTokens.gradients.panel,
                       boxShadow: '0 -10px 30px rgba(0,0,0,0.45)',
-                      zIndex: 25
+                      zIndex: 100
                     }}
                   >
                     <AttachmentDropzone
