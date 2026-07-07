@@ -219,7 +219,7 @@ export function WorkCardRow({
     if (max <= 0) return;
     const nearest = Math.max(0, Math.min(max, Math.round(row.scrollLeft / clientWidth) * clientWidth));
     if (Math.abs(nearest - row.scrollLeft) < 1) return;
-    row.scrollTo({ left: nearest, behavior: 'smooth' });
+    row.scrollTo({ left: nearest, behavior: 'auto' });
   }
 
   function handleMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
@@ -351,7 +351,7 @@ export function WorkCardRow({
         overflowY: 'hidden',
         padding: '12px 0',
         scrollbarWidth: 'thin',
-        scrollSnapType: 'x mandatory',
+        scrollSnapType: 'x proximity',
         WebkitOverflowScrolling: 'touch',
         cursor: isDragging ? 'grabbing' : 'grab',
         userSelect: isDragging ? 'none' : 'auto',

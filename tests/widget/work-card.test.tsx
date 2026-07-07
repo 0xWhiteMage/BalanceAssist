@@ -111,7 +111,8 @@ describe('WorkCardRow', () => {
       />
     );
     const row = screen.getByTestId('work-card-row');
-    expect(row.style.scrollSnapType).toBe('x mandatory');
+    expect(row.style.scrollSnapType).not.toBe('x mandatory');
+    expect(row.style.scrollSnapType === '' || row.style.scrollSnapType === 'x proximity').toBe(true);
     const cards = screen.getAllByTestId('work-card');
     for (const card of cards) {
       expect(card.style.scrollSnapAlign).toBe('start');
@@ -330,7 +331,7 @@ describe('WorkCardRow drag-to-scroll', () => {
     preventDefaultSpy.mockRestore();
   });
 
-  test('after a drag ends, scrollLeft is snapped to a multiple of clientWidth', () => {
+  test('after a drag ends, scrollLeft is snapped to a multiple of clientWidth with instant (auto) behavior', () => {
     render(
       <WorkCardRow
         entries={[
@@ -352,7 +353,7 @@ describe('WorkCardRow drag-to-scroll', () => {
         scrollLeft = v;
       }
     });
-    const scrollToSpy = vi.fn(function scrollTo(this: HTMLDivElement, opts: { left: number; behavior: string }) {
+    const scrollToSpy = vi.fn(function scrollTo(this: HTMLDivElement, opts: { left: number; behavior?: ScrollBehavior }) {
       this.scrollLeft = opts.left;
     });
     Object.defineProperty(row, 'scrollTo', {
@@ -366,9 +367,11 @@ describe('WorkCardRow drag-to-scroll', () => {
     fireEvent.mouseUp(document);
 
     expect(scrollToSpy).toHaveBeenCalled();
-    const callArgs = scrollToSpy.mock.calls[0]?.[0] as { left: number } | undefined;
+    const callArgs = scrollToSpy.mock.calls[0]?.[0] as { left: number; behavior?: string } | undefined;
     expect(callArgs).toBeDefined();
     expect(callArgs!.left % clientWidth).toBe(0);
+    expect(callArgs!.behavior).toBe('auto');
+    expect(callArgs!.behavior).not.toBe('smooth');
   });
 
   test('row does NOT render any dot indicators (replaced with swipe hint)', () => {
@@ -454,5 +457,64 @@ describe('WorkCardRow drag-to-scroll', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('work-card-row-swipe-hint')).toBeNull();
     });
+  });
+});
+
+describe('WorkCardRow magnetic snap is instant (no smooth scroll, no mandatory snap)', () => {
+  test('row uses scroll-snap-type: x proximity (NOT mandatory) so drag-only motion stays predictable', () => {
+    const { container } = render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' }
+        ]}
+      />
+    );
+    const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
+    expect(row.style.scrollSnapType).not.toBe('x mandatory');
+    expect(['x proximity', ''].includes(row.style.scrollSnapType)).toBe(true);
+  });
+
+  test('drag + release triggers scrollTo with behavior: "auto" (instant magnetic snap, no smooth scroll)', () => {
+    const { container } = render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' },
+          { entry: { ...baseEntry, slug: 'f1', title: 'F1', url: 'https://www.balancestudio.tv/f1' }, category: 'pitch' }
+        ]}
+      />
+    );
+    const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
+    const clientWidth = 320;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => clientWidth });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => clientWidth * 3 });
+    let scrollLeft = 175;
+    Object.defineProperty(row, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (v: number) => {
+        scrollLeft = v;
+      }
+    });
+    const scrollToSpy = vi.fn(function scrollTo(this: HTMLDivElement, opts: { left: number; behavior?: string }) {
+      this.scrollLeft = opts.left;
+    });
+    Object.defineProperty(row, 'scrollTo', {
+      configurable: true,
+      writable: true,
+      value: scrollToSpy
+    });
+
+    fireEvent.mouseDown(row, { clientX: 220, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 90 });
+    fireEvent.mouseUp(document);
+
+    expect(scrollToSpy).toHaveBeenCalled();
+    const callArgs = scrollToSpy.mock.calls[0]?.[0] as { left: number; behavior?: string } | undefined;
+    expect(callArgs).toBeDefined();
+    expect(callArgs!.behavior).toBe('auto');
+    expect(callArgs!.behavior).not.toBe('smooth');
+    expect(callArgs!.left).toBe(Math.round(scrollLeft / clientWidth) * clientWidth);
   });
 });
