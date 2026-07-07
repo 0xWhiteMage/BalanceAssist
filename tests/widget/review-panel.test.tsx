@@ -12,6 +12,7 @@ const readyDraft = {
   timelineBand: '1-2-months' as const,
   budgetBand: '20k-50k' as const,
   contactName: 'Jayden',
+  contactCompany: 'Samsung',
   contactEmail: 'jayden@example.com'
 };
 
@@ -26,7 +27,7 @@ describe('ReviewPanel', () => {
         onContinueRefining={() => {}}
       />
     );
-    expect(screen.getByText(/3 of 8 captured/i)).toBeInTheDocument();
+    expect(screen.getByText(/0 of 8 captured/i)).toBeInTheDocument();
     expect(screen.getByText(/Project Brief/i)).toBeInTheDocument();
   });
 

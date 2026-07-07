@@ -110,8 +110,25 @@ export function ReviewPanel({
   onContinueRefining: () => void;
 }) {
   const ready = isBriefReadyForApproval(draft);
-  const missing = missingReviewFields(draft);
-  const completed = TOTAL_FIELDS - missing.length;
+
+  // Progress must match the 8 visible rows on the brief card. Mirroring the exact substitution ProjectBriefCard applies.
+  const projectScopeFilled = (draft.scopePolished ?? draft.projectScope ?? '').trim().length > 0;
+  const projectTypeFilled = (draft.projectType ?? '').trim().length > 0;
+  const serviceFilled = Boolean(draft.service);
+  const timelineFilled = Boolean(draft.timelineBand);
+  const budgetFilled = Boolean(draft.budgetBand);
+  const contactNameFilled = draft.contactName.trim().length > 0;
+  const companyFilled = (draft.contactCompany ?? '').trim().length > 0;
+  const contactEmailFilled = draft.contactEmail.trim().length > 0;
+  const completed =
+    (projectScopeFilled ? 1 : 0) +
+    (projectTypeFilled ? 1 : 0) +
+    (serviceFilled ? 1 : 0) +
+    (timelineFilled ? 1 : 0) +
+    (budgetFilled ? 1 : 0) +
+    (contactNameFilled ? 1 : 0) +
+    (companyFilled ? 1 : 0) +
+    (contactEmailFilled ? 1 : 0);
 
   return (
     <div
@@ -119,7 +136,7 @@ export function ReviewPanel({
       data-testid="review-panel"
       data-mode={mode}
     >
-      <ProgressStrip completed={completed} total={TOTAL_FIELDS} />
+      <ProgressStrip completed={completed} total={TOTAL_FIELDS} data-completed={String(completed)} />
 
       <ProjectBriefCard
         draft={draft}
