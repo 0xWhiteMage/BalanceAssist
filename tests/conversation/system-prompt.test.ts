@@ -68,9 +68,15 @@ test('system prompt explicitly handles "ok / go on" replies while in brief-build
   expect(prompt).toMatch(/human team is a fallback/i);
 });
 
-test('system prompt does not contain the bad fallback phrase "I\'m not sure about that"', () => {
+test('system prompt does not contain the bad fallback phrase "I\'m not sure about that" as a positive example (only as a forbidden phrase)', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).not.toContain("I'm not sure about that");
+  expect(prompt).toContain("I'm not sure about that");
+  expect(prompt).toMatch(/do NOT say.*I'm not sure about that/i);
+  expect(prompt).toMatch(/Forbidden phrases.*I'm not sure about that/i);
+  const idx = prompt.indexOf("I'm not sure about that");
+  const window = prompt.slice(Math.max(0, idx - 120), idx + 200);
+  expect(window).toMatch(/do NOT say/i);
+  expect(window).toMatch(/cop-out/i);
 });
 
 test('system prompt suppresses the follow-up question when the brief is already reviewable', () => {
@@ -199,4 +205,24 @@ test('system prompt does not draft documents for the user', () => {
 test('system prompt routes job-application answers to Balance\'s own channels', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/submitted through Balance/i);
+});
+
+test('system prompt contains a LOW-INFORMATION REPLIES block that forbids "I\'m not sure about that" and similar filler', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/LOW-INFORMATION REPLIES/i);
+  expect(prompt).toMatch(/low-information/i);
+  expect(prompt).toMatch(/Do NOT re-interpret them as new answers/i);
+  expect(prompt).toMatch(/Forbidden phrases/i);
+  expect(prompt).toMatch(/I'm not sure about that/);
+  expect(prompt).toMatch(/Let me recalibrate/);
+  expect(prompt).toMatch(/My apologies/);
+  expect(prompt).not.toMatch(/say\s+"My apologies"\s+to express care/i);
+});
+
+test('system prompt does not use "My apologies" as a positive example', () => {
+  const prompt = buildSystemPrompt();
+  const matches = prompt.match(/My apologies/g) ?? [];
+  expect(matches.length).toBeGreaterThan(0);
+  const forbiddenContext = /Forbidden phrases[\s\S]*My apologies/i.test(prompt);
+  expect(forbiddenContext).toBe(true);
 });

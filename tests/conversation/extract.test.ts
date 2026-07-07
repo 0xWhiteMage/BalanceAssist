@@ -101,3 +101,28 @@ test('DOES capture projectScope for an in-scope "30s 3D animation" intro message
 
   expect(draft.projectScope).toContain('30s 3D animation');
 });
+
+test('contact-email step does NOT capture "yes" as the email (low-info reply guard)', () => {
+  const draft = applyTextToDraft('yes', createDefaultLeadDraft(), 'contact-email');
+  expect(draft.contactEmail).toBe('');
+});
+
+test('contact-email step does NOT capture "ok" as the email (low-info reply guard)', () => {
+  const draft = applyTextToDraft('ok', createDefaultLeadDraft(), 'contact-email');
+  expect(draft.contactEmail).toBe('');
+});
+
+test('contact-email step DOES capture a well-formed email address', () => {
+  const draft = applyTextToDraft('user@example.com', createDefaultLeadDraft(), 'contact-email');
+  expect(draft.contactEmail).toBe('user@example.com');
+});
+
+test('intro step does NOT capture "Looking" as a contact name from "I\'m looking to inquire for a project"', () => {
+  const draft = applyTextToDraft("I'm looking to inquire for a project", createDefaultLeadDraft(), 'intro');
+  expect(draft.contactName).toBe('');
+});
+
+test('intro step does NOT capture "Interested" as a contact name from "I am interested in a project"', () => {
+  const draft = applyTextToDraft('I am interested in a project', createDefaultLeadDraft(), 'intro');
+  expect(draft.contactName).toBe('');
+});

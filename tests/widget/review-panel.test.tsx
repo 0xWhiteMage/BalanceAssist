@@ -154,7 +154,7 @@ describe('ReviewPanel', () => {
     expect(screen.getByTestId('review-panel').getAttribute('data-mode')).toBe('summary');
   });
 
-  test('summary mode renders the Approve button with the pulse-glow animation when ready and not approved', () => {
+  test('summary mode renders the Approve button with a static warmGold gradient and no pulse animation', () => {
     render(
       <ReviewPanel
         draft={readyDraft}
@@ -165,8 +165,10 @@ describe('ReviewPanel', () => {
       />
     );
     const approveButton = screen.getByRole('button', { name: /approve & send to team/i });
-    expect(approveButton.getAttribute('data-pulse')).toBe('true');
-    expect(approveButton.style.animation).toMatch(/approve-pulse/i);
+    expect(approveButton.getAttribute('data-pulse')).toBeNull();
+    expect(approveButton.style.animation === '' || approveButton.style.animation === 'none').toBe(true);
+    expect(approveButton.style.background).toMatch(/linear-gradient/);
+    expect(approveButton.style.animation).not.toMatch(/approve-pulse/i);
   });
 
   test('summary mode replaces the Approve button with a green confirmation pill when approved', () => {
@@ -197,5 +199,22 @@ describe('ReviewPanel', () => {
     );
     const approveButton = screen.queryByRole('button', { name: /approve & send to team/i });
     expect(approveButton).not.toBeInTheDocument();
+  });
+
+  test('Approve button background is a static warmGold linear gradient (no animation property)', () => {
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={false}
+        mode="summary"
+        onApprove={() => {}}
+        onContinueRefining={() => {}}
+      />
+    );
+    const approveButton = screen.getByRole('button', { name: /approve & send to team/i }) as HTMLButtonElement;
+    expect(approveButton.style.background).toMatch(/linear-gradient/);
+    expect(approveButton.style.background).toMatch(/#dbb580|#ffd293/i);
+    expect(approveButton.style.animation === '' || approveButton.style.animation === 'none').toBe(true);
+    expect(approveButton.getAttribute('style') ?? '').not.toMatch(/animation\s*:\s*[^n]/i);
   });
 });
