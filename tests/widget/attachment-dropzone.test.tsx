@@ -25,6 +25,50 @@ test('classifies a pasted YouTube URL and adds a chip', async () => {
   await waitFor(() => expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ kind: 'youtube' })));
 });
 
+test('surfaces the server error message when /api/attachments/link returns a structured error', async () => {
+  const onAdd = vi.fn();
+  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/api/attachments/link')) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid request payload', issues: [] }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response('{}', { status: 404 });
+  }) as unknown as typeof fetch;
+
+  render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
+  const input = screen.getByPlaceholderText(/paste a reference link/i);
+  fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
+  fireEvent.submit(input.closest('form')!);
+
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(/Invalid request payload/i);
+  });
+  expect(onAdd).not.toHaveBeenCalled();
+});
+
+test('falls back to a generic message when the error response is not JSON', async () => {
+  const onAdd = vi.fn();
+  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/api/attachments/link')) {
+      return new Response('not-json', { status: 500 });
+    }
+    return new Response('{}', { status: 404 });
+  }) as unknown as typeof fetch;
+
+  render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
+  const input = screen.getByPlaceholderText(/paste a reference link/i);
+  fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
+  fireEvent.submit(input.closest('form')!);
+
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(/Failed to add link/i);
+  });
+});
+
 test('renders the uppercase section header and short subhead describing the upload affordance', () => {
   render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
   expect(

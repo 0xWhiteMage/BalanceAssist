@@ -421,7 +421,6 @@ export function ProjectBriefCard({
   const completed = rows.filter(([, value]) => value.trim().length > 0).length;
 
   const labelFontSize = compact ? 9 : 10;
-  const subheadFontSize = compact ? 11 : 12;
   const bodyFontSize = compact ? 11 : 12;
   const nudgeFontSize = compact ? 10 : 11;
 
@@ -442,9 +441,6 @@ export function ProjectBriefCard({
         <div>
           <div style={{ fontSize: labelFontSize, fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
             {title ?? 'Project Brief'}
-          </div>
-          <div style={{ marginTop: '3px', fontSize: subheadFontSize, color: brandTokens.colors.mutedText }}>
-            {completed} of {rows.length} key fields captured
           </div>
         </div>
       </div>

@@ -82,6 +82,12 @@ test.describe('balance assist intake via persistent rail', () => {
     const input = page.getByPlaceholder(/Type your message|Message the team/i);
     await expect(input).toBeVisible();
 
+    // The intro step plays three scripted bot messages before the user
+    // can submit. handleSubmitText returns early while isTyping is true,
+    // so wait for the final intro prompt to be visible (i.e. isTyping
+    // is back to false) before driving the user input.
+    await expect(page.getByText(/Tell me about your project, or ask me anything/i)).toBeVisible();
+
     // The rail is gated on hasProjectIntent. Before the user has sent
     // any intake-bearing message, the rail must NOT be in the DOM.
     const rail = page.getByTestId('review-rail');
@@ -93,8 +99,10 @@ test.describe('balance assist intake via persistent rail', () => {
     await input.fill('30s animation for social media');
     await input.press('Enter');
 
-    // The bot reply from the mocked /api/chat should appear in the chat.
-    await expect(page.getByText(/Your brief is ready/i)).toBeVisible();
+    // The bot reply from the mocked /api/chat should appear in the chat
+    // within 5 seconds. The widget now guarantees a fallback bot reply even
+    // if the LLM call fails, so this should never time out silently.
+    await expect(page.getByText(/Your brief is ready/i)).toBeVisible({ timeout: 5000 });
 
     // Once the AI merges the draftUpdates from /api/chat,
     // hasProjectIntent flips to true and the persistent left rail

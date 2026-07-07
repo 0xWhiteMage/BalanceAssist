@@ -37,6 +37,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export const WIDGET_WIDTH_CHAT_ONLY = 'min(380px, calc(100vw - 48px))';
+export const WIDGET_WIDTH_WITH_RAIL = 'min(820px, calc(100vw - 48px))';
+
+export function getWidgetWidth({
+  isTeamConnected,
+  hasProjectIntent
+}: {
+  isTeamConnected: boolean;
+  hasProjectIntent: boolean;
+}): string {
+  if (isTeamConnected || !hasProjectIntent) return WIDGET_WIDTH_CHAT_ONLY;
+  return WIDGET_WIDTH_WITH_RAIL;
+}
+
 function resolveBotTexts(stepId: ConversationStepId, draft: LeadDraft): string[] {
   const step = conversationSteps[stepId];
   const raw = step.botMessages;
@@ -582,12 +596,16 @@ const startConversation = useCallback(async () => {
 
       await botSay(replyText);
     } catch {
-      const localFallback = getLocalResponse(latestUserText, {
-        draft: draftRef.current,
-        step: stepRef.current,
-        isTeamConnected: teamRef.current
-      });
-      await botSay(localFallback ?? getFallbackResponse());
+      try {
+        const localFallback = getLocalResponse(latestUserText, {
+          draft: draftRef.current,
+          step: stepRef.current,
+          isTeamConnected: teamRef.current
+        });
+        await botSay(localFallback ?? getFallbackResponse());
+      } catch {
+        await botSay(getFallbackResponse());
+      }
     }
   }
 
@@ -859,9 +877,15 @@ const startConversation = useCallback(async () => {
         return;
       }
 
+      await ensureSession();
       appendUserMessage(trimmed);
-      await handleLLMResponse(messagesRef.current);
+      try {
+        await handleLLMResponse(messagesRef.current);
+      } catch {
+        await botSay(getFallbackResponse());
+      }
     } finally {
+      setIsTyping(false);
       submitInFlightRef.current = false;
     }
   }
@@ -980,7 +1004,7 @@ const startConversation = useCallback(async () => {
             position: 'absolute',
             bottom: '72px',
             right: '0px',
-            width: !isTeamConnected ? 'min(820px, calc(100vw - 48px))' : 'min(380px, calc(100vw - 48px))',
+            width: getWidgetWidth({ isTeamConnected, hasProjectIntent }),
             height: 'min(580px, calc(100vh - 120px))',
             display: 'flex',
             flexDirection: 'column',
