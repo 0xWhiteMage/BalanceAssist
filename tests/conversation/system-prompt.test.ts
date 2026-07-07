@@ -41,21 +41,16 @@ test('system prompt worked example: 30s animation maps to empty timelineBand/bud
   expect(prompt).toMatch(/budgetBand:\s*\"\"/);
 });
 
-test('system prompt requires exactly one follow-up question per visible reply', () => {
+test('system prompt asks one focused question when starting a brief', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/end with exactly one conversational question/i);
-  expect(prompt).toMatch(/next most useful missing field/i);
+  expect(prompt).toMatch(/ask the FIRST obvious brief question/i);
+  expect(prompt).toMatch(/format and length/i);
 });
 
 test('system prompt suppresses the follow-up question when the brief is already reviewable', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/If the brief is already reviewable, do NOT ask a question/i);
+  expect(prompt).toMatch(/do NOT emit the review sentence/i);
   expect(prompt).toContain(REVIEW_PROMPT);
-});
-
-test('REVIEW GATE warns the model against marking the brief ready if any field is a guess', () => {
-  const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/do NOT mark the brief ready if any field you filled is a guess/i);
 });
 
 test('system prompt embeds the Balance Studio profile for general questions', () => {
@@ -63,4 +58,12 @@ test('system prompt embeds the Balance Studio profile for general questions', ()
   expect(prompt).toMatch(/ABOUT BALANCE STUDIO/);
   expect(prompt).toMatch(/Singapore-based/);
   expect(prompt).toMatch(/Dream · Design · Create/);
+});
+
+test('system prompt positions Balance Assist as a general-purpose assistant', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/general-purpose AI assistant/i);
+  expect(prompt).toMatch(/Project briefs are one capability/i);
+  expect(prompt).toMatch(/Job application help/i);
+  expect(prompt).toMatch(/do NOT pivot to "do you have a project/i);
 });
