@@ -63,9 +63,8 @@ test('system prompt embeds the Balance Studio profile for general questions', ()
 test('system prompt positions Balance Assist as a focused, scoped AI for Balance Studio', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/focused AI for Balance Studio/i);
-  expect(prompt).toMatch(/Project briefs/i);
-  expect(prompt).toMatch(/Document drafting for Balance/i);
-  expect(prompt).not.toMatch(/Job application help/i);
+  expect(prompt).toMatch(/Project brief/i);
+  expect(prompt).toMatch(/Job application to Balance/i);
 });
 
 test('system prompt instructs substantive answers for general questions', () => {
@@ -144,4 +143,25 @@ test('system prompt deflects out-of-scope requests with a friendly acknowledgeme
   expect(prompt).toMatch(/OUT OF SCOPE/i);
   expect(prompt).toMatch(/homework.*math.*medical/i);
   expect(prompt).toMatch(/outside what you're set up to help with/i);
+});
+
+test('system prompt scopes the AI to project brief + job application + general questions only', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toContain('Project brief');
+  expect(prompt).toContain('Job application');
+  expect(prompt).toContain('General questions about Balance');
+  expect(prompt).not.toContain('Document drafting');
+  expect(prompt).not.toMatch(/post-event writeups/);
+  expect(prompt).not.toMatch(/proposals, briefs, scripts/);
+});
+
+test('system prompt does not draft documents for the user', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/do not draft documents/i);
+  expect(prompt).toMatch(/OUT OF SCOPE/i);
+});
+
+test('system prompt routes job-application answers to Balance\'s own channels', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/submitted through Balance/i);
 });
