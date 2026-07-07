@@ -44,18 +44,39 @@ describe('ReviewPanel', () => {
     expect(screen.getByText(/8 of 8 captured/i)).toBeInTheDocument();
   });
 
-  test('essentials mode does not render Approve CTA', () => {
+  test('essentials mode renders a disabled "Send to team" CTA when the draft is not ready', () => {
     render(
       <ReviewPanel
-        draft={readyDraft}
+        draft={createDefaultLeadDraft()}
         approved={false}
         mode="essentials"
         onApprove={() => {}}
         onContinueRefining={() => {}}
       />
     );
-    expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /continue refining/i })).not.toBeInTheDocument();
+    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
+    expect(approveButton).toBeInTheDocument();
+    expect(approveButton.disabled).toBe(true);
+    expect(approveButton.textContent).toMatch(/send to team/i);
+    expect(screen.getByTestId('approve-disabled-hint')).toBeInTheDocument();
+  });
+
+  test('essentials mode renders a disabled "Send to team" CTA when even a fully ready brief should still show the disabled sub-line', () => {
+    const onApprove = vi.fn();
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={false}
+        mode="essentials"
+        onApprove={onApprove}
+        onContinueRefining={() => {}}
+      />
+    );
+    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
+    expect(approveButton).toBeInTheDocument();
+    expect(approveButton.disabled).toBe(false);
+    expect(approveButton.textContent).toMatch(/send to team/i);
+    expect(screen.queryByTestId('approve-disabled-hint')).not.toBeInTheDocument();
   });
 
   test('summary mode renders Approve CTA + Continue refining when ready and not approved', () => {
@@ -118,17 +139,22 @@ describe('ReviewPanel', () => {
     expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
   });
 
-  test('summary mode does NOT render Approve CTA when draft is not ready', () => {
+  test('summary mode renders a disabled "Approve & send to team" CTA when the draft is not ready', () => {
+    const onApprove = vi.fn();
     render(
       <ReviewPanel
         draft={createDefaultLeadDraft()}
         approved={false}
         mode="summary"
-        onApprove={() => {}}
+        onApprove={onApprove}
         onContinueRefining={() => {}}
       />
     );
-    expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
+    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
+    expect(approveButton).toBeInTheDocument();
+    expect(approveButton.textContent).toMatch(/approve.*send to team/i);
+    expect(approveButton.disabled).toBe(true);
+    expect(screen.getByTestId('approve-disabled-hint')).toBeInTheDocument();
   });
 
   test('exposes mode via data-mode attribute', () => {
@@ -187,7 +213,7 @@ describe('ReviewPanel', () => {
     expect(confirmation.textContent).toMatch(/Balance team has been notified/i);
   });
 
-  test('essentials mode never shows the Approve pulse even when the brief is ready', () => {
+  test('essentials mode always renders the Approve button, even when the brief is ready', () => {
     render(
       <ReviewPanel
         draft={readyDraft}
@@ -197,8 +223,40 @@ describe('ReviewPanel', () => {
         onContinueRefining={() => {}}
       />
     );
-    const approveButton = screen.queryByRole('button', { name: /approve & send to team/i });
-    expect(approveButton).not.toBeInTheDocument();
+    const approveButton = screen.getByTestId('approve-button');
+    expect(approveButton).toBeInTheDocument();
+    expect(approveButton.textContent).toMatch(/send to team/i);
+    expect((approveButton as HTMLButtonElement).disabled).toBe(false);
+    expect(approveButton.getAttribute('style') ?? '').not.toMatch(/animation\s*:\s*[^n]/i);
+  });
+
+  test('disabled Send-to-team button has aria-label explaining why it is disabled', () => {
+    render(
+      <ReviewPanel
+        draft={createDefaultLeadDraft()}
+        approved={false}
+        mode="essentials"
+        onApprove={() => {}}
+        onContinueRefining={() => {}}
+      />
+    );
+    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
+    expect(approveButton.getAttribute('aria-label')).toBe('Fill the missing fields to send to the team');
+  });
+
+  test('enabled Send-to-team button is reachable under the accessible name "Send to team"', () => {
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={false}
+        mode="essentials"
+        onApprove={() => {}}
+        onContinueRefining={() => {}}
+      />
+    );
+    expect(
+      screen.getByRole('button', { name: /send to team/i }) as HTMLButtonElement
+    ).toBeInTheDocument();
   });
 
   test('Approve button background is a static warmGold linear gradient (no animation property)', () => {

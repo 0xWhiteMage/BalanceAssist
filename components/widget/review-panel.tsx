@@ -49,30 +49,6 @@ function ProgressStrip({ completed, total }: { completed: number; total: number 
   );
 }
 
-function PrimaryButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        width: '100%',
-        padding: '10px 12px',
-        borderRadius: '8px',
-        border: 'none',
-        background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-        color: brandTokens.colors.baseBlack,
-        fontSize: 11,
-        fontWeight: 700,
-        cursor: 'pointer',
-        textTransform: 'uppercase',
-        letterSpacing: '0.12em'
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
 function SecondaryButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -122,12 +98,12 @@ export function ReviewPanel({
   }, [approved]);
 
   function handleApproveClick() {
-    if (approved || isApproveInFlight) return;
+    if (approved || isApproveInFlight || !ready) return;
     setIsApproveInFlight(true);
     onApprove();
   }
 
-  const approveDisabled = approved || isApproveInFlight;
+  const approveDisabled = !ready || approved || isApproveInFlight;
 
   // Progress must match the 8 visible rows on the brief card. Mirroring the exact substitution ProjectBriefCard applies.
   const projectScopeFilled = (draft.scopePolished ?? draft.projectScope ?? '').trim().length > 0;
@@ -148,6 +124,16 @@ export function ReviewPanel({
     (companyFilled ? 1 : 0) +
     (contactEmailFilled ? 1 : 0);
 
+  const missing = missingReviewFields(draft);
+
+  const approveButtonLabel = approved
+    ? 'Approved'
+    : isApproveInFlight
+      ? 'Sending…'
+      : mode === 'summary'
+        ? 'Approve & send to team'
+        : 'Send to team';
+
   return (
     <div
       style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 14 }}
@@ -166,15 +152,18 @@ export function ReviewPanel({
         onChange={onChange}
       />
 
-{mode === 'summary' && ready && !approved && (
-        <div style={{ display: 'grid', gap: 8 }}>
+      {!approved && (
+        <div style={{ display: 'grid', gap: 6 }}>
           <button
             type="button"
             data-testid="approve-button"
             onClick={handleApproveClick}
             disabled={approveDisabled}
             data-in-flight={isApproveInFlight ? 'true' : 'false'}
+            data-ready={ready ? 'true' : 'false'}
             aria-busy={isApproveInFlight || undefined}
+            aria-label={!ready ? 'Fill the missing fields to send to the team' : undefined}
+            title={!ready ? 'Fill the missing fields to send to the team' : undefined}
             style={{
               width: '100%',
               padding: '10px 12px',
@@ -185,10 +174,10 @@ export function ReviewPanel({
               fontSize: 11,
               fontWeight: 700,
               cursor: approveDisabled ? 'not-allowed' : 'pointer',
-              opacity: approveDisabled ? 0.5 : 1,
+              opacity: approveDisabled ? 0.4 : 1,
               textTransform: 'uppercase',
               letterSpacing: '0.12em',
-              boxShadow: '0 4px 18px rgba(219, 181, 128, 0.45)'
+              boxShadow: approveDisabled ? 'none' : '0 4px 18px rgba(219, 181, 128, 0.45)'
             }}
             onMouseEnter={(e) => {
               if (approveDisabled) return;
@@ -198,9 +187,39 @@ export function ReviewPanel({
               e.currentTarget.style.filter = 'brightness(1)';
             }}
           >
-            {isApproveInFlight ? 'Sending…' : 'Approve & send to team'}
+            {approveButtonLabel}
           </button>
-          <SecondaryButton onClick={onContinueRefining}>Continue refining</SecondaryButton>
+          {!ready && missing.length > 0 && mode === 'essentials' && (
+            <div
+              data-testid="approve-disabled-hint"
+              style={{
+                fontSize: 10,
+                color: brandTokens.colors.mutedText,
+                lineHeight: 1.5,
+                textAlign: 'center',
+                padding: '4px 6px'
+              }}
+            >
+              Fill the missing fields to enable.
+            </div>
+          )}
+          {!ready && missing.length > 0 && mode === 'summary' && (
+            <div
+              data-testid="approve-disabled-hint"
+              style={{
+                fontSize: 10,
+                color: brandTokens.colors.mutedText,
+                lineHeight: 1.5,
+                textAlign: 'center',
+                padding: '4px 6px'
+              }}
+            >
+              Fill the missing fields to enable.
+            </div>
+          )}
+          {mode === 'summary' && ready && !approved && (
+            <SecondaryButton onClick={onContinueRefining}>Continue refining</SecondaryButton>
+          )}
         </div>
       )}
 
