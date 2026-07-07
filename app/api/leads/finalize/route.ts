@@ -100,6 +100,8 @@ export async function POST(request: Request) {
     .update({ status: qualificationStatus === 'qualified' ? 'completed' : 'escalated' })
     .eq('id', sessionId);
 
+  let telegramSent = false;
+
   try {
     const { data: sessionRow } = await supabase
       .from('sessions')
@@ -112,6 +114,10 @@ export async function POST(request: Request) {
       contact_name?: string | null;
       contact_company?: string | null;
     } | null;
+
+    if (!snap?.telegram_thread_id) {
+      console.warn('[leads-finalize] No Telegram thread id for session', sessionId);
+    }
 
     if (snap?.telegram_thread_id) {
       const shortId = sessionId.slice(0, 8);
@@ -163,7 +169,8 @@ export async function POST(request: Request) {
       }
 
       try {
-        await sendTelegramMessage(messageParts.join('\n'), { threadId: snap.telegram_thread_id });
+        const result = await sendTelegramMessage(messageParts.join('\n'), { threadId: snap.telegram_thread_id });
+        telegramSent = Boolean(result);
       } catch (error) {
         console.warn('[leads-finalize] failed to send approval notification', { sessionId, error });
       }
@@ -176,6 +183,7 @@ export async function POST(request: Request) {
     ok: true,
     sessionId,
     qualificationStatus,
-    persisted: true
+    persisted: true,
+    telegramSent
   });
 }

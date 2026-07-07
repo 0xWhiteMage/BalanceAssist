@@ -231,4 +231,80 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     expect(res.status).toBe(200);
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
   });
+
+  test('logs a warning when there is no Telegram thread id', async () => {
+    const { client } = buildMockSupabase({ telegramThreadId: null });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const res = await callFinalizeRoute({
+      sessionId: '55555555-6666-7777-8888-999999999999',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s spot',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: 'Sam',
+        contactEmail: 'sam@example.com'
+      }
+    });
+
+    expect(res.status).toBe(200);
+    expect(warnSpy).toHaveBeenCalled();
+    const sawWarn = warnSpy.mock.calls.some(
+      (call) => typeof call[0] === 'string' && call[0].includes('No Telegram thread id for session')
+    );
+    expect(sawWarn).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  test('response includes telegramSent=true when the Telegram message is dispatched', async () => {
+    const { client } = buildMockSupabase({ telegramThreadId: 11 });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const res = await callFinalizeRoute({
+      sessionId: '66666666-7777-8888-9999-aaaaaaaaaaaa',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s spot',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: 'Sam',
+        contactEmail: 'sam@example.com'
+      }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.telegramSent).toBe(true);
+  });
+
+  test('response includes telegramSent=false when there is no Telegram thread', async () => {
+    const { client } = buildMockSupabase({ telegramThreadId: null });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const res = await callFinalizeRoute({
+      sessionId: '77777777-8888-9999-aaaa-bbbbbbbbbbbb',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s spot',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: 'Sam',
+        contactEmail: 'sam@example.com'
+      }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.telegramSent).toBe(false);
+  });
 });

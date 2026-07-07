@@ -173,6 +173,7 @@ export function WidgetOverlay({
   const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'unconfigured'>('unconfigured');
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -725,6 +726,7 @@ const startConversation = useCallback(async () => {
     if (approveInFlightRef.current || briefApproved) return;
     approveInFlightRef.current = true;
     setBriefApproved(true);
+    setTelegramBroadcastStatus('pending');
 
     try {
       await ensureSession();
@@ -743,7 +745,12 @@ const startConversation = useCallback(async () => {
         }
       } as const;
 
-      await finalizeLead(payload);
+      const finalizeResponse = await finalizeLead(payload);
+      if (finalizeResponse && typeof finalizeResponse.telegramSent === 'boolean') {
+        setTelegramBroadcastStatus(finalizeResponse.telegramSent ? 'sent' : 'unconfigured');
+      } else {
+        setTelegramBroadcastStatus('unconfigured');
+      }
       setCurrentStep('handoff');
       await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
       await advanceStep('handoff', draftRef.current);
@@ -1140,6 +1147,12 @@ const startConversation = useCallback(async () => {
                     setRailMode('essentials');
                   }}
                   onChange={handleDraftEdit}
+                  telegramBroadcastStatus={telegramBroadcastStatus}
+                  onBookCatchUp={() => {
+                    setCalendlyUrl('https://calendly.com/haiha-dang/catch-up');
+                    setView('calendly');
+                  }}
+                  onTalkToHuman={handleTeamConnect}
                 />
               </div>
             )}

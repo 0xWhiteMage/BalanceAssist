@@ -79,7 +79,11 @@ export function ReviewPanel({
   mode,
   onApprove,
   onContinueRefining,
-  onChange
+  onChange,
+  onBookCatchUp,
+  onTalkToHuman,
+  telegramBroadcastStatus = 'unconfigured',
+  telegramPending = false
 }: {
   draft: LeadDraft;
   approved: boolean;
@@ -87,6 +91,10 @@ export function ReviewPanel({
   onApprove: () => void;
   onContinueRefining: () => void;
   onChange?: (key: string, value: string) => void;
+  onBookCatchUp?: () => void;
+  onTalkToHuman?: () => void;
+  telegramBroadcastStatus?: 'pending' | 'sent' | 'unconfigured';
+  telegramPending?: boolean;
 }) {
   const ready = isBriefReadyForApproval(draft);
   const [isApproveInFlight, setIsApproveInFlight] = useState(false);
@@ -227,18 +235,108 @@ export function ReviewPanel({
         <div
           data-testid="approve-confirmation"
           style={{
-            fontSize: 11,
-            color: '#4ade80',
-            lineHeight: 1.5,
-            padding: '10px 12px',
-            border: `1px solid rgba(74, 222, 128, 0.45)`,
-            borderRadius: 8,
-            background: 'rgba(74, 222, 128, 0.08)',
-            fontWeight: 600,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            padding: '12px 12px',
+            border: `1px solid rgba(74, 222, 128, 0.6)`,
+            borderRadius: 10,
+            background: 'rgba(74, 222, 128, 0.10)',
             animation: 'approve-confirm 0.4s ease-out'
           }}
         >
-          ✓ Brief approved. The Balance team has been notified.
+          <div
+            data-testid="approve-confirmation-banner"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#4ade80',
+              textTransform: 'uppercase',
+              letterSpacing: '0.10em'
+            }}
+          >
+            <span style={{ fontSize: 14 }}>✓</span>
+            Brief approved
+          </div>
+          <div
+            data-testid="approve-confirmation-count"
+            style={{
+              fontSize: 11,
+              color: brandTokens.colors.lightText,
+              lineHeight: 1.45
+            }}
+          >
+            {completed} of {TOTAL_FIELDS} fields captured · The Balance team has been notified.
+          </div>
+          <div
+            data-testid="approve-confirmation-telegram"
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color:
+                telegramBroadcastStatus === 'sent'
+                  ? '#4ade80'
+                  : telegramBroadcastStatus === 'pending' || telegramPending
+                    ? brandTokens.colors.warmGold
+                    : brandTokens.colors.mutedText,
+              textTransform: 'uppercase',
+              letterSpacing: '0.10em'
+            }}
+          >
+            {telegramBroadcastStatus === 'sent'
+              ? 'Telegram notification sent'
+              : telegramBroadcastStatus === 'pending' || telegramPending
+                ? 'Telegram broadcast pending…'
+                : 'Telegram connection pending'}
+          </div>
+          {onBookCatchUp && (
+            <button
+              type="button"
+              data-testid="book-catch-up-cta"
+              onClick={onBookCatchUp}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: 'none',
+                background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+                color: brandTokens.colors.baseBlack,
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
+                boxShadow: '0 4px 18px rgba(219, 181, 128, 0.45)'
+              }}
+            >
+              Book a catch-up
+            </button>
+          )}
+          {onTalkToHuman && (
+            <button
+              type="button"
+              data-testid="talk-to-human-cta"
+              onClick={onTalkToHuman}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: `1px solid ${brandTokens.colors.border}`,
+                background: 'transparent',
+                color: brandTokens.colors.lightText,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em'
+              }}
+            >
+              Talk to a human
+            </button>
+          )}
         </div>
       )}
     </div>
