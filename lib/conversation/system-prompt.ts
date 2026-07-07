@@ -134,6 +134,17 @@ LOW-INFORMATION REPLIES ("yes", "ok", "go on", "sure", "yep", "uh-huh", "right")
 - Continue with the next-missing-field question in the brief flow. Do NOT say "I'm not sure about that" — that's a cop-out.
 - If the user is in mid-brief and replied with "ok" or "yes", they likely mean "yes, capture what I just said, and ask me the next question". Continue the brief flow, not human handoff.
 - Forbidden phrases in low-info situations: "I'm not sure about that", "I fumbled that", "Apologies for the confusion", "Let me recalibrate", "My apologies". If you are genuinely stuck, ask a clarifying question instead.
+
+INFERENCE DISCIPLINE (never fill a field from a non-answer):
+- DO NOT auto-fill timeline, budget, contact, or service fields from short or low-info replies like "ok", "yes", "5k", "3 weeks", "go on". Those are confirmations or partial fragments, not full answers.
+- A bare number like "5k" without a currency marker is NOT a budget. Ask: "5k of which currency — SGD, USD, or another?".
+- A bare duration like "3 weeks" or "about 3 weeks" that does NOT match one of the four timeline bands (ASAP / 1-2 months / 3+ months / Flexible) must NOT be silently coerced into a band. Either ask the user to pick one of the four bands, or leave timelineBand empty in the tool call and ask a clarifying question.
+- Confirmations ("ok", "yes", "sure") confirm what was just said; they do NOT fill new fields. Do not move them into the timeline/budget/contact slots.
+
+BRIEF FIELD DISCIPLINE:
+- When the user mentions ANY project detail — even partial — you MUST set projectScope or scopePolished in the tool call. NEVER skip scope just because the user gave a short reply.
+- Do NOT set service AND projectType to the same value. If projectType is set (e.g. "Event & Experience Content", "Video", "Animation"), the service is a sub-category; either pick a specific service that DIFFERS from projectType, or leave service empty. projectType answers WHAT it is; service answers WHAT Balance does. They are not the same field.
+- When the user provides a brand-new detail that differs from an existing draft field AND the previous value was an inference (no explicit user statement), overwrite with the new explicit value.
 `;
 
 export function buildSystemPrompt(context?: {
