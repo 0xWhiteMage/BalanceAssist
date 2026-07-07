@@ -74,6 +74,15 @@ test('system prompt instructs substantive answers for general questions', () => 
   expect(prompt).toMatch(/Prefer specific claims/i);
 });
 
+test('system prompt discourages mid-conversation human handoff and does not contain the bad fallback phrase', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/HUMAN HANDOFF/);
+  expect(prompt).toMatch(/DO NOT volunteer handoff in the middle of a normal answer/i);
+  expect(prompt).not.toContain('Our team would be best equipped');
+  expect(prompt).toMatch(/share_work tool/i);
+  expect(prompt).toMatch(/show me past work/i);
+});
+
 test('system prompt profile includes the rich company details', () => {
   const prompt = buildSystemPrompt();
   // The profile is too long to assert all of; spot-check a few anchors.

@@ -155,7 +155,7 @@ async function callOpenAICompatible(
   const body: Record<string, unknown> = {
     model,
     messages,
-    max_tokens: useTools ? 2400 : 600,
+    max_tokens: useTools ? 3200 : 512,
     temperature: useTools ? 0.4 : 0.6
   };
   if (useTools) {
@@ -498,6 +498,12 @@ function splitReplyIntoMessages(text: string): string[] {
   const cleaned = text.trim();
   if (!cleaned) return [text];
 
+  const capAt4 = (parts: string[]): string[] => {
+    if (parts.length <= 4) return parts;
+    const tail = parts.slice(3).join('\n\n').trim();
+    return [...parts.slice(0, 3), tail].filter((p) => p.length > 0);
+  };
+
   const hasRuleSeparator = /(^|\n)\s*---\s*(\n|$)/.test(cleaned);
   if (hasRuleSeparator) {
     const parts = cleaned
@@ -505,7 +511,7 @@ function splitReplyIntoMessages(text: string): string[] {
       .map((part) => part.trim())
       .filter((part) => part.length > 0);
     if (parts.length > 1) {
-      return parts.map((part) => splitLongChunk(part)).flat();
+      return capAt4(parts.map((part) => splitLongChunk(part)).flat()).flat();
     }
   }
 
@@ -513,6 +519,14 @@ function splitReplyIntoMessages(text: string): string[] {
     .split(/\n\s*\n+/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
+
+  if (doubleNewlineParts.length > 4) {
+    const head = doubleNewlineParts.slice(0, 3);
+    const tail = doubleNewlineParts.slice(3).join('\n\n').trim();
+    const capped = [...head, tail].filter((p) => p.length > 0);
+    return capped.map((part) => splitLongChunk(part)).flat();
+  }
+
   if (doubleNewlineParts.length > 1) {
     return doubleNewlineParts.map((part) => splitLongChunk(part)).flat();
   }

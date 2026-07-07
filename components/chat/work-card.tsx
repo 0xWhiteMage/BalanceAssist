@@ -39,7 +39,7 @@ export function WorkCard({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        minWidth: '280px',
+        minWidth: '240px',
         minHeight: '220px',
         maxWidth: '300px',
         borderRadius: '12px',
@@ -72,7 +72,7 @@ export function WorkCard({
           data-testid="work-card-image"
           style={{
             width: '100%',
-            height: '160px',
+            height: '130px',
             objectFit: 'cover',
             display: 'block',
             background: 'rgba(0,0,0,0.4)'
@@ -83,7 +83,7 @@ export function WorkCard({
           aria-hidden="true"
           style={{
             width: '100%',
-            height: '160px',
+            height: '130px',
             background: 'rgba(0,0,0,0.4)',
             display: 'flex',
             alignItems: 'center',
@@ -96,7 +96,7 @@ export function WorkCard({
         </div>
       )}
 
-      <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
           <span
             style={{
@@ -182,6 +182,11 @@ export function WorkCardRow({
   const rowRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [scrollMetrics, setScrollMetrics] = useState<{ pageCount: number; activePage: number }>({
+    pageCount: 1,
+    activePage: 0
+  });
+  const [rowWidth, setRowWidth] = useState<number>(0);
 
   function beginDrag(clientX: number) {
     if (!rowRef.current) return;
@@ -248,6 +253,41 @@ export function WorkCardRow({
     };
   }, []);
 
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+
+    function recompute() {
+      const el = rowRef.current;
+      if (!el) return;
+      const clientWidth = el.clientWidth;
+      const scrollWidth = el.scrollWidth;
+      if (clientWidth <= 0) {
+        setScrollMetrics({ pageCount: 1, activePage: 0 });
+        setRowWidth(0);
+        return;
+      }
+      const pageCount = Math.max(1, Math.ceil(scrollWidth / clientWidth));
+      const activePage = Math.min(
+        pageCount - 1,
+        Math.max(0, Math.round(el.scrollLeft / clientWidth))
+      );
+      setScrollMetrics({ pageCount, activePage });
+      setRowWidth(clientWidth);
+    }
+
+    recompute();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(recompute) : null;
+    if (observer) observer.observe(row);
+    row.addEventListener('scroll', recompute, { passive: true });
+    window.addEventListener('resize', recompute);
+    return () => {
+      if (observer) observer.disconnect();
+      row.removeEventListener('scroll', recompute);
+      window.removeEventListener('resize', recompute);
+    };
+  }, [entries.length]);
+
   function handleRowClick(event: ReactMouseEvent<HTMLDivElement>) {
     const state = dragStateRef.current;
     if (state && state.totalMoved > DRAG_CLICK_THRESHOLD_PX) {
@@ -263,6 +303,7 @@ export function WorkCardRow({
   }
 
   if (entries.length === 0) return null;
+  const isOverflowing = scrollMetrics.pageCount > 1 && rowWidth > 0;
   return (
     <div
       ref={rowRef}
@@ -284,7 +325,9 @@ export function WorkCardRow({
         scrollSnapType: 'x mandatory',
         WebkitOverflowScrolling: 'touch',
         cursor: isDragging ? 'grabbing' : 'grab',
-        userSelect: isDragging ? 'none' : 'auto'
+        userSelect: isDragging ? 'none' : 'auto',
+        touchAction: 'pan-x',
+        minHeight: '220px'
       }}
     >
       {entries.map(({ entry, category }) => (
@@ -303,6 +346,42 @@ export function WorkCardRow({
           pointerEvents: 'none'
         }}
       />
+      {isOverflowing && (
+        <div
+          data-testid="work-card-row-dots"
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            right: '8px',
+            bottom: '8px',
+            display: 'flex',
+            gap: '4px',
+            padding: '4px 8px',
+            borderRadius: '999px',
+            background: 'rgba(16, 16, 16, 0.55)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            pointerEvents: 'none'
+          }}
+        >
+          {Array.from({ length: scrollMetrics.pageCount }).map((_, i) => (
+            <span
+              key={i}
+              data-testid="work-card-row-dot"
+              data-active={i === scrollMetrics.activePage ? 'true' : 'false'}
+              style={{
+                width: '5px',
+                height: '5px',
+                borderRadius: '50%',
+                background:
+                  i === scrollMetrics.activePage
+                    ? brandTokens.colors.warmGold
+                    : 'rgba(255, 255, 255, 0.35)',
+                transition: 'background 0.15s ease'
+              }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

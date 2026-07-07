@@ -47,10 +47,10 @@ describe('WorkCard', () => {
 });
 
 describe('WorkCard sizing and grab affordance', () => {
-  test('renders cards with a min-width of 280px for a more grabbable feel', () => {
+  test('renders cards with a min-width of 240px for a more grabbable feel', () => {
     render(<WorkCard entry={baseEntry} category="reference" />);
     const card = screen.getByTestId('work-card');
-    expect(card.style.minWidth).toBe('280px');
+    expect(card.style.minWidth).toBe('240px');
   });
 
   test('renders the card with cursor: grab so users know it can be swiped', () => {
@@ -70,10 +70,10 @@ describe('WorkCard sizing and grab affordance', () => {
     expect(screen.getByTestId('work-card').style.userSelect).toBe('none');
   });
 
-  test('thumbnail uses a 160px image real estate', () => {
+  test('thumbnail uses a 130px image real estate', () => {
     render(<WorkCard entry={baseEntry} category="reference" />);
     const img = screen.getByTestId('work-card-image');
-    expect(img.style.height).toBe('160px');
+    expect(img.style.height).toBe('130px');
   });
 });
 
@@ -158,6 +158,35 @@ describe('WorkCardRow', () => {
     const row = screen.getByTestId('work-card-row');
     expect(row.style.cursor).toBe('grab');
     expect(row.getAttribute('data-dragging')).toBe('false');
+  });
+
+  test('row has touch-action: pan-x so mobile devices use horizontal panning instead of pinch-zoom', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row');
+    expect(row.style.touchAction).toBe('pan-x');
+  });
+
+  test('row has a minHeight of 220px so it has enough draggable area', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row');
+    expect(row.style.minHeight).toBe('220px');
+  });
+
+  test('row renders no dot indicators when content fits on one page', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    expect(screen.queryByTestId('work-card-row-dots')).toBeNull();
   });
 });
 

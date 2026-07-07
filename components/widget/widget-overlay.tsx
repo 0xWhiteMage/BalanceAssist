@@ -22,7 +22,7 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
-import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, verifySession, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
@@ -32,6 +32,35 @@ let messageCounter = 0;
 function nextId() {
   messageCounter += 1;
   return `msg-${messageCounter}`;
+}
+
+export const SESSION_STORAGE_KEY = 'balance-assist:sessionId';
+
+function readStoredSessionId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(SESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSessionId(sessionId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  } catch {
+    // ignore quota / privacy mode errors
+  }
+}
+
+function clearStoredSessionId(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -420,6 +449,7 @@ export function WidgetOverlay({
 
         setSessionId(session.sessionId);
         sessionIdRef.current = session.sessionId;
+        writeStoredSessionId(session.sessionId);
         return session.sessionId;
       }
     } catch (error) {
@@ -428,6 +458,34 @@ export function WidgetOverlay({
 
     return null;
   }, []);
+
+  const loadOrCreateSession = useCallback(async (): Promise<string | null> => {
+    if (sessionIdRef.current) return sessionIdRef.current;
+    if (typeof window === 'undefined') return null;
+
+    const stored = readStoredSessionId();
+    if (stored) {
+      try {
+        const valid = await verifySession(stored);
+        if (valid) {
+          setSessionId(stored);
+          sessionIdRef.current = stored;
+          return stored;
+        }
+      } catch {
+        // fall through to creation
+      }
+      clearStoredSessionId();
+    }
+
+    return ensureSession();
+  }, [ensureSession]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (sessionIdRef.current) return;
+    loadOrCreateSession().catch(() => undefined);
+  }, [loadOrCreateSession]);
 
 const startConversation = useCallback(async () => {
     if (hasStarted) return;
@@ -478,6 +536,9 @@ const startConversation = useCallback(async () => {
   }
 
   function handleReset() {
+    clearStoredSessionId();
+    setSessionId(null);
+    sessionIdRef.current = null;
     cancelRef.current = true;
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
@@ -652,7 +713,7 @@ const startConversation = useCallback(async () => {
 
   async function appendReferenceLink(link: ReferenceLink) {
     setReferenceLinks((prev) => [...prev, link]);
-    const id = sessionIdRef.current ?? (await ensureSession());
+    const id = sessionIdRef.current ?? (await loadOrCreateSession());
     if (!id) return;
     void addReferenceLink({ sessionId: id, url: link.url, kind: link.kind });
   }
@@ -1204,6 +1265,7 @@ const startConversation = useCallback(async () => {
                     <AttachmentDropzone
                       onAddLink={appendReferenceLink}
                       onAddFile={appendReferenceFile}
+                      sessionId={sessionId}
                     />
                   </div>
                 )}
