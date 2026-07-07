@@ -91,14 +91,14 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   handoff: {
     id: 'handoff',
     botMessages: [
-      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also reach out directly below if you'd like to talk sooner."
+      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also book a quick catch-up below if you'd like to talk sooner."
     ],
     inlineCards: [
       {
-        type: 'email',
-        label: 'Email the team',
-        subtitle: 'hello@balancestudio.tv · We will reply within 1 business day',
-        href: 'mailto:hello@balancestudio.tv'
+        type: 'calendly',
+        url: 'https://calendly.com/haiha-dang/catch-up',
+        label: 'Book a catch-up',
+        subtitle: '15 min · Pick a time'
       }
     ],
     next: 'free-chat'
