@@ -217,4 +217,44 @@ describe('ReviewPanel', () => {
     expect(approveButton.style.animation === '' || approveButton.style.animation === 'none').toBe(true);
     expect(approveButton.getAttribute('style') ?? '').not.toMatch(/animation\s*:\s*[^n]/i);
   });
+
+  test('clicking Approve twice in a row only invokes onApprove once (button enters in-flight state)', () => {
+    const onApprove = vi.fn();
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={false}
+        mode="summary"
+        onApprove={onApprove}
+        onContinueRefining={() => {}}
+      />
+    );
+    const approveButton = screen.getByRole('button', { name: /approve & send to team/i });
+    fireEvent.click(approveButton);
+    // After the first click, the button label flips to "Sending…" and the
+    // second click MUST NOT re-invoke onApprove.
+    expect(screen.getByTestId('approve-button').getAttribute('data-in-flight')).toBe('true');
+    const sendingButton = screen.getByRole('button', { name: /sending/i }) as HTMLButtonElement;
+    expect(sendingButton.disabled).toBe(true);
+    fireEvent.click(sendingButton);
+    expect(onApprove).toHaveBeenCalledOnce();
+  });
+
+  test('when approved=true, clicking the Approve button (if it renders) does NOT trigger onApprove', () => {
+    const onApprove = vi.fn();
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={true}
+        mode="summary"
+        onApprove={onApprove}
+        onContinueRefining={() => {}}
+      />
+    );
+    // The Approve CTA is replaced by the green confirmation pill when approved,
+    // so onApprove must remain uncalled.
+    expect(screen.queryByRole('button', { name: /approve.*send to team/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('approve-confirmation')).toBeInTheDocument();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
 });
