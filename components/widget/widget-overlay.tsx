@@ -596,12 +596,16 @@ const startConversation = useCallback(async () => {
 
       await botSay(replyText);
     } catch {
-      const localFallback = getLocalResponse(latestUserText, {
-        draft: draftRef.current,
-        step: stepRef.current,
-        isTeamConnected: teamRef.current
-      });
-      await botSay(localFallback ?? getFallbackResponse());
+      try {
+        const localFallback = getLocalResponse(latestUserText, {
+          draft: draftRef.current,
+          step: stepRef.current,
+          isTeamConnected: teamRef.current
+        });
+        await botSay(localFallback ?? getFallbackResponse());
+      } catch {
+        await botSay(getFallbackResponse());
+      }
     }
   }
 
@@ -873,9 +877,15 @@ const startConversation = useCallback(async () => {
         return;
       }
 
+      await ensureSession();
       appendUserMessage(trimmed);
-      await handleLLMResponse(messagesRef.current);
+      try {
+        await handleLLMResponse(messagesRef.current);
+      } catch {
+        await botSay(getFallbackResponse());
+      }
     } finally {
+      setIsTyping(false);
       submitInFlightRef.current = false;
     }
   }
