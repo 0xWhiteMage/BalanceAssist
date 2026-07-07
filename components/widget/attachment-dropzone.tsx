@@ -29,7 +29,8 @@ export function AttachmentDropzone({
       body: JSON.stringify({ url, kind })
     });
     if (!res.ok) {
-      setError('Failed to add link.');
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? 'Failed to add link.');
       return;
     }
     onAddLink({ kind, url });
