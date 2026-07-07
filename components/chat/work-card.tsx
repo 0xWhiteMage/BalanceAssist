@@ -193,6 +193,7 @@ export function WorkCardRow({
   });
   const [rowWidth, setRowWidth] = useState<number>(0);
   const [hasScrolled, setHasScrolled] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   function beginDrag(clientX: number) {
     if (!rowRef.current) return;
@@ -203,6 +204,38 @@ export function WorkCardRow({
       isActive: true
     };
     setIsDragging(true);
+  }
+
+  function snapToMagneticPage() {
+    const el = rowRef.current;
+    if (!el) return;
+    const clientWidth = el.clientWidth;
+    if (clientWidth <= 0) return;
+    const max = el.scrollWidth - clientWidth;
+    if (max <= 0) return;
+    const nearest = Math.max(0, Math.min(max, Math.round(el.scrollLeft / clientWidth) * clientWidth));
+    if (Math.abs(nearest - el.scrollLeft) < 1) return;
+    el.scrollTo({ left: nearest, behavior: 'auto' });
+  }
+
+  function scrollByPage(direction: -1 | 1) {
+    const el = rowRef.current;
+    if (!el) return;
+    const clientWidth = el.clientWidth;
+    if (clientWidth <= 0) return;
+    const offset = direction * clientWidth;
+    if (typeof el.scrollBy === 'function') {
+      el.scrollBy({ left: offset, behavior: 'auto' });
+    } else {
+      el.scrollTo({ left: (el.scrollLeft || 0) + offset, behavior: 'auto' });
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        snapToMagneticPage();
+      });
+    } else {
+      snapToMagneticPage();
+    }
   }
 
   function endDrag() {
@@ -328,18 +361,28 @@ export function WorkCardRow({
     if (isDragging) {
       endDrag();
     }
+    setIsHovered(false);
+  }
+
+  function handleRowMouseEnter() {
+    setIsHovered(true);
   }
 
   if (entries.length === 0) return null;
   const isOverflowing = scrollMetrics.pageCount > 1 && rowWidth > 0;
+  const canPrev = scrollMetrics.activePage > 0;
+  const canNext = scrollMetrics.activePage < scrollMetrics.pageCount - 1;
+  const showArrows = isOverflowing && isHovered;
   return (
     <div
       ref={rowRef}
       data-testid="work-card-row"
       data-dragging={isDragging ? 'true' : 'false'}
+      data-hovered={isHovered ? 'true' : 'false'}
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
       onClick={handleRowClick}
+      onMouseEnter={handleRowMouseEnter}
       onMouseLeave={handleRowMouseLeave}
       style={{
         position: 'relative',
@@ -376,6 +419,84 @@ export function WorkCardRow({
           pointerEvents: 'none'
         }}
       />
+      {isOverflowing && (
+        <>
+          <button
+            type="button"
+            data-testid="work-card-row-prev"
+            data-disabled={canPrev ? 'false' : 'true'}
+            aria-label="Previous cards"
+            aria-disabled={!canPrev}
+            disabled={!canPrev}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (canPrev) scrollByPage(-1);
+            }}
+            style={{
+              position: 'absolute',
+              left: '4px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              border: `1px solid ${brandTokens.colors.border}`,
+              background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+              color: brandTokens.colors.baseBlack,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: canPrev ? 'pointer' : 'not-allowed',
+              opacity: showArrows && canPrev ? 1 : 0,
+              pointerEvents: canPrev ? 'auto' : 'none',
+              transition: 'opacity 0.15s ease',
+              zIndex: 2
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M9 2L4 7l5 5" stroke="#101010" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            data-testid="work-card-row-next"
+            data-disabled={canNext ? 'false' : 'true'}
+            aria-label="Next cards"
+            aria-disabled={!canNext}
+            disabled={!canNext}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (canNext) scrollByPage(1);
+            }}
+            style={{
+              position: 'absolute',
+              right: '4px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              border: `1px solid ${brandTokens.colors.border}`,
+              background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+              color: brandTokens.colors.baseBlack,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: canNext ? 'pointer' : 'not-allowed',
+              opacity: showArrows && canNext ? 1 : 0,
+              pointerEvents: canNext ? 'auto' : 'none',
+              transition: 'opacity 0.15s ease',
+              zIndex: 2
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M5 2l5 5-5 5" stroke="#101010" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </>
+      )}
       {isOverflowing && !hasScrolled && (
         <div
           data-testid="work-card-row-swipe-hint"
