@@ -125,3 +125,74 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     );
   });
 });
+
+describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
+  test('after the user types a project description and the LLM tool-call sets projectScope, the brief card renders the scope', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            message: "Got it — a brand film for Heineken. What's the format and length?",
+            draftUpdates: {
+              projectScope:
+                "It's a brand film for Heineken — making them look premium for a new launch",
+              scopePolished:
+                "Brand film for Heineken — making them look premium for a new launch"
+            },
+            briefReady: false,
+            reviewPrompt: null,
+            missingFields: ['projectType', 'service', 'timelineBand', 'budgetBand', 'contact']
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(
+          JSON.stringify({ sessionId: 'mock-session', persisted: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = (await waitFor(() => {
+      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
+      expect(el).toBeInTheDocument();
+      return el;
+    }, { timeout: 4000 })) as HTMLInputElement;
+
+    fireEvent.change(input, {
+      target: {
+        value: "It's a brand film for Heineken — making them look premium for a new launch"
+      }
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // The rail mounts because hasProjectIntent is now true (projectScope is set).
+    await waitFor(
+      () => {
+        expect(screen.queryByTestId('review-rail')).not.toBeNull();
+      },
+      { timeout: 4000 }
+    );
+
+    // The brief card inside the rail renders the scope row with the user's text.
+    await waitFor(
+      () => {
+        const rail = screen.getByTestId('review-rail');
+        const briefCard = rail.querySelector('[data-testid="project-brief-card"]') as HTMLElement | null;
+        expect(briefCard).not.toBeNull();
+        const scopeRow = briefCard!.querySelector(
+          '[data-row-key="projectScope"]'
+        ) as HTMLElement | null;
+        expect(scopeRow).not.toBeNull();
+        expect(scopeRow!.getAttribute('data-filled')).toBe('true');
+        expect(scopeRow!.textContent).toContain('Heineken');
+      },
+      { timeout: 4000 }
+    );
+  });
+});
