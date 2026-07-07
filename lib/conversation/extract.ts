@@ -3,6 +3,7 @@ import type { BudgetBandId, LeadDraft, ServiceOptionId, TimelineBandId } from '@
 import type { ConversationStepId } from '@/lib/conversation/types';
 
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
+const strictEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const numberBudgetPattern = /(\d+(?:[.,]\d+)?)\s*(k\b|m\b|thousand\b|million\b)?/i;
 
 const PROJECT_SIGNAL_PATTERN =
@@ -127,6 +128,36 @@ function detectBudget(text: string): BudgetBandId | null {
   return '150k-plus';
 }
 
+const NAME_BLACKLIST = new Set([
+  'looking',
+  'here',
+  'ready',
+  'sorry',
+  'interested',
+  'asking',
+  'curious',
+  'from',
+  'with',
+  'working',
+  'inquire',
+  'going',
+  'wondering',
+  'thinking'
+]);
+
+function isLikelyName(s: string): boolean {
+  const words = s
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return false;
+  for (const word of words) {
+    if (NAME_BLACKLIST.has(word)) return false;
+  }
+  return true;
+}
+
 function detectName(text: string): string | null {
   const nameMatch = text.match(/(?:i am|i'm|my name is|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/i);
   if (nameMatch?.[1]) {
@@ -135,11 +166,14 @@ function detectName(text: string): string | null {
       .split(/\s+/)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
       .join(' ');
-    return titled;
+    if (isLikelyName(titled)) {
+      return titled;
+    }
+    return null;
   }
 
   const trimmed = text.trim();
-  if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/.test(trimmed)) {
+  if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/.test(trimmed) && isLikelyName(trimmed)) {
     return trimmed;
   }
 
@@ -210,7 +244,10 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
   }
 
   if (currentStep === 'contact-email' && !updates.contactEmail && (!currentDraft.contactEmail || overwrite)) {
-    updates.contactEmail = text.trim();
+    const trimmed = text.trim();
+    if (strictEmailPattern.test(trimmed)) {
+      updates.contactEmail = trimmed;
+    }
   }
 
   return updates;
