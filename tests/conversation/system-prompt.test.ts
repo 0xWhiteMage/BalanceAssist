@@ -43,7 +43,7 @@ test('system prompt worked example: 30s animation maps to empty timelineBand/bud
 
 test('system prompt requires exactly one follow-up question per visible reply', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/MUST end with exactly one conversational question/i);
+  expect(prompt).toMatch(/end with exactly one conversational question/i);
   expect(prompt).toMatch(/next most useful missing field/i);
 });
 
@@ -56,4 +56,11 @@ test('system prompt suppresses the follow-up question when the brief is already 
 test('REVIEW GATE warns the model against marking the brief ready if any field is a guess', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/do NOT mark the brief ready if any field you filled is a guess/i);
+});
+
+test('system prompt embeds the Balance Studio profile for general questions', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/ABOUT BALANCE STUDIO/);
+  expect(prompt).toMatch(/Singapore-based/);
+  expect(prompt).toMatch(/Dream · Design · Create/);
 });
