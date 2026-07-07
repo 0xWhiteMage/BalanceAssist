@@ -43,8 +43,34 @@ test('system prompt worked example: 30s animation maps to empty timelineBand/bud
 
 test('system prompt asks one focused question when starting a brief', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/first obvious brief question/i);
   expect(prompt).toMatch(/format and length/i);
+});
+
+test('system prompt ALWAYS ends brief replies with a follow-up question', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/ALWAYS end with a follow-up question/i);
+});
+
+test('system prompt gives a concrete next-question for projectScope-empty', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/What's the project about\?/);
+});
+
+test('system prompt tells the model not to punt on low-information replies during brief mode', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/Do NOT punt to the human team/i);
+});
+
+test('system prompt explicitly handles "ok / go on" replies while in brief-building mode', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/low-information/i);
+  expect(prompt).toMatch(/brief-building mode/i);
+  expect(prompt).toMatch(/human team is a fallback/i);
+});
+
+test('system prompt does not contain the bad fallback phrase "I\'m not sure about that"', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).not.toContain("I'm not sure about that");
 });
 
 test('system prompt suppresses the follow-up question when the brief is already reviewable', () => {

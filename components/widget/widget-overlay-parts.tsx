@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { brandTokens } from '@/lib/brand-tokens';
 import {
@@ -517,13 +517,42 @@ export function ProjectBriefCard({
       <div style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
         {rows.map((row) => {
           const filled = row.raw.trim().length > 0;
+          const editing = editingKey === row.key;
+          const openEditor = () => {
+            if (onChange) setEditingKey(row.key);
+          };
+          const rowClick = onChange
+            ? (event: React.MouseEvent<HTMLDivElement>) => {
+                if (event.defaultPrevented) return;
+                openEditor();
+              }
+            : undefined;
+          const baseRowStyle = compact
+            ? {
+                display: 'flex',
+                flexDirection: 'column' as const,
+                gap: '2px',
+                fontSize: bodyFontSize,
+                cursor: onChange ? 'pointer' : 'default'
+              }
+            : {
+                display: 'flex',
+                flexDirection: 'column' as const,
+                gap: '6px',
+                fontSize: bodyFontSize,
+                cursor: onChange ? 'pointer' : 'default'
+              };
+
           if (compact) {
             return (
               <div
                 key={row.label}
                 data-testid="brief-row"
                 data-row-key={row.key}
-                style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: bodyFontSize }}
+                data-filled={filled ? 'true' : 'false'}
+                data-editing={editing ? 'true' : 'false'}
+                onClick={rowClick}
+                style={baseRowStyle}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span
@@ -563,7 +592,11 @@ export function ProjectBriefCard({
                   {onChange && (
                     <button
                       type="button"
-                      onClick={() => setEditingKey(row.key)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openEditor();
+                      }}
+                      data-testid={`brief-row-edit-${row.key}`}
                       aria-label={`Edit ${row.label.toLowerCase()}`}
                       style={{
                         background: 'transparent',
@@ -579,7 +612,7 @@ export function ProjectBriefCard({
                     </button>
                   )}
                 </div>
-                {filled && editingKey !== row.key && (
+                {filled && !editing && (
                   <div
                     data-testid="brief-row-value"
                     style={{
@@ -595,9 +628,10 @@ export function ProjectBriefCard({
                     {row.display}
                   </div>
                 )}
-                {filled && editingKey === row.key && (
+                {editing && (
                   <BriefRowEditor
                     row={row}
+                    compact={true}
                     onCommit={(value) => {
                       onChange?.(row.key, value);
                       setEditingKey(null);
@@ -613,12 +647,75 @@ export function ProjectBriefCard({
               key={row.label}
               data-testid="brief-row"
               data-row-key={row.key}
-              style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', fontSize: bodyFontSize }}
+              data-filled={filled ? 'true' : 'false'}
+              data-editing={editing ? 'true' : 'false'}
+              onClick={rowClick}
+              style={baseRowStyle}
             >
-              <span style={{ color: brandTokens.colors.mutedText, textTransform: 'capitalize' }}>{row.label}</span>
-              <span style={{ color: filled ? brandTokens.colors.lightText : brandTokens.colors.mutedText, textAlign: 'right', maxWidth: '60%', textTransform: 'capitalize' }}>
-                {filled ? row.display : 'Unfilled'}
-              </span>
+              <div
+                style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}
+              >
+                <span style={{ color: brandTokens.colors.mutedText, textTransform: 'capitalize' }}>{row.label}</span>
+                <span
+                  data-testid={filled ? 'brief-row-value' : undefined}
+                  style={{
+                    color: filled ? brandTokens.colors.lightText : brandTokens.colors.mutedText,
+                    textAlign: 'right',
+                    maxWidth: '60%',
+                    textTransform: 'capitalize',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    justifyContent: 'flex-end'
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                  >
+                    {filled ? row.display : 'Unfilled'}
+                  </span>
+                  {onChange && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openEditor();
+                      }}
+                      data-testid={`brief-row-edit-${row.key}`}
+                      aria-label={`Edit ${row.label.toLowerCase()}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: brandTokens.colors.mutedText,
+                        cursor: 'pointer',
+                        padding: 2,
+                        fontSize: 10,
+                        lineHeight: 1,
+                        flexShrink: 0
+                      }}
+                    >
+                      ✎
+                    </button>
+                  )}
+                </span>
+              </div>
+              {editing && (
+                <BriefRowEditor
+                  row={row}
+                  compact={false}
+                  onCommit={(value) => {
+                    onChange?.(row.key, value);
+                    setEditingKey(null);
+                  }}
+                  onCancel={() => setEditingKey(null)}
+                />
+              )}
             </div>
           );
         })}
@@ -705,10 +802,12 @@ function formatProjectType(value: string | undefined): string {
 
 function BriefRowEditor({
   row,
+  compact = true,
   onCommit,
   onCancel
 }: {
   row: BriefRow;
+  compact?: boolean;
   onCommit: (value: string) => void;
   onCancel: () => void;
 }) {
@@ -718,9 +817,13 @@ function BriefRowEditor({
     onCommit(value);
   }
 
+  const containerStyle: React.CSSProperties = compact
+    ? { marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }
+    : { display: 'flex', alignItems: 'center', gap: 6, width: '100%' };
+
   if (row.editor === 'select' && row.options) {
     return (
-      <div style={{ marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={containerStyle}>
         <select
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -755,6 +858,7 @@ function BriefRowEditor({
           type="button"
           onMouseDown={(event) => {
             event.preventDefault();
+            event.stopPropagation();
             onCancel();
           }}
           aria-label={`Cancel editing ${row.label.toLowerCase()}`}
@@ -773,7 +877,7 @@ function BriefRowEditor({
   }
 
   return (
-    <div style={{ marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={containerStyle}>
       <input
         type="text"
         value={value}
@@ -805,6 +909,7 @@ function BriefRowEditor({
         type="button"
         onMouseDown={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           onCancel();
         }}
         aria-label={`Cancel editing ${row.label.toLowerCase()}`}

@@ -40,7 +40,9 @@ describe('ProjectBriefCard', () => {
     );
     expect(screen.getByTestId('project-brief-card')).toHaveAttribute('data-compact', 'false');
     expect(screen.queryAllByTestId('brief-row-status')).toHaveLength(0);
-    expect(screen.queryAllByTestId('brief-row-value')).toHaveLength(0);
+    // Non-compact mode now exposes per-row edit affordances too, but does
+    // NOT use the dedicated "value line" indent that compact mode uses.
+    expect(screen.queryAllByTestId('brief-row-value')).toHaveLength(7);
   });
 
   test('compact mode marks the card and renders one filled-row indicator per captured field', () => {
@@ -248,6 +250,125 @@ describe('ProjectBriefCard', () => {
       expect(option.style.color).not.toBe('');
       expect(option.style.background).toBeTruthy();
       expect(option.style.background).not.toBe('');
+    }
+  });
+
+  test('compact mode: every row (filled or unfilled) exposes a pencil edit affordance', () => {
+    const empty = createDefaultLeadDraft();
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={empty}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const rows = screen.getAllByTestId('brief-row');
+    expect(rows.length).toBe(8);
+    for (const row of rows) {
+      const pencil = within(row as HTMLElement).getByRole('button', { name: /^edit /i });
+      expect(pencil).toBeInTheDocument();
+    }
+  });
+
+  test('non-compact mode: every row (filled or unfilled) exposes a pencil edit affordance', () => {
+    const empty = createDefaultLeadDraft();
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={empty}
+        compact={false}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const rows = screen.getAllByTestId('brief-row');
+    expect(rows.length).toBe(8);
+    for (const row of rows) {
+      const pencil = within(row as HTMLElement).getByRole('button', { name: /^edit /i });
+      expect(pencil).toBeInTheDocument();
+    }
+  });
+
+  test('clicking an unfilled row opens the editor on that row', () => {
+    const onChange = vi.fn();
+    const empty = createDefaultLeadDraft();
+    render(
+      <ProjectBriefCard
+        draft={empty}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const companyRow = screen.getByText('Company').closest('[data-testid="brief-row"]') as HTMLElement;
+    expect(companyRow.getAttribute('data-filled')).toBe('false');
+    fireEvent.click(companyRow);
+    const input = within(companyRow).getByRole('textbox') as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input.value).toBe('');
+  });
+
+  test('clicking the pencil on a row opens the editor and does not bubble', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const emailRow = screen.getByText('Email').closest('[data-testid="brief-row"]') as HTMLElement;
+    const pencil = within(emailRow).getByTestId('brief-row-edit-contactEmail');
+    fireEvent.click(pencil);
+    const input = within(emailRow).getByRole('textbox') as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    // Only the editor should be present inside the row, not also the read-only
+    // value div. (Bubbling would not open another editor, but checking that
+    // the editor is exactly once proves the row-click handler didn't re-fire.)
+    expect(within(emailRow).getAllByRole('textbox')).toHaveLength(1);
+  });
+
+  test('clicking an unfilled row in non-compact mode also opens the editor', () => {
+    const onChange = vi.fn();
+    const empty = createDefaultLeadDraft();
+    render(
+      <ProjectBriefCard
+        draft={empty}
+        compact={false}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const companyRow = screen.getByText('Company').closest('[data-testid="brief-row"]') as HTMLElement;
+    expect(companyRow.getAttribute('data-filled')).toBe('false');
+    fireEvent.click(companyRow);
+    const input = within(companyRow).getByRole('textbox') as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input.value).toBe('');
+  });
+
+  test('brief rows carry cursor: pointer when onChange is provided', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const rows = screen.getAllByTestId('brief-row');
+    for (const row of rows) {
+      expect((row as HTMLElement).style.cursor).toBe('pointer');
     }
   });
 });

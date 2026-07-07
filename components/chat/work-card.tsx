@@ -39,6 +39,7 @@ export function WorkCard({
       style={{
         display: 'flex',
         flexDirection: 'column',
+        alignSelf: 'stretch',
         minWidth: '240px',
         minHeight: '220px',
         maxWidth: '300px',
@@ -51,6 +52,9 @@ export function WorkCard({
         flexShrink: 0,
         cursor: 'grab',
         userSelect: 'none',
+        WebkitUserSelect: 'none',
+        MozUserSelect: 'none',
+        msUserSelect: 'none',
         scrollSnapAlign: 'start',
         transition: 'border-color 0.15s ease, background 0.15s ease'
       }}
@@ -181,12 +185,14 @@ export function WorkCardRow({
 }) {
   const rowRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
+  const hasScrolledRef = useRef<boolean>(false);
   const [isDragging, setIsDragging] = useState(false);
   const [scrollMetrics, setScrollMetrics] = useState<{ pageCount: number; activePage: number }>({
     pageCount: 1,
     activePage: 0
   });
   const [rowWidth, setRowWidth] = useState<number>(0);
+  const [hasScrolled, setHasScrolled] = useState(false);
 
   function beginDrag(clientX: number) {
     if (!rowRef.current) return;
@@ -204,10 +210,22 @@ export function WorkCardRow({
       dragStateRef.current.isActive = false;
     }
     setIsDragging(false);
+
+    if (!rowRef.current) return;
+    const row = rowRef.current;
+    const clientWidth = row.clientWidth;
+    if (clientWidth <= 0) return;
+    const max = row.scrollWidth - clientWidth;
+    if (max <= 0) return;
+    const nearest = Math.max(0, Math.min(max, Math.round(row.scrollLeft / clientWidth) * clientWidth));
+    if (Math.abs(nearest - row.scrollLeft) < 1) return;
+    row.scrollTo({ left: nearest, behavior: 'smooth' });
   }
 
   function handleMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
+    // Prevent the underlying <a> from being activated when the user starts a drag.
+    event.preventDefault();
     beginDrag(event.clientX);
   }
 
@@ -276,14 +294,24 @@ export function WorkCardRow({
       setRowWidth(clientWidth);
     }
 
+    function onScroll() {
+      const el = rowRef.current;
+      if (!el) return;
+      recompute();
+      if (el.scrollLeft > 4 && !hasScrolledRef.current) {
+        hasScrolledRef.current = true;
+        setHasScrolled(true);
+      }
+    }
+
     recompute();
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(recompute) : null;
     if (observer) observer.observe(row);
-    row.addEventListener('scroll', recompute, { passive: true });
+    row.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', recompute);
     return () => {
       if (observer) observer.disconnect();
-      row.removeEventListener('scroll', recompute);
+      row.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', recompute);
     };
   }, [entries.length]);
@@ -317,6 +345,7 @@ export function WorkCardRow({
         position: 'relative',
         display: 'flex',
         flexDirection: 'row',
+        alignItems: 'stretch',
         gap: '14px',
         overflowX: 'auto',
         overflowY: 'hidden',
@@ -327,6 +356,7 @@ export function WorkCardRow({
         cursor: isDragging ? 'grabbing' : 'grab',
         userSelect: isDragging ? 'none' : 'auto',
         touchAction: 'pan-x',
+        overscrollBehaviorX: 'contain',
         minHeight: '220px'
       }}
     >
@@ -346,40 +376,40 @@ export function WorkCardRow({
           pointerEvents: 'none'
         }}
       />
-      {isOverflowing && (
+      {isOverflowing && !hasScrolled && (
         <div
-          data-testid="work-card-row-dots"
+          data-testid="work-card-row-swipe-hint"
           aria-hidden="true"
           style={{
             position: 'absolute',
-            right: '8px',
-            bottom: '8px',
+            right: '14px',
+            bottom: '10px',
             display: 'flex',
-            gap: '4px',
-            padding: '4px 8px',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '4px 10px',
             borderRadius: '999px',
             background: 'rgba(16, 16, 16, 0.55)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            pointerEvents: 'none'
+            border: `1px solid ${brandTokens.colors.subtleBorder}`,
+            pointerEvents: 'none',
+            fontSize: 10,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: brandTokens.colors.mutedText,
+            opacity: hasScrolled ? 0 : 0.85,
+            transition: 'opacity 0.4s ease'
           }}
         >
-          {Array.from({ length: scrollMetrics.pageCount }).map((_, i) => (
-            <span
-              key={i}
-              data-testid="work-card-row-dot"
-              data-active={i === scrollMetrics.activePage ? 'true' : 'false'}
-              style={{
-                width: '5px',
-                height: '5px',
-                borderRadius: '50%',
-                background:
-                  i === scrollMetrics.activePage
-                    ? brandTokens.colors.warmGold
-                    : 'rgba(255, 255, 255, 0.35)',
-                transition: 'background 0.15s ease'
-              }}
+          <span>Swipe</span>
+          <svg width="14" height="10" viewBox="0 0 14 10" fill="none" aria-hidden="true">
+            <path
+              d="M1 5h11M8 1l4 4-4 4"
+              stroke={brandTokens.colors.warmGold}
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
-          ))}
+          </svg>
         </div>
       )}
     </div>
