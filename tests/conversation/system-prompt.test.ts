@@ -256,3 +256,13 @@ test('system prompt treats low-info confirmations as confirmations, not new answ
   const window = /INFERENCE DISCIPLINE[\s\S]*?(?=INFERENCE|BRIEF FIELD|$)/i.exec(prompt)?.[0] ?? '';
   expect(window.toLowerCase()).toMatch(/confirmations.*do not fill new fields|confirmations.*confirm what was just said/i);
 });
+
+test('system prompt accumulates additional project context into projectScope across turns', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/UPDATING PROJECT SCOPE ACROSS TURNS/i);
+  expect(prompt).toMatch(/projectScope should accumulate/i);
+  expect(prompt).toMatch(/fold it into projectScope/i);
+  expect(prompt).toMatch(/single growing field/i);
+  expect(prompt).toMatch(/30s 2D animation/i);
+  expect(prompt).toMatch(/IKEA/i);
+});
