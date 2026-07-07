@@ -105,7 +105,7 @@ async function callOpenAICompatible(
   const body: Record<string, unknown> = {
     model,
     messages,
-    max_tokens: useTools ? 1024 : 512,
+    max_tokens: useTools ? 1600 : 512,
     temperature: useTools ? 0.4 : 0.6
   };
   if (useTools) {
@@ -135,8 +135,16 @@ async function callOpenAICompatible(
   }
 
   const data = await response.json();
-  const message = data?.choices?.[0]?.message;
+  const choice = data?.choices?.[0];
+  const message = choice?.message;
   const content = typeof message?.content === 'string' ? message.content : getFallbackResponse();
+
+  if (choice?.finish_reason === 'length') {
+    const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+    if (!hasToolCalls) {
+      console.warn('[chat] response truncated: finish_reason=length');
+    }
+  }
 
   if (useTools && Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
     const firstCall = message.tool_calls[0];

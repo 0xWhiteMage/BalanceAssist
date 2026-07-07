@@ -86,7 +86,7 @@ test.describe('balance assist intake via persistent rail', () => {
     // can submit. handleSubmitText returns early while isTyping is true,
     // so wait for the final intro prompt to be visible (i.e. isTyping
     // is back to false) before driving the user input.
-    await expect(page.getByText(/Tell me about your project, or ask me anything/i)).toBeVisible();
+    await expect(page.getByText(/What can I help you with today\?/i)).toBeVisible();
 
     // The rail is gated on hasProjectIntent. Before the user has sent
     // any intake-bearing message, the rail must NOT be in the DOM.

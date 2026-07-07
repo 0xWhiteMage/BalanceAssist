@@ -34,6 +34,19 @@ describe('POST /api/chat', () => {
     };
   }
 
+  function makeTruncatedResponse(content: string, finishReason: string) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: { content },
+          finish_reason: finishReason
+        }]
+      })
+    };
+  }
+
   async function postChat(body: unknown) {
     const { POST } = await import('@/app/api/chat/route');
     const req = new Request('http://localhost/api/chat', {
@@ -167,5 +180,26 @@ describe('POST /api/chat', () => {
     expect(data.briefReady).toBe(false);
     expect(data.reviewPrompt).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('truncated response (finish_reason=length) returns the partial message verbatim and logs a warning', async () => {
+    const partial = 'Balance Studio has shipped 110+ projects across APAC, working with clients like Heineken, ' +
+      'Red Bull, and Visa. Their team includes directors, producers, cinematographers, animators, VFX artists, editors -';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    global.fetch = vi.fn(async () => makeTruncatedResponse(partial, 'length')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'Tell me everything about Balance Studio' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBe(partial);
+    expect(warnSpy).toHaveBeenCalledWith('[chat] response truncated: finish_reason=length');
+
+    warnSpy.mockRestore();
   });
 });

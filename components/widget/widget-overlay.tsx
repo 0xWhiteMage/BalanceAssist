@@ -20,6 +20,7 @@ import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from 
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
+import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
 import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
@@ -80,19 +81,6 @@ function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): s
   }
 
   return null;
-}
-
-function detectProjectIntent(draft: LeadDraft): boolean {
-  if (draft.service) return true;
-  if (draft.projectType && draft.projectType.trim().length > 0) return true;
-  if (draft.projectScope && draft.projectScope.trim().length > 0) return true;
-  if (draft.scopePolished && draft.scopePolished.trim().length > 0) return true;
-  if (draft.timelineBand) return true;
-  if (draft.budgetBand) return true;
-  if (draft.contactEmail && draft.contactEmail.trim().length > 0) return true;
-  if (draft.contactName && draft.contactName.trim().length > 0) return true;
-  if (draft.contactCompany && draft.contactCompany.trim().length > 0) return true;
-  return false;
 }
 
 function createAttachment(file: File) {
