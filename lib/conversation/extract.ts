@@ -5,6 +5,16 @@ import type { ConversationStepId } from '@/lib/conversation/types';
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const numberBudgetPattern = /(\d+(?:[.,]\d+)?)\s*(k\b|m\b|thousand\b|million\b)?/i;
 
+const PROJECT_SIGNAL_PATTERN =
+  /\b(video|film|animation|graphic|design|brand|campaign|ad|advert|promo|content|photo|3d|2d|edit|footage|shoot|launch|event|exhibit|production|project|script|storyboard|animatic)\b/i;
+
+const OUT_OF_SCOPE_TRIGGER_PATTERN =
+  /^(draft|homework|essay|writing|math|recipe|cooking|counsel|cry|therapy|emotional|advice|help|support|cancel|stop|bye|goodbye|apply|hire|recruit|subscribe|login|sign in|hi|hello|hey|thanks?|thank you)\b/i;
+
+function hasProjectSignal(text: string): boolean {
+  return PROJECT_SIGNAL_PATTERN.test(text);
+}
+
 type DraftUpdates = Partial<LeadDraft>;
 
 function shouldOverwriteExistingValue(text: string) {
@@ -183,8 +193,8 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
   const trimmedText = text.trim();
   const looksLikeScopeDescription =
     trimmedText.length > 24 &&
-    !/^(apply|hire|recruit|subscribe|login|sign in|hi|hello|hey|thanks?|thank you)\b/i.test(trimmedText) &&
-    !/^(help|support|cancel|stop|bye|goodbye)\b/i.test(trimmedText);
+    !OUT_OF_SCOPE_TRIGGER_PATTERN.test(trimmedText) &&
+    hasProjectSignal(trimmedText);
 
   if (
     (currentStep === 'intro' || currentStep === 'scope' || currentStep === 'service') &&

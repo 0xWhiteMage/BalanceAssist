@@ -55,3 +55,49 @@ test('captures company name from "from" phrasing', () => {
 
   expect((draft as { contactCompany?: string }).contactCompany).toBe('OpenAI Labs');
 });
+
+test('does NOT capture projectScope for an out-of-scope "draft text for my homework" intro message', () => {
+  const draft = applyTextToDraft(
+    'can you help me draft text for my homework?',
+    createDefaultLeadDraft(),
+    'intro'
+  );
+
+  expect(draft.projectScope).toBe('');
+});
+
+test('does NOT capture projectScope for out-of-scope triggers (homework, recipe, therapy)', () => {
+  expect(
+    applyTextToDraft(
+      'help me write a homework essay please',
+      createDefaultLeadDraft(),
+      'intro'
+    ).projectScope
+  ).toBe('');
+
+  expect(
+    applyTextToDraft(
+      'I just want a recipe for chicken curry tonight',
+      createDefaultLeadDraft(),
+      'intro'
+    ).projectScope
+  ).toBe('');
+
+  expect(
+    applyTextToDraft(
+      'I need emotional therapy advice about my mother',
+      createDefaultLeadDraft(),
+      'intro'
+    ).projectScope
+  ).toBe('');
+});
+
+test('DOES capture projectScope for an in-scope "30s 3D animation" intro message (positive case)', () => {
+  const draft = applyTextToDraft(
+    'I want a 30s 3D animation for our launch',
+    createDefaultLeadDraft(),
+    'intro'
+  );
+
+  expect(draft.projectScope).toContain('30s 3D animation');
+});
