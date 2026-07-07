@@ -29,9 +29,14 @@ test('chooses the next missing conversation step dynamically', () => {
 });
 
 test('captures a direct contact name response', () => {
-  const draft = applyTextToDraft('Jane Lee', createDefaultLeadDraft(), 'contact-name');
+  const draft = applyTextToDraft("my name is Jane Lee", createDefaultLeadDraft(), 'contact-name');
 
   expect(draft.contactName).toBe('Jane Lee');
+});
+
+test('contact-name step rejects raw text that has no explicit name pattern', () => {
+  const draft = applyTextToDraft('yes, an event video', createDefaultLeadDraft(), 'contact-name');
+  expect(draft.contactName).toBe('');
 });
 
 test('captures company name from natural phrasing', () => {

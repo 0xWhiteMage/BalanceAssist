@@ -195,7 +195,8 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
   }
 
   if (currentStep === 'contact-name' && !updates.contactName && (!currentDraft.contactName || overwrite)) {
-    updates.contactName = text.trim();
+    const explicit = text.match(/(?:my name is|i'm called|this is|name's)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/i);
+    if (explicit?.[1]) updates.contactName = explicit[1].trim();
   }
 
   if (currentStep === 'contact-email' && !updates.contactEmail && (!currentDraft.contactEmail || overwrite)) {

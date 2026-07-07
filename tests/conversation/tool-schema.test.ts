@@ -1,12 +1,14 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import {
+  guardAgainstFabricatedBriefFields,
   recordBriefUpdatesJsonSchema,
   recordBriefUpdatesSchema,
   sanitizeShareWork,
   shareWorkJsonSchema,
   shareWorkSchema
 } from '@/lib/conversation/tool-schema';
+import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);
@@ -278,5 +280,129 @@ describe('sanitizeShareWork', () => {
   test('handles missing input', () => {
     expect(sanitizeShareWork(null).slugs).toEqual([]);
     expect(sanitizeShareWork(undefined).slugs).toEqual([]);
+  });
+});
+
+describe('guardAgainstFabricatedBriefFields', () => {
+  test('strips a fabricated contactName that the user message did not contain', () => {
+    const prior = createDefaultLeadDraft();
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s animation',
+        scopePolished: '',
+        timelineBand: '',
+        budgetBand: '',
+        contactName: 'Whatever',
+        contactCompany: '',
+        contactEmail: ''
+      },
+      prior,
+      'yes, an event video'
+    );
+    expect(guarded.contactName).toBe('');
+  });
+
+  test('keeps a contactName that the user message did contain as a phrase', () => {
+    const prior = createDefaultLeadDraft();
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        service: '',
+        projectType: '',
+        projectScope: '',
+        scopePolished: '',
+        timelineBand: '',
+        budgetBand: '',
+        contactName: 'Jayden',
+        contactCompany: '',
+        contactEmail: ''
+      },
+      prior,
+      'my name is Jayden, I have a 30s animation project'
+    );
+    expect(guarded.contactName).toBe('Jayden');
+  });
+
+  test('keeps a contactName that already exists in the prior draft (no fabrication check needed)', () => {
+    const prior = { ...createDefaultLeadDraft(), contactName: 'Existing User' };
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        service: '',
+        projectType: '',
+        projectScope: '',
+        scopePolished: '',
+        timelineBand: '',
+        budgetBand: '',
+        contactName: 'Existing User',
+        contactCompany: '',
+        contactEmail: ''
+      },
+      prior,
+      'just a follow-up'
+    );
+    expect(guarded.contactName).toBe('Existing User');
+  });
+
+  test('strips a fabricated contactEmail when the user message does not contain it', () => {
+    const prior = createDefaultLeadDraft();
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        service: 'production',
+        projectType: '',
+        projectScope: '30s animation',
+        scopePolished: '',
+        timelineBand: '',
+        budgetBand: '',
+        contactName: '',
+        contactCompany: '',
+        contactEmail: 'fabricated@example.com'
+      },
+      prior,
+      '30s animation'
+    );
+    expect(guarded.contactEmail).toBe('');
+  });
+
+  test('strips a fabricated contactCompany when the user message does not contain it', () => {
+    const prior = createDefaultLeadDraft();
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        service: 'production',
+        projectType: '',
+        projectScope: '30s animation',
+        scopePolished: '',
+        timelineBand: '',
+        budgetBand: '',
+        contactName: '',
+        contactCompany: 'Hallucinated Co',
+        contactEmail: ''
+      },
+      prior,
+      '30s animation'
+    );
+    expect(guarded.contactCompany).toBe('');
+  });
+
+  test('preserves non-name fields verbatim (no fabrication guard on scope, timeline, etc.)', () => {
+    const prior = createDefaultLeadDraft();
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s animation',
+        scopePolished: '',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: '',
+        contactCompany: '',
+        contactEmail: ''
+      },
+      prior,
+      '30s animation'
+    );
+    expect(guarded.projectScope).toBe('30s animation');
+    expect(guarded.timelineBand).toBe('1-2-months');
+    expect(guarded.budgetBand).toBe('20k-50k');
   });
 });

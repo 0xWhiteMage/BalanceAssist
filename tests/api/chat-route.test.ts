@@ -94,7 +94,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: 'I have a 30s animation' }],
+      messages: [{ role: 'user', content: 'I have a 30s animation, my name is Tool' }],
       context: { step: 'intro', draft: '{}' }
     });
 
@@ -329,7 +329,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: '30s animation with mood reference' }],
+      messages: [{ role: 'user', content: '30s animation with mood reference, my name is Tool' }],
       context: { step: 'intro', draft: '{}' }
     });
 
@@ -339,5 +339,36 @@ describe('POST /api/chat', () => {
     expect(data.sharedWork).toBeDefined();
     expect(data.sharedWork.entries).toHaveLength(1);
     expect(data.sharedWork.entries[0].category).toBe('mood');
+  });
+
+  test('fabrication guard strips a hallucinated contactName when the user message is only about scope', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'Got it.',
+      'record_brief_updates',
+      JSON.stringify({
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s animation',
+        scopePolished: '',
+        timelineBand: '',
+        budgetBand: '',
+        contactEmail: '',
+        contactName: 'Whatever',
+        contactCompany: ''
+      })
+    )) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'yes, an event video' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.draftUpdates.contactName).toBe('');
+    expect(data.draftUpdates.projectScope).toBe('30s animation');
+    expect(data.briefReady).toBe(false);
   });
 });

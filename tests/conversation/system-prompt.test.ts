@@ -109,3 +109,16 @@ test('system prompt embeds the compact works index', () => {
   expect(prompt).toMatch(/milo \| MILO/);
   expect(prompt).toMatch(/ae-junior-club \| EA Junior Club/);
 });
+
+test('system prompt has the speculative-commitment gate (does NOT pivot to brief-building on "I might")', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/WHEN THE USER HINTS/);
+  expect(prompt).toMatch(/I might/);
+  expect(prompt).toMatch(/do NOT pivot to brief-building/i);
+});
+
+test('system prompt includes the length-discipline rule for long answers', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/GENERAL ANSWERS — LENGTH DISCIPLINE/);
+  expect(prompt).toMatch(/NEVER list more than 5 works/i);
+});

@@ -10,6 +10,7 @@ import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
 import { checkRateLimit } from '@/lib/conversation/rate-limit';
 import { isBriefReadyForApproval, missingReviewFields, REVIEW_PROMPT } from '@/lib/conversation/review-state';
 import {
+  guardAgainstFabricatedBriefFields,
   recordBriefUpdatesJsonSchema,
   recordBriefUpdatesSchema,
   sanitizeShareWork,
@@ -17,6 +18,8 @@ import {
 } from '@/lib/conversation/tool-schema';
 import { listAllWorks, type WorkEntry } from '@/lib/conversation/works-search';
 import type { ConversationStepId } from '@/lib/conversation/types';
+import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
+import type { LeadDraft } from '@/lib/onboarding/types';
 
 const chatMessageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant']),
@@ -44,7 +47,7 @@ const PROVIDER_TIMEOUT_MS = 15000;
 const TOOL_NAME = 'record_brief_updates';
 const SHARE_WORK_TOOL_NAME = 'share_work';
 
-export type SharedWorkEntry = {
+type SharedWorkEntry = {
   title: string;
   url: string;
   description: string;
@@ -53,7 +56,7 @@ export type SharedWorkEntry = {
   slug: string;
 };
 
-export type SharedWork = {
+type SharedWork = {
   entries: SharedWorkEntry[];
 };
 
@@ -140,7 +143,12 @@ async function callOpenAICompatible(
   apiKey: string,
   model: string,
   messages: OpenAIMessage[],
-  options?: { useTools?: boolean; sessionId?: string }
+  options?: {
+    useTools?: boolean;
+    sessionId?: string;
+    priorDraft?: Record<string, string>;
+    userMessage?: string;
+  }
 ): Promise<ProviderResult> {
   const useTools = options?.useTools ?? false;
   const body: Record<string, unknown> = {
@@ -207,7 +215,15 @@ async function callOpenAICompatible(
           const parsed = JSON.parse(call.function.arguments);
           const result = recordBriefUpdatesSchema.safeParse(parsed);
           if (result.success) {
-            toolArguments = result.data;
+            const guarded = guardAgainstFabricatedBriefFields(
+              result.data as Record<string, unknown>,
+              {
+                ...createDefaultLeadDraft(),
+                ...(options?.priorDraft as Partial<LeadDraft> | undefined)
+              },
+              options?.userMessage ?? ''
+            );
+            toolArguments = guarded;
           } else {
             console.warn('[chat] record_brief_updates tool arguments failed schema validation', {
               sessionId: options?.sessionId,
@@ -381,7 +397,7 @@ export async function POST(request: Request) {
         env.DEEPSEEK_API_KEY,
         model,
         llmMessages,
-        { useTools: true, sessionId }
+        { useTools: true, sessionId, priorDraft: ctx.priorDraft, userMessage: lastUserMessage }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
@@ -402,7 +418,7 @@ export async function POST(request: Request) {
         env.OPENAI_API_KEY,
         model,
         llmMessages,
-        { useTools: true, sessionId }
+        { useTools: true, sessionId, priorDraft: ctx.priorDraft, userMessage: lastUserMessage }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
