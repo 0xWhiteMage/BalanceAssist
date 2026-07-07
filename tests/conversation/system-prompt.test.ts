@@ -43,8 +43,22 @@ test('system prompt worked example: 30s animation maps to empty timelineBand/bud
 
 test('system prompt asks one focused question when starting a brief', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/first obvious brief question/i);
   expect(prompt).toMatch(/format and length/i);
+});
+
+test('system prompt ALWAYS ends brief replies with a follow-up question', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/ALWAYS end with a follow-up question/i);
+});
+
+test('system prompt gives a concrete next-question for projectScope-empty', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/What's the project about\?/);
+});
+
+test('system prompt tells the model not to punt on low-information replies during brief mode', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/Do NOT punt to the human team/i);
 });
 
 test('system prompt suppresses the follow-up question when the brief is already reviewable', () => {
