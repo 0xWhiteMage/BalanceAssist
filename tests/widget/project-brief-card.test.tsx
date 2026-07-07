@@ -16,6 +16,19 @@ const readyDraft = {
 };
 
 describe('ProjectBriefCard', () => {
+  test('shows the "Project Brief" title and no "key fields captured" subhead', () => {
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={false}
+        readyForApproval={false}
+        approved={false}
+      />
+    );
+    expect(screen.getByText('Project Brief')).toBeInTheDocument();
+    expect(screen.queryByText(/key fields captured/i)).not.toBeInTheDocument();
+  });
+
   test('defaults to the full row layout (compact=false) with side-by-side label and value', () => {
     render(
       <ProjectBriefCard
@@ -80,5 +93,17 @@ describe('ProjectBriefCard', () => {
     );
     expect(screen.queryAllByTestId('brief-row-status')).toHaveLength(0);
     expect(screen.queryAllByTestId('brief-row-value')).toHaveLength(0);
+  });
+
+  test('compact mode omits the "key fields captured" caption (progress lives on the rail)', () => {
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+      />
+    );
+    expect(screen.queryByText(/key fields captured/i)).not.toBeInTheDocument();
   });
 });
