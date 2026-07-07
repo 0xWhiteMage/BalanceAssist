@@ -146,7 +146,7 @@ async function callOpenAICompatible(
   const body: Record<string, unknown> = {
     model,
     messages,
-    max_tokens: useTools ? 1600 : 512,
+    max_tokens: useTools ? 2400 : 600,
     temperature: useTools ? 0.4 : 0.6
   };
   if (useTools) {
