@@ -2,12 +2,11 @@
 
 import { memo } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
-import type { ChatMessage, InlineCard, QuickReply } from '@/lib/conversation/types';
+import type { ChatMessage, InlineCard } from '@/lib/conversation/types';
 import { WorkCardRow, type WorkCardCategory } from '@/components/chat/work-card';
 
 type MessageBubbleProps = {
   message: ChatMessage;
-  onQuickReply?: (value: string, label: string) => void;
   onInlineCardClick?: (card: InlineCard) => void;
 };
 
@@ -39,7 +38,7 @@ function renderText(text: string) {
   });
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, onQuickReply, onInlineCardClick }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onInlineCardClick }: MessageBubbleProps) {
   const isBot = message.sender === 'bot';
 
   if (message.isSystem) {
@@ -192,47 +191,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onQuickReply
                 category: (entry.category as WorkCardCategory) ?? 'reference'
               }))}
             />
-          </div>
-        )}
-
-        {message.quickReplies && onQuickReply && (
-          <div
-            style={{
-              marginLeft: '36px',
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '6px',
-              marginTop: '4px'
-            }}
-          >
-            {message.quickReplies.map((reply) => (
-              <button
-                key={reply.value}
-                onClick={() => onQuickReply(reply.value, reply.label)}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: '20px',
-                  border: `1px solid ${brandTokens.colors.border}`,
-                  background: 'transparent',
-                  color: brandTokens.colors.lightText,
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  fontFamily: brandTokens.typography.ui,
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = brandTokens.colors.warmGold;
-                  e.currentTarget.style.background = 'rgba(219, 181, 128, 0.08)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = brandTokens.colors.border;
-                  e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                {reply.label}
-              </button>
-            ))}
           </div>
         )}
       </div>
