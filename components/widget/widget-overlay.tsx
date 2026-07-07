@@ -68,6 +68,19 @@ function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): s
   return null;
 }
 
+function detectProjectIntent(draft: LeadDraft): boolean {
+  if (draft.service) return true;
+  if (draft.projectType && draft.projectType.trim().length > 0) return true;
+  if (draft.projectScope && draft.projectScope.trim().length > 0) return true;
+  if (draft.scopePolished && draft.scopePolished.trim().length > 0) return true;
+  if (draft.timelineBand) return true;
+  if (draft.budgetBand) return true;
+  if (draft.contactEmail && draft.contactEmail.trim().length > 0) return true;
+  if (draft.contactName && draft.contactName.trim().length > 0) return true;
+  if (draft.contactCompany && draft.contactCompany.trim().length > 0) return true;
+  return false;
+}
+
 function createAttachment(file: File) {
   const size =
     file.size > 1024 * 1024
@@ -111,6 +124,7 @@ export function WidgetOverlay({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
   const [draft, setDraft] = useState<LeadDraft>(createDefaultLeadDraft());
+  const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -478,6 +492,7 @@ const startConversation = useCallback(async () => {
     messagesRef.current = [];
     setMessages([]);
     setDraft(createDefaultLeadDraft());
+    setHasProjectIntent(false);
     setBriefApproved(false);
     setCurrentStep('intro');
     setHasStarted(false);
@@ -556,6 +571,7 @@ const startConversation = useCallback(async () => {
           }
         }
         setDraft(merged);
+        setHasProjectIntent(detectProjectIntent(merged));
         setBriefApproved(false);
 
         const nextStep = getNextConversationStep(merged);
@@ -650,10 +666,12 @@ const startConversation = useCallback(async () => {
     if (step.freeText || currentStep === 'intro') {
       updatedDraft = applyTextToDraft(value, draft, currentStep);
       setDraft(updatedDraft);
+      setHasProjectIntent(detectProjectIntent(updatedDraft));
       setBriefApproved(false);
     } else if (step.field) {
       updatedDraft = { ...draft, [step.field]: value };
       setDraft(updatedDraft);
+      setHasProjectIntent(detectProjectIntent(updatedDraft));
       setBriefApproved(false);
     }
 
@@ -1005,7 +1023,7 @@ const startConversation = useCallback(async () => {
               position: 'relative'
             }}
           >
-            {!isTeamConnected && (
+            {!isTeamConnected && hasProjectIntent && (
               <div
                 data-testid="review-rail"
                 style={{

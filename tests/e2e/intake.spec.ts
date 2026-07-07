@@ -1,24 +1,27 @@
 import { test, expect } from '@playwright/test';
 
-// Playwright E2E covering the tool-calling intake path against the new
-// persistent-rail layout (introduced in commit c892654):
-//   1. user types a free-form project prompt
-//   2. /api/chat is intercepted and returns a complete brief via
+// Playwright E2E covering the tool-calling intake path against the
+// gated persistent-rail layout (reintroduced in fix/brief-rail-gating):
+//   1. /preview mounts the widget with autoOpen=true; until the user
+//      sends an intake-bearing message, hasProjectIntent is false and
+//      the left rail is hidden (chat fills the widget width).
+//   2. user types a free-form project prompt into the intro step
+//   3. /api/chat is intercepted and returns a complete brief via
 //      `record_brief_updates`-style draftUpdates + briefReady: true
-//   3. the persistent left rail (ReviewPanel) is visible from the moment
-//      the widget opens, with no slide-out / edge tab interaction needed
-//   4. the rail auto-switches from "essentials" to "summary" mode and
+//   4. once the AI captures any reviewable field, hasProjectIntent
+//      flips to true and the persistent left rail (ReviewPanel) appears
+//   5. the rail auto-switches from "essentials" to "summary" mode and
 //      shows the "Approve & send to team" CTA once all 8 reviewable
 //      fields are captured
-//   5. clicking that CTA hits /api/leads/finalize (mocked) and the
+//   6. clicking that CTA hits /api/leads/finalize (mocked) and the
 //      widget appends the post-approval confirmation
 //
 // The widget is mounted on /preview with `autoOpen={true}`, so the chat
-// surface AND the left rail are both already visible when the page
-// loads — no launcher click and no rail-opener click needed.
+// surface is visible the moment the page loads — but the rail only
+// appears after the AI confirms project intent.
 
 test.describe('balance assist intake via persistent rail', () => {
-  test('shows the rail from open, auto-switches to summary, and triggers send', async ({ page }) => {
+  test('rail is gated on hasProjectIntent, then auto-switches to summary and triggers send', async ({ page }) => {
     // Mock /api/sessions so ensureSession() inside the widget can resolve
     // when the user clicks "Approve & send to team".
     await page.route('**/api/sessions', async (route) => {
@@ -79,10 +82,10 @@ test.describe('balance assist intake via persistent rail', () => {
     const input = page.getByPlaceholder(/Type your message|Message the team/i);
     await expect(input).toBeVisible();
 
-    // The persistent left rail must be visible from the moment the
-    // widget opens — no slide-out / edge-tab click needed.
+    // The rail is gated on hasProjectIntent. Before the user has sent
+    // any intake-bearing message, the rail must NOT be in the DOM.
     const rail = page.getByTestId('review-rail');
-    await expect(rail).toBeVisible();
+    await expect(rail).toHaveCount(0);
 
     // Drive a free-form prompt into the intro step. Pressing Enter
     // triggers handleSubmitText -> processFlowAnswer -> handleLLMResponse,
@@ -92,6 +95,11 @@ test.describe('balance assist intake via persistent rail', () => {
 
     // The bot reply from the mocked /api/chat should appear in the chat.
     await expect(page.getByText(/Your brief is ready/i)).toBeVisible();
+
+    // Once the AI merges the draftUpdates from /api/chat,
+    // hasProjectIntent flips to true and the persistent left rail
+    // mounts to the left of the chat column.
+    await expect(rail).toBeVisible();
 
     // Once the merged draft satisfies `isBriefReadyForApproval`, the
     // rail auto-switches from "essentials" to "summary" mode and the
