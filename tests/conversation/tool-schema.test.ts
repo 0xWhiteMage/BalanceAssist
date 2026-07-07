@@ -2,7 +2,10 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import {
   recordBriefUpdatesJsonSchema,
-  recordBriefUpdatesSchema
+  recordBriefUpdatesSchema,
+  sanitizeShareWork,
+  shareWorkJsonSchema,
+  shareWorkSchema
 } from '@/lib/conversation/tool-schema';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -174,4 +177,106 @@ test('Zod and JSON schema agree on negative fixture', () => {
   const zodOk = recordBriefUpdatesSchema.safeParse(negativeFixture).success;
   const jsonOk = validateJsonSchema(negativeFixture);
   expect(zodOk).toBe(jsonOk);
+});
+
+describe('shareWorkSchema', () => {
+  const ajvShare = new Ajv({ allErrors: true, strict: false });
+  const validateShareJsonSchema = ajvShare.compile(shareWorkJsonSchema);
+
+  test('accepts a minimal share_work call (1 slug + default category)', () => {
+    const result = shareWorkSchema.safeParse({ slugs: ['milo'] });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.slugs).toEqual(['milo']);
+      expect(result.data.category).toBe('reference');
+    }
+  });
+
+  test('accepts up to 8 slugs', () => {
+    const result = shareWorkSchema.safeParse({
+      slugs: ['milo', 'razer', 'msi', 'handshakes', 'compare-club', 'filmninja', 'sccc5x', 'sccc-kaki-says'],
+      category: 'pitch'
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.category).toBe('pitch');
+    }
+  });
+
+  test('rejects more than 8 slugs', () => {
+    const result = shareWorkSchema.safeParse({
+      slugs: ['milo', 'razer', 'msi', 'handshakes', 'compare-club', 'filmninja', 'sccc5x', 'sccc-kaki-says', 'sph-the-future-of-skills']
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects empty slug array', () => {
+    const result = shareWorkSchema.safeParse({ slugs: [] });
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects unknown category values', () => {
+    const result = shareWorkSchema.safeParse({ slugs: ['milo'], category: 'looks-cool' });
+    expect(result.success).toBe(false);
+  });
+
+  test('strict mode rejects unknown keys', () => {
+    const result = shareWorkSchema.safeParse({ slugs: ['milo'], evil: 'x' });
+    expect(result.success).toBe(false);
+  });
+
+  test('JSON schema accepts the share_work positive fixture', () => {
+    const valid = validateShareJsonSchema({ slugs: ['milo'], category: 'reference' });
+    expect(valid).toBe(true);
+  });
+});
+
+describe('sanitizeShareWork', () => {
+  test('drops slugs that do not exist in the works file', () => {
+    const result = sanitizeShareWork({ slugs: ['milo', 'made-up-slug'], category: 'reference' });
+    expect(result.slugs).toEqual(['milo']);
+  });
+
+  test('deduplicates slugs and preserves order', () => {
+    const result = sanitizeShareWork({ slugs: ['milo', 'milo', 'razer'], category: 'pitch' });
+    expect(result.slugs).toEqual(['milo', 'razer']);
+  });
+
+  test('caps slugs at 8', () => {
+    const result = sanitizeShareWork({
+      slugs: [
+        'milo',
+        'razer',
+        'msi',
+        'handshakes',
+        'compare-club',
+        'filmninja',
+        'sccc5x',
+        'sccc-kaki-says',
+        'sph-the-future-of-skills'
+      ],
+      category: 'reference'
+    });
+    expect(result.slugs.length).toBe(8);
+  });
+
+  test('returns slugs=[] when every slug is invalid', () => {
+    const result = sanitizeShareWork({ slugs: ['nope-1', 'nope-2'], category: 'reference' });
+    expect(result.slugs).toEqual([]);
+  });
+
+  test('defaults category to reference for unknown values', () => {
+    const result = sanitizeShareWork({ slugs: ['milo'], category: 'gibberish' });
+    expect(result.category).toBe('reference');
+  });
+
+  test('accepts mood and pitch categories', () => {
+    expect(sanitizeShareWork({ slugs: ['milo'], category: 'mood' }).category).toBe('mood');
+    expect(sanitizeShareWork({ slugs: ['milo'], category: 'pitch' }).category).toBe('pitch');
+  });
+
+  test('handles missing input', () => {
+    expect(sanitizeShareWork(null).slugs).toEqual([]);
+    expect(sanitizeShareWork(undefined).slugs).toEqual([]);
+  });
 });

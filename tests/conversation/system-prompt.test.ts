@@ -93,3 +93,19 @@ test('system prompt profile includes the tool stack', () => {
   expect(prompt).toMatch(/Premiere Pro/);
   expect(prompt).toMatch(/After Effects/);
 });
+
+test('system prompt includes the share_work tool section', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/SHARE WORK TOOL/);
+  expect(prompt).toMatch(/share_work/);
+  expect(prompt).toMatch(/reference/);
+  expect(prompt).toMatch(/mood/);
+  expect(prompt).toMatch(/pitch/);
+});
+
+test('system prompt embeds the compact works index', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/COMPACT WORKS INDEX/);
+  expect(prompt).toMatch(/milo \| MILO/);
+  expect(prompt).toMatch(/ae-junior-club \| EA Junior Club/);
+});

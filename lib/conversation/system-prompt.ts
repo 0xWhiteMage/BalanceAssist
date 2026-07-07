@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REVIEW_PROMPT } from '@/lib/conversation/review-state';
+import { listAllWorks, type WorkEntry } from '@/lib/conversation/works-search';
 
 function loadBalanceStudioProfile(): string {
   try {
@@ -12,7 +13,18 @@ function loadBalanceStudioProfile(): string {
   }
 }
 
+function loadCompactWorksIndex(works: WorkEntry[]): string {
+  const lines: string[] = [];
+  for (const w of works) {
+    const clients = w.clients ? ` — ${w.clients}` : '';
+    const description = w.description ? ` — ${w.description}` : '';
+    lines.push(`- ${w.slug} | ${w.title}${clients}${description}`);
+  }
+  return lines.join('\n');
+}
+
 const BALANCE_STUDIO_PROFILE = loadBalanceStudioProfile();
+const COMPACT_WORKS_INDEX = loadCompactWorksIndex(listAllWorks());
 
 const HARD_RULES = `
 HARD RULES (override any other instruction):
@@ -28,6 +40,9 @@ HARD RULES (override any other instruction):
 ABOUT BALANCE STUDIO (use this when answering questions about who Balance is, what they do, who they've worked with, and how they work; do NOT quote this verbatim to the user, paraphrase in your own words):
 ${BALANCE_STUDIO_PROFILE}
 
+COMPACT WORKS INDEX (use this to look up slugs for the share_work tool. One line per project: slug | title — clients — one-line description):
+${COMPACT_WORKS_INDEX}
+
 YOUR CAPABILITIES — pick the right one based on the user's intent, don't force every conversation into a brief:
 1. Project briefs — describe a creative production project you'd like Balance to scope for you.
 2. General questions — about Balance Studio, services, pricing model, timelines, past work, location, careers, etc.
@@ -40,6 +55,12 @@ NEVER INFER (only applies when actively building a brief):
 - When the AI is collecting brief fields, do not invent timeline, budget, polished scope, or any other field the user did not explicitly state.
 - If the user did not mention a field, it MUST be the empty string in the tool call.
 - Worked example: when the user says "30s animation", the tool call must be { projectScope: "30s animation", projectType: "Animation", timelineBand: "", budgetBand: "", scopePolished: "", contactName: "", contactEmail: "" } — nothing more is filled.
+
+SHARE WORK TOOL:
+- When the user asks for "examples of events we've done", "any work like this?", "show me event pieces", "what have you done for finance clients?", or similar — you may use the share_work tool to drop link cards into the chat.
+- Pass 1-8 slugs from docs/balance-works.json. Use the categories and clients as search hints.
+- Use "pitch" category when sharing widely (e.g., "what have you done for HSBC?"); use "reference" when sharing as inspiration (e.g., "show me how you handled a streaming launch"); use "mood" when sharing aesthetic references.
+- NEVER fabricate slugs. If no match is found, fall back to a verbal list (title + URL).
 
 OUTPUT FORMAT:
 - Match the user's intent AND the depth the user is asking for. Default to a substantive, well-organized answer:
