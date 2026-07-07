@@ -491,4 +491,60 @@ describe('POST /api/chat', () => {
     expect(data.messages).toBeUndefined();
     expect(data.truncated).toBe(false);
   });
+
+  test('5-paragraph response is capped at 4 bubbles (first 3 plus a combined tail)', async () => {
+    const longReply = 'One.\n\nTwo.\n\nThree.\n\nFour.\n\nFive.';
+    global.fetch = vi.fn(async () => makeTruncatedResponse(longReply, 'stop')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'long answer please' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBeUndefined();
+    expect(Array.isArray(data.messages)).toBe(true);
+    const bubbles = data.messages as string[];
+    expect(bubbles).toHaveLength(4);
+    expect(bubbles[0]).toBe('One.');
+    expect(bubbles[1]).toBe('Two.');
+    expect(bubbles[2]).toBe('Three.');
+    expect(bubbles[3]).toContain('Four.');
+    expect(bubbles[3]).toContain('Five.');
+  });
+
+  test('1-paragraph response returns a single message field (no messages[] array)', async () => {
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Just one paragraph.', 'stop')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'brief' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBe('Just one paragraph.');
+    expect(data.messages).toBeUndefined();
+  });
+
+  test('replies using --- with more than 4 segments are also capped at 4 bubbles', async () => {
+    const reply = 'A.\n\n---\n\nB.\n\n---\n\nC.\n\n---\n\nD.\n\n---\n\nE.';
+    global.fetch = vi.fn(async () => makeTruncatedResponse(reply, 'stop')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'five explicit bubbles' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBeUndefined();
+    const bubbles = data.messages as string[];
+    expect(bubbles).toHaveLength(4);
+    expect(bubbles[bubbles.length - 1]).toContain('E.');
+  });
 });
