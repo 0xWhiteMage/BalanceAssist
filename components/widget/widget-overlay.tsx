@@ -1051,11 +1051,13 @@ const startConversation = useCallback(async () => {
               style={{
                 flex: 1,
                 overflowY: 'auto',
+                overflowX: 'hidden',
                 padding: '16px 14px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '14px',
                 minWidth: 0,
+                maxWidth: '100%',
                 position: 'relative'
               }}
             >
