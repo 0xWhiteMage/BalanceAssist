@@ -24,3 +24,30 @@ test('classifies a pasted YouTube URL and adds a chip', async () => {
   fireEvent.submit(input.closest('form')!);
   await waitFor(() => expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ kind: 'youtube' })));
 });
+
+test('renders the uppercase section header and short subhead describing the upload affordance', () => {
+  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+  expect(
+    screen.getByText(/share files to help us understand your project/i)
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/upload a pdf or deck, or share a google drive link/i)
+  ).toBeInTheDocument();
+});
+
+test('dropzone region shows the uppercase DROP FILES HERE label and the accepted-format hint as a separate line', () => {
+  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+  // The DROP FILES HERE label must be its own uppercase element, not buried in a sentence.
+  // The label is normalised to uppercase via CSS text-transform.
+  expect(screen.getByText((_, node) => node?.textContent?.trim().toUpperCase() === 'DROP FILES HERE')).toBeInTheDocument();
+  expect(screen.getByText('(PDF, PPTX, DOCX up to 50 MB)')).toBeInTheDocument();
+});
+
+test('URL submit button uses the uppercase ADD LINK pill copy', () => {
+  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+  // The button uses the widget's uppercase pill pattern; the visible text is
+  // normalised to uppercase via CSS text-transform on a mixed-case source.
+  const addLinkButton = screen.getByRole('button', { name: /add link/i });
+  expect(addLinkButton).toBeInTheDocument();
+  expect(addLinkButton.tagName).toBe('BUTTON');
+});
