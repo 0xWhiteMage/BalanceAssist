@@ -1,4 +1,4 @@
-import { budgetBandOptions, serviceOptions, timelineBandOptions } from '@/lib/onboarding/service-options';
+import { serviceOptions } from '@/lib/onboarding/service-options';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { getBudgetGuidance } from '@/lib/qualification/budget-matrix';
 import { getNextStepCopy } from '@/lib/qualification/next-step';
@@ -36,7 +36,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   timeline: {
     id: 'timeline',
     botMessages: ['What timeline are you working with? This helps us understand feasibility and planning.'],
-    quickReplies: timelineBandOptions.map((o) => ({ label: o.label, value: o.id })),
+    freeText: true,
     field: 'timelineBand',
     next: 'budget'
   },
@@ -44,7 +44,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   budget: {
     id: 'budget',
     botMessages: ['What budget range are you working with? Knowing your budget range helps us suggest realistic formats and timelines.'],
-    quickReplies: budgetBandOptions.map((o) => ({ label: o.label, value: o.id })),
+    freeText: true,
     field: 'budgetBand',
     next: 'contact-name'
   },
@@ -74,11 +74,8 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   'offer-upload': {
     id: 'offer-upload',
     botMessages: ['Would you like to share any files — a brief, deck, or reference materials?'],
-    quickReplies: [
-      { label: 'Yes, upload files', value: 'upload' },
-      { label: 'No, continue', value: 'skip' }
-    ],
-    next: (response: string) => (response === 'upload' ? 'upload' : 'handoff')
+    freeText: true,
+    next: 'handoff'
   },
 
   upload: {
@@ -157,7 +154,7 @@ export function tryMatchOption(
   text: string,
   step: ConversationStep
 ): string | null {
-  if (!step.quickReplies) return null;
+  if (!step.quickReplies || step.quickReplies.length === 0) return null;
 
   const normalized = text.toLowerCase().trim();
 

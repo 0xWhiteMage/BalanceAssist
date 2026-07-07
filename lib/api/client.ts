@@ -15,6 +15,8 @@ export type FinalizeLeadResponse = {
   ok: boolean;
   sessionId: string;
   qualificationStatus: string;
+  persisted?: boolean;
+  telegramSent?: boolean;
 };
 
 const REQUEST_TIMEOUT_MS = 10000;

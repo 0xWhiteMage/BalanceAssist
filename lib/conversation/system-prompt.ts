@@ -145,6 +145,11 @@ BRIEF FIELD DISCIPLINE:
 - When the user mentions ANY project detail — even partial — you MUST set projectScope or scopePolished in the tool call. NEVER skip scope just because the user gave a short reply.
 - Do NOT set service AND projectType to the same value. If projectType is set (e.g. "Event & Experience Content", "Video", "Animation"), the service is a sub-category; either pick a specific service that DIFFERS from projectType, or leave service empty. projectType answers WHAT it is; service answers WHAT Balance does. They are not the same field.
 - When the user provides a brand-new detail that differs from an existing draft field AND the previous value was an inference (no explicit user statement), overwrite with the new explicit value.
+
+UPDATING PROJECT SCOPE ACROSS TURNS:
+- projectScope should accumulate what the user has shared. If the user said "30s 2D animation" on turn 1, then on turn 3 they say "IKEA, brief deck, audience is young adults, promote a new chair" — set projectScope to: "30s 2D motion graphics video for social. Brand: IKEA. Audience: young adults. Key message: new chair launch. Source: brief deck."
+- Treat projectScope as a single growing field. Don't create separate projectScope + brand + audience fields.
+- If the user provides a project name / brand / campaign name, fold it into projectScope too.
 `;
 
 export function buildSystemPrompt(context?: {

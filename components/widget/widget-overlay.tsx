@@ -19,7 +19,7 @@ import { brandTokens } from '@/lib/brand-tokens';
 import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
-import { conversationSteps, getQuickReplyLabel, tryMatchOption } from '@/lib/conversation/flow';
+import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
 import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, verifySession, type TeamMessage } from '@/lib/api/client';
@@ -173,6 +173,7 @@ export function WidgetOverlay({
   const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'unconfigured'>('unconfigured');
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -369,7 +370,6 @@ export function WidgetOverlay({
     async (
       text: string,
       options?: {
-        quickReplies?: ChatMessage['quickReplies'];
         inlineCards?: InlineCard[];
         sharedWork?: ChatMessage['sharedWork'];
         isDisclaimer?: boolean;
@@ -391,7 +391,6 @@ export function WidgetOverlay({
         sender: 'bot',
         text,
         timestamp: Date.now(),
-        quickReplies: options?.quickReplies,
         inlineCards: options?.inlineCards,
         sharedWork: options?.sharedWork,
         isDisclaimer: options?.isDisclaimer
@@ -416,7 +415,6 @@ export function WidgetOverlay({
         const isLast = i === texts.length - 1;
         await botSay(texts[i], {
           isDisclaimer: stepId === 'intro' && i === 1,
-          quickReplies: isLast ? step.quickReplies : undefined,
           inlineCards: isLast ? step.inlineCards : undefined
         });
       }
@@ -728,6 +726,7 @@ const startConversation = useCallback(async () => {
     if (approveInFlightRef.current || briefApproved) return;
     approveInFlightRef.current = true;
     setBriefApproved(true);
+    setTelegramBroadcastStatus('pending');
 
     try {
       await ensureSession();
@@ -746,7 +745,12 @@ const startConversation = useCallback(async () => {
         }
       } as const;
 
-      await finalizeLead(payload);
+      const finalizeResponse = await finalizeLead(payload);
+      if (finalizeResponse && typeof finalizeResponse.telegramSent === 'boolean') {
+        setTelegramBroadcastStatus(finalizeResponse.telegramSent ? 'sent' : 'unconfigured');
+      } else {
+        setTelegramBroadcastStatus('unconfigured');
+      }
       setCurrentStep('handoff');
       await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
       await advanceStep('handoff', draftRef.current);
@@ -940,12 +944,6 @@ const startConversation = useCallback(async () => {
         return;
       }
 
-      const matched = step.quickReplies ? tryMatchOption(trimmed, step) : null;
-      if (matched) {
-        processFlowAnswer(matched, getQuickReplyLabel(currentStep, matched));
-        return;
-      }
-
       const localResponse = getLocalResponse(trimmed, {
         draft,
         step: currentStep,
@@ -974,11 +972,6 @@ const startConversation = useCallback(async () => {
       setIsTyping(false);
       submitInFlightRef.current = false;
     }
-  }
-
-  function handleSubmitQuickReply(value: string, label: string) {
-    if (isTyping) return;
-    processFlowAnswer(value, label);
   }
 
   function handleInlineCardClick(card: InlineCard) {
@@ -1154,6 +1147,12 @@ const startConversation = useCallback(async () => {
                     setRailMode('essentials');
                   }}
                   onChange={handleDraftEdit}
+                  telegramBroadcastStatus={telegramBroadcastStatus}
+                  onBookCatchUp={() => {
+                    setCalendlyUrl('https://calendly.com/haiha-dang/catch-up');
+                    setView('calendly');
+                  }}
+                  onTalkToHuman={handleTeamConnect}
                 />
               </div>
             )}
@@ -1173,7 +1172,7 @@ const startConversation = useCallback(async () => {
               }}
             >
               {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} onQuickReply={handleSubmitQuickReply} onInlineCardClick={handleInlineCardClick} />
+                <MessageBubble key={msg.id} message={msg} onInlineCardClick={handleInlineCardClick} />
               ))}
 
               {isTyping && (

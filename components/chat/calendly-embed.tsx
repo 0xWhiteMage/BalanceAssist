@@ -20,13 +20,19 @@ declare global {
 export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fallback, setFallback] = useState(false);
 
   useEffect(() => {
+    setLoaded(false);
+    setFallback(false);
+
+    let scriptLoadStarted = false;
+
     const initWidget = () => {
       if (containerRef.current && window.Calendly) {
         containerRef.current.innerHTML = '';
         window.Calendly.initInlineWidget({
-          url: `${url}?hide_gdpr_banner=1&primary_color=${brandTokens.colors.warmGold.replace('#', '')}`,
+          url,
           parentElement: containerRef.current
         });
         setLoaded(true);
@@ -39,21 +45,34 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
       const existing = document.querySelector('script[src*="calendly"]');
 
       if (!existing) {
+        scriptLoadStarted = true;
         const script = document.createElement('script');
         script.src = 'https://assets.calendly.com/assets/external/widget.js';
         script.async = true;
         script.onload = () => setTimeout(initWidget, 100);
+        script.onerror = () => {
+          setLoaded(true);
+          setFallback(true);
+        };
         document.head.appendChild(script);
       } else {
         existing.addEventListener('load', () => setTimeout(initWidget, 100));
       }
     }
 
-    const timer = setTimeout(() => {
-      if (!loaded) setLoaded(true);
-    }, 3000);
+    const fallbackTimer = window.setTimeout(() => {
+      if (!loaded) {
+        setLoaded(true);
+        setFallback(true);
+      }
+    }, 1500);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(fallbackTimer);
+      if (scriptLoadStarted) {
+        // intentionally keep the script tag for subsequent mounts; nothing to clean up
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
 
@@ -137,11 +156,20 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
             Loading calendar...
           </div>
         )}
-        <div
-          ref={containerRef}
-          className="calendly-inline-widget"
-          style={{ minWidth: '320px', height: '100%', width: '100%' }}
-        />
+        {fallback ? (
+          <iframe
+            data-testid="calendly-fallback-iframe"
+            src={url}
+            title="Book a Discovery Call"
+            style={{ minWidth: '320px', height: '100%', width: '100%', border: 'none' }}
+          />
+        ) : (
+          <div
+            ref={containerRef}
+            className="calendly-inline-widget"
+            style={{ minWidth: '320px', height: '100%', width: '100%' }}
+          />
+        )}
       </div>
     </div>
   );
