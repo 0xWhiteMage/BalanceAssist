@@ -38,8 +38,9 @@ export function WorkCard({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        minWidth: '220px',
-        maxWidth: '240px',
+        minWidth: '280px',
+        minHeight: '220px',
+        maxWidth: '300px',
         borderRadius: '12px',
         border: `1px solid ${brandTokens.colors.border}`,
         background: 'rgba(255, 255, 255, 0.03)',
@@ -47,6 +48,9 @@ export function WorkCard({
         textDecoration: 'none',
         color: brandTokens.colors.lightText,
         flexShrink: 0,
+        cursor: 'grab',
+        userSelect: 'none',
+        scrollSnapAlign: 'start',
         transition: 'border-color 0.15s ease, background 0.15s ease'
       }}
       onMouseEnter={(e) => {
@@ -67,7 +71,7 @@ export function WorkCard({
           data-testid="work-card-image"
           style={{
             width: '100%',
-            height: '120px',
+            height: '160px',
             objectFit: 'cover',
             display: 'block',
             background: 'rgba(0,0,0,0.4)'
@@ -78,7 +82,7 @@ export function WorkCard({
           aria-hidden="true"
           style={{
             width: '100%',
-            height: '120px',
+            height: '160px',
             background: 'rgba(0,0,0,0.4)',
             display: 'flex',
             alignItems: 'center',
@@ -170,18 +174,34 @@ export function WorkCardRow({
     <div
       data-testid="work-card-row"
       style={{
+        position: 'relative',
         display: 'flex',
         flexDirection: 'row',
-        gap: '10px',
+        gap: '14px',
         overflowX: 'auto',
         overflowY: 'hidden',
-        paddingBottom: '4px',
-        scrollbarWidth: 'thin'
+        padding: '12px 0',
+        scrollbarWidth: 'thin',
+        scrollSnapType: 'x mandatory',
+        WebkitOverflowScrolling: 'touch'
       }}
     >
       {entries.map(({ entry, category }) => (
         <WorkCard key={entry.slug} entry={entry} category={category} />
       ))}
+      <div
+        data-testid="work-card-row-fade"
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          width: '28px',
+          height: '100%',
+          background: 'linear-gradient(to right, transparent, rgba(16,16,16,0.85))',
+          pointerEvents: 'none'
+        }}
+      />
     </div>
   );
 }
