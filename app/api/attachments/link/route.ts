@@ -8,7 +8,7 @@ export async function OPTIONS() {
 }
 
 const linkSchema = z.object({
-  sessionId: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
   url: z.string().url(),
   kind: z.enum(['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other'])
 });
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   if (!supabase) return jsonWithCors({ ok: true, persisted: false, reason: 'Supabase client failed.' });
 
   const { error } = await supabase.from('reference_links').insert({
-    session_id: parsed.data.sessionId,
+    session_id: parsed.data.sessionId ?? null,
     url: parsed.data.url,
     kind: parsed.data.kind
   });
