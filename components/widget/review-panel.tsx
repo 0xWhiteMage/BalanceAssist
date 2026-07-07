@@ -150,11 +150,10 @@ export function ReviewPanel({
         onChange={onChange}
       />
 
-      {mode === 'summary' && ready && !approved && (
+{mode === 'summary' && ready && !approved && (
         <div style={{ display: 'grid', gap: 8 }}>
           <button
             type="button"
-            data-pulse="true"
             data-testid="approve-button"
             onClick={onApprove}
             style={{
@@ -169,8 +168,13 @@ export function ReviewPanel({
               cursor: 'pointer',
               textTransform: 'uppercase',
               letterSpacing: '0.12em',
-              boxShadow: '0 4px 18px rgba(219, 181, 128, 0.45)',
-              animation: 'approve-pulse 1.6s ease-in-out infinite'
+              boxShadow: '0 4px 18px rgba(219, 181, 128, 0.45)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.filter = 'brightness(1.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.filter = 'brightness(1)';
             }}
           >
             Approve &amp; send to team
