@@ -733,11 +733,20 @@ function BriefRowEditor({
             color: brandTokens.colors.lightText,
             borderRadius: 6,
             padding: '4px 6px',
-            fontSize: 12
+            fontSize: 12,
+            colorScheme: 'dark',
+            caretColor: brandTokens.colors.warmGold
           }}
         >
           {row.options.map((option) => (
-            <option key={option.id} value={option.id}>
+            <option
+              key={option.id}
+              value={option.id}
+              style={{
+                background: brandTokens.colors.charcoal,
+                color: brandTokens.colors.lightText
+              }}
+            >
               {option.label}
             </option>
           ))}
