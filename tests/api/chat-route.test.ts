@@ -197,7 +197,7 @@ describe('POST /api/chat', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  test('truncated response (finish_reason=length) returns the partial message verbatim and logs a warning', async () => {
+  test('truncated response (finish_reason=length) prefixes the partial with "(continuing…)" and sets truncated=true', async () => {
     const partial = 'Balance Studio has shipped 110+ projects across APAC, working with clients like Heineken, ' +
       'Red Bull, and Visa. Their team includes directors, producers, cinematographers, animators, VFX artists, editors -';
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -212,7 +212,10 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe(partial);
+    expect(data.truncated).toBe(true);
+    expect(Array.isArray(data.messages)).toBe(true);
+    expect((data.messages as string[])[0]).toBe('(continuing…)');
+    expect((data.messages as string[])[1]).toBe(partial);
     expect(warnSpy).toHaveBeenCalledWith('[chat] response truncated: finish_reason=length');
 
     warnSpy.mockRestore();
@@ -436,5 +439,56 @@ describe('POST /api/chat', () => {
     expect(data.sharedWork).toBeDefined();
     expect(data.sharedWork.entries).toHaveLength(2);
     expect(data.briefReady).toBe(false);
+  });
+
+  test('splits a Deepseek reply with --- on its own line (with surrounding whitespace) into 3 bubbles', async () => {
+    global.fetch = vi.fn(async () => makeTruncatedResponse(
+      'First thought.\n\n---\n\nSecond thought.\n\n---\n\nThird thought.',
+      'stop'
+    )) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'three bubbles please' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBeUndefined();
+    expect(data.messages).toEqual(['First thought.', 'Second thought.', 'Third thought.']);
+    expect(data.truncated).toBe(false);
+  });
+
+  test('truncated single-bubble reply emits messages[] whose first element starts with "(continuing…)"', async () => {
+    global.fetch = vi.fn(async () => makeTruncatedResponse('partial', 'length')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'short reply please' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.truncated).toBe(true);
+    expect(Array.isArray(data.messages)).toBe(true);
+    expect((data.messages as string[])[0]).toMatch(/^\(continuing…\)/);
+  });
+
+  test('single-bubble reply with no separators returns the message field (not messages[])', async () => {
+    global.fetch = vi.fn(async () => makeTruncatedResponse('partial', 'stop')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'short reply please' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBe('partial');
+    expect(data.messages).toBeUndefined();
+    expect(data.truncated).toBe(false);
   });
 });

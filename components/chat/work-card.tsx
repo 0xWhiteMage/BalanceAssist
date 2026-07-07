@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
 
 export type WorkCardCategory = 'reference' | 'mood' | 'pitch';
@@ -164,15 +165,113 @@ export function WorkCard({
   );
 }
 
+type DragState = {
+  startX: number;
+  scrollLeft: number;
+  totalMoved: number;
+  isActive: boolean;
+};
+
+const DRAG_CLICK_THRESHOLD_PX = 5;
+
 export function WorkCardRow({
   entries
 }: {
   entries: Array<{ entry: WorkCardEntry; category: WorkCardCategory }>;
 }) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  function beginDrag(clientX: number) {
+    if (!rowRef.current) return;
+    dragStateRef.current = {
+      startX: clientX,
+      scrollLeft: rowRef.current.scrollLeft,
+      totalMoved: 0,
+      isActive: true
+    };
+    setIsDragging(true);
+  }
+
+  function endDrag() {
+    if (dragStateRef.current) {
+      dragStateRef.current.isActive = false;
+    }
+    setIsDragging(false);
+  }
+
+  function handleMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    beginDrag(event.clientX);
+  }
+
+  function handleTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
+    const touch = event.touches[0];
+    if (!touch) return;
+    beginDrag(touch.clientX);
+  }
+
+  useEffect(() => {
+    function handleMouseMove(event: MouseEvent) {
+      const state = dragStateRef.current;
+      if (!state || !state.isActive || !rowRef.current) return;
+      event.preventDefault();
+      const delta = event.clientX - state.startX;
+      state.totalMoved = Math.max(state.totalMoved, Math.abs(delta));
+      rowRef.current.scrollLeft = state.scrollLeft - delta;
+    }
+
+    function handleTouchMove(event: TouchEvent) {
+      const state = dragStateRef.current;
+      if (!state || !state.isActive || !rowRef.current) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      const delta = touch.clientX - state.startX;
+      state.totalMoved = Math.max(state.totalMoved, Math.abs(delta));
+      rowRef.current.scrollLeft = state.scrollLeft - delta;
+    }
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', endDrag);
+    document.addEventListener('mouseleave', endDrag);
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
+    document.addEventListener('touchend', endDrag);
+    document.addEventListener('touchcancel', endDrag);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', endDrag);
+      document.removeEventListener('mouseleave', endDrag);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', endDrag);
+      document.removeEventListener('touchcancel', endDrag);
+    };
+  }, []);
+
+  function handleRowClick(event: ReactMouseEvent<HTMLDivElement>) {
+    const state = dragStateRef.current;
+    if (state && state.totalMoved > DRAG_CLICK_THRESHOLD_PX) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function handleRowMouseLeave() {
+    if (isDragging) {
+      endDrag();
+    }
+  }
+
   if (entries.length === 0) return null;
   return (
     <div
+      ref={rowRef}
       data-testid="work-card-row"
+      data-dragging={isDragging ? 'true' : 'false'}
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
+      onClick={handleRowClick}
+      onMouseLeave={handleRowMouseLeave}
       style={{
         position: 'relative',
         display: 'flex',
@@ -183,7 +282,9 @@ export function WorkCardRow({
         padding: '12px 0',
         scrollbarWidth: 'thin',
         scrollSnapType: 'x mandatory',
-        WebkitOverflowScrolling: 'touch'
+        WebkitOverflowScrolling: 'touch',
+        cursor: isDragging ? 'grabbing' : 'grab',
+        userSelect: isDragging ? 'none' : 'auto'
       }}
     >
       {entries.map(({ entry, category }) => (

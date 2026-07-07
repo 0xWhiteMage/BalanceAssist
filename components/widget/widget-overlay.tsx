@@ -702,12 +702,10 @@ const startConversation = useCallback(async () => {
     if (step.freeText || currentStep === 'intro') {
       updatedDraft = applyTextToDraft(value, draft, currentStep);
       setDraft(updatedDraft);
-      setHasProjectIntent(detectProjectIntent(updatedDraft));
       setBriefApproved(false);
     } else if (step.field) {
       updatedDraft = { ...draft, [step.field]: value };
       setDraft(updatedDraft);
-      setHasProjectIntent(detectProjectIntent(updatedDraft));
       setBriefApproved(false);
     }
 

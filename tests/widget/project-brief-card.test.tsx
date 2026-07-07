@@ -206,4 +206,48 @@ describe('ProjectBriefCard', () => {
     expect(within(select).getByRole('option', { name: 'Production' })).toBeInTheDocument();
     expect(within(select).getByRole('option', { name: 'Post-Production' })).toBeInTheDocument();
   });
+
+  test('select element carries colorScheme=dark + brand caret color so the native chrome renders dark', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(serviceRow).getByRole('button', { name: /edit service/i }));
+    const select = within(serviceRow).getByRole('combobox') as HTMLSelectElement;
+    expect(select.style.colorScheme).toBe('dark');
+    expect(select.style.caretColor).toBeTruthy();
+    expect(select.style.caretColor).not.toBe('');
+  });
+
+  test('each <option> inside the brief-editing select carries an inline dark-style color', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(serviceRow).getByRole('button', { name: /edit service/i }));
+    const select = within(serviceRow).getByRole('combobox') as HTMLSelectElement;
+    const options = Array.from(select.querySelectorAll('option')) as HTMLOptionElement[];
+    expect(options.length).toBeGreaterThan(0);
+    for (const option of options) {
+      // jsdom returns the inline style string; just confirm color is set.
+      expect(option.style.color).toBeTruthy();
+      expect(option.style.color).not.toBe('');
+      expect(option.style.background).toBeTruthy();
+      expect(option.style.background).not.toBe('');
+    }
+  });
 });

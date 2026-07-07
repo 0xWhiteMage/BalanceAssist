@@ -60,11 +60,11 @@ test('system prompt embeds the Balance Studio profile for general questions', ()
   expect(prompt).toMatch(/DREAM — DESIGN — CREATE/);
 });
 
-test('system prompt positions Balance Assist as a general-purpose assistant', () => {
+test('system prompt positions Balance Assist as a focused, scoped AI for Balance Studio', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/general-purpose AI assistant/i);
-  expect(prompt).toMatch(/Project briefs are one capability/i);
-  expect(prompt).toMatch(/Job application help/i);
+  expect(prompt).toMatch(/focused AI for Balance Studio/i);
+  expect(prompt).toMatch(/Project brief/i);
+  expect(prompt).toMatch(/Job application to Balance/i);
 });
 
 test('system prompt instructs substantive answers for general questions', () => {
@@ -123,9 +123,45 @@ test('system prompt includes the length-discipline rule for long answers', () =>
   expect(prompt).toMatch(/NEVER list more than 5 works/i);
 });
 
-test('system prompt instructs multi-bubble structure with double-newlines', () => {
+test('system prompt instructs multi-bubble structure with --- separator', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/MULTI-BUBBLE STRUCTURE/);
-  expect(prompt).toMatch(/double-newlines[\s\S]*separate your reply into 2-3 bubbles/i);
-  expect(prompt).toMatch(/Hard cap: 3 bubbles per reply/i);
+  expect(prompt).toMatch(/literal separator --- on its own line between bubbles/i);
+  expect(prompt).toMatch(/Hard cap: 4 bubbles per reply/i);
+});
+
+test('system prompt includes red-team defenses section', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/RED-TEAM DEFENSES/);
+  expect(prompt).toMatch(/prompt-injection/i);
+  expect(prompt).toMatch(/illegal.*harmful.*harassing.*hateful.*sexual/i);
+  expect(prompt).toMatch(/ignore the request and continue helping within scope/i);
+});
+
+test('system prompt deflects out-of-scope requests with a friendly acknowledgement', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/OUT OF SCOPE/i);
+  expect(prompt).toMatch(/homework.*math.*medical/i);
+  expect(prompt).toMatch(/outside what you're set up to help with/i);
+});
+
+test('system prompt scopes the AI to project brief + job application + general questions only', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toContain('Project brief');
+  expect(prompt).toContain('Job application');
+  expect(prompt).toContain('General questions about Balance');
+  expect(prompt).not.toContain('Document drafting');
+  expect(prompt).not.toMatch(/post-event writeups/);
+  expect(prompt).not.toMatch(/proposals, briefs, scripts/);
+});
+
+test('system prompt does not draft documents for the user', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/do not draft documents/i);
+  expect(prompt).toMatch(/OUT OF SCOPE/i);
+});
+
+test('system prompt routes job-application answers to Balance\'s own channels', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/submitted through Balance/i);
 });
