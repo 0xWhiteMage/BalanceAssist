@@ -56,24 +56,92 @@ export function AttachmentDropzone({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <form onSubmit={handleUrlSubmit} style={{ display: 'flex', gap: 8 }}>
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ display: 'grid', gap: 3 }}>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: brandTokens.colors.warmGold,
+            textTransform: 'uppercase',
+            letterSpacing: '0.16em'
+          }}
+        >
+          Share files to help us understand your project
+        </div>
+        <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
+          Upload a PDF or deck, or share a Google Drive link.
+        </div>
+      </div>
+
+      <form onSubmit={handleUrlSubmit} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <input
           type="url"
           placeholder="Paste a reference link..."
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          style={{ flex: 1, padding: '8px 10px', borderRadius: 6, border: `1px solid ${brandTokens.colors.border}`, background: 'transparent', color: brandTokens.colors.lightText }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: '8px 10px',
+            borderRadius: 999,
+            border: `1px solid ${brandTokens.colors.border}`,
+            background: 'transparent',
+            color: brandTokens.colors.lightText,
+            fontSize: 12
+          }}
         />
-        <button type="submit" style={{ padding: '8px 12px', borderRadius: 6, border: 'none', background: brandTokens.colors.warmGold, color: brandTokens.colors.baseBlack, fontWeight: 600 }}>
+        <button
+          type="submit"
+          style={{
+            padding: '8px 14px',
+            borderRadius: 999,
+            border: 'none',
+            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+            color: brandTokens.colors.baseBlack,
+            fontSize: 10,
+            fontWeight: 700,
+            cursor: 'pointer',
+            textTransform: 'uppercase',
+            letterSpacing: '0.16em',
+            flexShrink: 0
+          }}
+        >
           Add link
         </button>
       </form>
+
       <label
         htmlFor="attachment-drop"
-        style={{ padding: 14, borderRadius: 8, border: `1px dashed ${brandTokens.colors.border}`, textAlign: 'center', cursor: 'pointer', color: brandTokens.colors.mutedText }}
+        style={{
+          padding: 14,
+          borderRadius: 10,
+          border: `1px dashed ${brandTokens.colors.border}`,
+          textAlign: 'center',
+          cursor: 'pointer',
+          color: brandTokens.colors.mutedText,
+          display: 'grid',
+          justifyItems: 'center',
+          gap: 6
+        }}
       >
-        Drop files here (PDF, PPTX, DOCX up to 50 MB)
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke={brandTokens.colors.warmGold} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: brandTokens.colors.lightText,
+            textTransform: 'uppercase',
+            letterSpacing: '0.16em'
+          }}
+        >
+          Drop files here
+        </span>
+        <span style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
+          (PDF, PPTX, DOCX up to 50 MB)
+        </span>
         <input
           id="attachment-drop"
           type="file"
@@ -82,6 +150,7 @@ export function AttachmentDropzone({
           style={{ display: 'none' }}
         />
       </label>
+
       {error && <div role="alert" style={{ color: 'tomato', fontSize: 12 }}>{error}</div>}
     </div>
   );
