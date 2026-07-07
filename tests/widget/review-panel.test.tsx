@@ -153,4 +153,49 @@ describe('ReviewPanel', () => {
     );
     expect(screen.getByTestId('review-panel').getAttribute('data-mode')).toBe('summary');
   });
+
+  test('summary mode renders the Approve button with the pulse-glow animation when ready and not approved', () => {
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={false}
+        mode="summary"
+        onApprove={() => {}}
+        onContinueRefining={() => {}}
+      />
+    );
+    const approveButton = screen.getByRole('button', { name: /approve & send to team/i });
+    expect(approveButton.getAttribute('data-pulse')).toBe('true');
+    expect(approveButton.style.animation).toMatch(/approve-pulse/i);
+  });
+
+  test('summary mode replaces the Approve button with a green confirmation pill when approved', () => {
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={true}
+        mode="summary"
+        onApprove={() => {}}
+        onContinueRefining={() => {}}
+      />
+    );
+    expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
+    const confirmation = screen.getByTestId('approve-confirmation');
+    expect(confirmation).toBeInTheDocument();
+    expect(confirmation.textContent).toMatch(/Balance team has been notified/i);
+  });
+
+  test('essentials mode never shows the Approve pulse even when the brief is ready', () => {
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={false}
+        mode="essentials"
+        onApprove={() => {}}
+        onContinueRefining={() => {}}
+      />
+    );
+    const approveButton = screen.queryByRole('button', { name: /approve & send to team/i });
+    expect(approveButton).not.toBeInTheDocument();
+  });
 });
