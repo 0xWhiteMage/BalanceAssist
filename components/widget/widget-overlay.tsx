@@ -155,7 +155,6 @@ export function WidgetOverlay({
   const [railMode, setRailMode] = useState<'essentials' | 'summary'>('essentials');
   const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
-  const [missingFields, setMissingFields] = useState<string[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
@@ -518,7 +517,6 @@ const startConversation = useCallback(async () => {
     setRailMode('essentials');
     setReferenceLinks([]);
     setReferenceFiles([]);
-    setMissingFields([]);
     setAttachmentOpen(false);
     setView('chat');
     setAllowAttachment(false);
@@ -566,16 +564,9 @@ const startConversation = useCallback(async () => {
         return;
       }
 
-      const replyText: string = data.message ?? getFallbackResponse();
+      const replyText: string = data.message?.trim() ? data.message : getFallbackResponse();
       const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
       const briefReady: boolean = Boolean(data.briefReady);
-      const missing: string[] = Array.isArray(data.missingFields) ? data.missingFields : [];
-
-      if (missing.length > 0) {
-        setMissingFields(missing);
-      } else {
-        setMissingFields([]);
-      }
 
       if (Object.keys(draftUpdates).length > 0) {
         const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
@@ -1085,41 +1076,6 @@ const startConversation = useCallback(async () => {
                 position: 'relative'
               }}
             >
-              {!isTeamConnected && missingFields.length > 0 && (
-                <div
-                  style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: 6,
-                    padding: '6px 10px',
-                    border: `1px solid ${brandTokens.colors.subtleBorder}`,
-                    borderRadius: 10,
-                    background: 'rgba(219, 181, 128, 0.06)',
-                    fontSize: 11,
-                    color: brandTokens.colors.mutedText
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10 }}>
-                    Missing
-                  </span>
-                  {missingFields.map((field) => (
-                    <span
-                      key={field}
-                      style={{
-                        fontSize: 11,
-                        padding: '2px 8px',
-                        borderRadius: 999,
-                        background: 'rgba(219, 181, 128, 0.10)',
-                        border: `1px solid ${brandTokens.colors.subtleBorder}`,
-                        color: brandTokens.colors.lightText
-                      }}
-                    >
-                      {field}
-                    </span>
-                  ))}
-                </div>
-              )}
-
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} onQuickReply={handleSubmitQuickReply} onInlineCardClick={handleInlineCardClick} />
               ))}
