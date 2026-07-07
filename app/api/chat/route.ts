@@ -136,6 +136,7 @@ type ProviderResult = {
   content: string;
   toolArguments: Record<string, unknown> | null;
   sharedWork: SharedWork | null;
+  truncated: boolean;
 };
 
 async function callOpenAICompatible(
@@ -194,15 +195,15 @@ async function callOpenAICompatible(
   const choice = data?.choices?.[0];
   const message = choice?.message;
   const content = typeof message?.content === 'string' ? message.content : getFallbackResponse();
+  const finishReason = choice?.finish_reason;
+  const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+  const truncated = finishReason === 'length' && !hasToolCalls && content.trim().length > 0;
 
-  if (choice?.finish_reason === 'length') {
-    const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
-    if (!hasToolCalls) {
-      console.warn('[chat] response truncated: finish_reason=length');
-    }
+  if (finishReason === 'length' && !hasToolCalls) {
+    console.warn('[chat] response truncated: finish_reason=length');
   }
 
-  if (useTools && Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+  if (useTools && hasToolCalls) {
     let toolArguments: Record<string, unknown> | null = null;
     let sharedWork: SharedWork | null = null;
 
@@ -253,11 +254,11 @@ async function callOpenAICompatible(
     }
 
     if (toolArguments !== null || sharedWork !== null) {
-      return { content, toolArguments, sharedWork };
+      return { content, toolArguments, sharedWork, truncated };
     }
   }
 
-  return { content, toolArguments: null, sharedWork: null };
+  return { content, toolArguments: null, sharedWork: null, truncated };
 }
 
 async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<string> {
@@ -384,6 +385,7 @@ export async function POST(request: Request) {
   let visibleContent: string;
   let toolArguments: Record<string, unknown> | null = null;
   let sharedWork: SharedWork | null = null;
+  let truncated = false;
   let category: 'reply' | 'refusal' | 'local_fallback' = 'reply';
 
   try {
@@ -402,6 +404,7 @@ export async function POST(request: Request) {
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
       sharedWork = providerResult.sharedWork;
+      truncated = providerResult.truncated;
     } else if (env.MINIMAX_API_KEY) {
       const ctx = buildLlmContext(context);
       const systemPrompt = ctx.systemPrompt;
@@ -423,6 +426,7 @@ export async function POST(request: Request) {
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
       sharedWork = providerResult.sharedWork;
+      truncated = providerResult.truncated;
     } else {
       category = 'local_fallback';
       const localResponse = getLocalResponse(lastUserMessage, {
@@ -443,9 +447,13 @@ export async function POST(request: Request) {
     }
 
     const sanitized = sanitizeReply(visibleContent, lastUserMessage, { toolCallArguments: toolArguments ?? undefined });
-    const replyText = sanitized.reply;
+    let replyText = sanitized.reply;
     if (sanitized.overridden) {
       category = 'refusal';
+    }
+
+    if (truncated && replyText.trim().length > 0) {
+      replyText = `(continuing…)\n\n${replyText}`;
     }
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
@@ -466,7 +474,8 @@ export async function POST(request: Request) {
         briefReady,
         reviewPrompt: briefReady ? REVIEW_PROMPT : null,
         missingFields,
-        sharedWork: sharedWork ?? undefined
+        sharedWork: sharedWork ?? undefined,
+        truncated
       });
     }
 
@@ -476,7 +485,8 @@ export async function POST(request: Request) {
       briefReady,
       reviewPrompt: briefReady ? REVIEW_PROMPT : null,
       missingFields,
-      sharedWork: sharedWork ?? undefined
+      sharedWork: sharedWork ?? undefined,
+      truncated
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
