@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WorkCard, WorkCardRow } from '@/components/chat/work-card';
 
 const baseEntry = {
@@ -187,6 +187,50 @@ describe('WorkCardRow', () => {
       />
     );
     expect(screen.queryByTestId('work-card-row-dots')).toBeNull();
+    expect(screen.queryAllByTestId('work-card-row-dot')).toHaveLength(0);
+  });
+
+  test('row uses align-items: stretch so cards line up vertically when their heights differ', () => {
+    render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' }
+        ]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row') as HTMLDivElement;
+    expect(row.style.alignItems).toBe('stretch');
+  });
+
+  test('row has overscroll-behavior-x: contain to avoid bouncing the page on horizontal drag', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row') as HTMLDivElement;
+    expect(row.style.overscrollBehaviorX).toBe('contain');
+  });
+
+  test('each card has align-self: stretch so they fill the row height', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const card = screen.getByTestId('work-card') as HTMLAnchorElement;
+    expect(card.style.alignSelf).toBe('stretch');
+  });
+
+  test('each card disables text selection so a drag never highlights text', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const card = screen.getByTestId('work-card') as HTMLAnchorElement;
+    expect(card.style.userSelect).toBe('none');
   });
 });
 
@@ -270,5 +314,145 @@ describe('WorkCardRow drag-to-scroll', () => {
     fireEvent.mouseUp(document);
     expect(row.getAttribute('data-dragging')).toBe('false');
     expect((row as HTMLElement).style.cursor).toBe('grab');
+  });
+
+  test('mousedown on a row calls preventDefault so the underlying card link is not activated', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row');
+
+    const preventDefaultSpy = vi.spyOn(MouseEvent.prototype, 'preventDefault');
+    fireEvent.mouseDown(row, { clientX: 100, button: 0 });
+    expect(preventDefaultSpy).toHaveBeenCalled();
+    preventDefaultSpy.mockRestore();
+  });
+
+  test('after a drag ends, scrollLeft is snapped to a multiple of clientWidth', () => {
+    render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' },
+          { entry: { ...baseEntry, slug: 'f1', title: 'F1', url: 'https://www.balancestudio.tv/f1' }, category: 'pitch' }
+        ]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row') as HTMLDivElement;
+    const clientWidth = 300;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => clientWidth });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => clientWidth * 3 });
+    let scrollLeft = 137;
+    Object.defineProperty(row, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (v: number) => {
+        scrollLeft = v;
+      }
+    });
+    const scrollToSpy = vi.fn(function scrollTo(this: HTMLDivElement, opts: { left: number; behavior: string }) {
+      this.scrollLeft = opts.left;
+    });
+    Object.defineProperty(row, 'scrollTo', {
+      configurable: true,
+      writable: true,
+      value: scrollToSpy
+    });
+
+    fireEvent.mouseDown(row, { clientX: 200, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 80 });
+    fireEvent.mouseUp(document);
+
+    expect(scrollToSpy).toHaveBeenCalled();
+    const callArgs = scrollToSpy.mock.calls[0]?.[0] as { left: number } | undefined;
+    expect(callArgs).toBeDefined();
+    expect(callArgs!.left % clientWidth).toBe(0);
+  });
+
+  test('row does NOT render any dot indicators (replaced with swipe hint)', () => {
+    render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' },
+          { entry: { ...baseEntry, slug: 'f1', title: 'F1', url: 'https://www.balancestudio.tv/f1' }, category: 'pitch' }
+        ]}
+      />
+    );
+    // Force the overflow computation to run with non-zero dimensions so the
+    // swipe hint would actually render. Even then, no dots should appear.
+    const row = screen.getByTestId('work-card-row') as HTMLDivElement;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => 1800 });
+    fireEvent.scroll(row);
+
+    expect(screen.queryByTestId('work-card-row-dots')).toBeNull();
+    expect(screen.queryAllByTestId('work-card-row-dot')).toHaveLength(0);
+  });
+
+  test('row renders a swipe-hint element when content overflows and the user has not scrolled yet', async () => {
+    const { container } = render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' },
+          { entry: { ...baseEntry, slug: 'f1', title: 'F1', url: 'https://www.balancestudio.tv/f1' }, category: 'pitch' }
+        ]}
+      />
+    );
+    // jsdom defaults clientWidth to 0; the row's resize observer fires on
+    // mount, so we have to mutate the underlying element to make the row
+    // "overflow" before we look for the swipe hint.
+    const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => 1800 });
+    let scrollLeft = 0;
+    Object.defineProperty(row, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (v: number) => {
+        scrollLeft = v;
+      }
+    });
+    fireEvent.scroll(row);
+    await waitFor(() => {
+      expect(screen.getByTestId('work-card-row-swipe-hint')).toBeInTheDocument();
+    });
+  });
+
+  test('swipe-hint fades out (is removed) once the user has scrolled', async () => {
+    const { container } = render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' },
+          { entry: { ...baseEntry, slug: 'f1', title: 'F1', url: 'https://www.balancestudio.tv/f1' }, category: 'pitch' }
+        ]}
+      />
+    );
+    const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => 1800 });
+    let scrollLeft = 0;
+    Object.defineProperty(row, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (v: number) => {
+        scrollLeft = v;
+      }
+    });
+    fireEvent.scroll(row);
+    await waitFor(() => {
+      expect(screen.getByTestId('work-card-row-swipe-hint')).toBeInTheDocument();
+    });
+
+    // Simulate the user scrolling — the swipe hint should disappear.
+    scrollLeft = 50;
+    fireEvent.scroll(row);
+    await waitFor(() => {
+      expect(screen.queryByTestId('work-card-row-swipe-hint')).toBeNull();
+    });
   });
 });
