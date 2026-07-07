@@ -91,14 +91,14 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   handoff: {
     id: 'handoff',
     botMessages: [
-      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also book a discovery call below if you'd like to talk sooner."
+      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also reach out directly below if you'd like to talk sooner."
     ],
     inlineCards: [
       {
-        type: 'calendly',
-        url: 'https://calendly.com/balancestudio/intro-call',
-        label: 'Book a Discovery Call',
-        subtitle: '30 min · Video call · Pick a time'
+        type: 'email',
+        label: 'Email the team',
+        subtitle: 'hello@balancestudio.tv · We will reply within 1 business day',
+        href: 'mailto:hello@balancestudio.tv'
       }
     ],
     next: 'free-chat'

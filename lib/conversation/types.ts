@@ -3,9 +3,9 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 export type Sender = 'bot' | 'user';
 
 export type InlineCard =
-  | { type: 'calendly'; url: string; label: string; subtitle: string }
-  | { type: 'telegram'; url: string; label: string; subtitle: string }
-  | { type: 'email'; address: string; label: string; subtitle: string };
+  | { type: 'calendly'; url: string; label: string; subtitle?: string }
+  | { type: 'telegram'; label: string; subtitle?: string }
+  | { type: 'email'; label: string; subtitle?: string; href: string };
 
 export type QuickReply = {
   label: string;

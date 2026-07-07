@@ -312,10 +312,17 @@ function InlineCardView({ card, onClick }: { card: InlineCard; onClick?: (card: 
     }
   };
 
+  const href = card.type === 'email'
+    ? card.href
+    : card.type === 'calendly'
+      ? card.url
+      : '#';
+  const target = card.type === 'email' || card.type === 'telegram' ? undefined : '_blank';
+
   return (
     <a
-      href={card.type === 'email' ? `mailto:${card.address}` : card.url}
-      target={card.type === 'email' ? undefined : '_blank'}
+      href={href}
+      target={target}
       rel="noopener noreferrer"
       onClick={handleClick}
       style={{
@@ -352,15 +359,17 @@ function InlineCardView({ card, onClick }: { card: InlineCard; onClick?: (card: 
         >
           {card.label}
         </p>
-        <p
-          style={{
-            margin: '2px 0 0',
-            fontSize: '11px',
-            color: brandTokens.colors.mutedText
-          }}
-        >
-          {card.subtitle}
-        </p>
+        {card.subtitle && (
+          <p
+            style={{
+              margin: '2px 0 0',
+              fontSize: '11px',
+              color: brandTokens.colors.mutedText
+            }}
+          >
+            {card.subtitle}
+          </p>
+        )}
       </div>
       <span style={{ color: brandTokens.colors.warmGold, fontSize: '16px', flexShrink: 0 }}>&#8594;</span>
     </a>
