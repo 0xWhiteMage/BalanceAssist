@@ -1,6 +1,13 @@
 import Image from 'next/image';
+import { useState } from 'react';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { brandTokens } from '@/lib/brand-tokens';
+import {
+  budgetBandOptions,
+  serviceOptions,
+  timelineBandOptions
+} from '@/lib/onboarding/service-options';
+import type { BudgetBandId, ServiceOptionId, TimelineBandId } from '@/lib/onboarding/types';
 import { HUMAN_UPLOAD_GUIDANCE } from '@/lib/uploads/file-policy';
 
 export const balanceLogoUrl =
@@ -386,6 +393,7 @@ export function ProjectBriefCard({
   title,
   onApprove,
   onContinueRefining,
+  onChange,
   compact = false
 }: {
   draft: {
@@ -405,20 +413,81 @@ export function ProjectBriefCard({
   title?: string;
   onApprove?: () => void;
   onContinueRefining?: () => void;
+  onChange?: (key: string, value: string) => void;
   compact?: boolean;
 }) {
-  const rows = [
-    ['Project scope', draft.scopePolished ?? draft.projectScope],
-    ['Project type', draft.projectType ?? ''],
-    ['Service', draft.service],
-    ['Timeline', draft.timelineBand],
-    ['Budget', draft.budgetBand],
-    ['Contact name', draft.contactName],
-    ['Company', draft.contactCompany ?? ''],
-    ['Email', draft.contactEmail]
-  ] as const;
+  const [editingKey, setEditingKey] = useState<string | null>(null);
 
-  const completed = rows.filter(([, value]) => value.trim().length > 0).length;
+  const rows: ReadonlyArray<{
+    label: string;
+    key: string;
+    raw: string;
+    display: string;
+    editor: 'text' | 'select';
+    options?: ReadonlyArray<{ id: string; label: string }>;
+  }> = [
+    {
+      label: 'Project scope',
+      key: 'projectScope',
+      raw: draft.scopePolished ?? draft.projectScope,
+      display: (draft.scopePolished ?? draft.projectScope).trim(),
+      editor: 'text'
+    },
+    {
+      label: 'Project type',
+      key: 'projectType',
+      raw: draft.projectType ?? '',
+      display: formatProjectType(draft.projectType),
+      editor: 'text'
+    },
+    {
+      label: 'Service',
+      key: 'service',
+      raw: draft.service,
+      display: serviceOptions.find((s) => s.id === draft.service)?.label ?? draft.service,
+      editor: 'select',
+      options: serviceOptions
+    },
+    {
+      label: 'Timeline',
+      key: 'timelineBand',
+      raw: draft.timelineBand,
+      display: timelineBandOptions.find((t) => t.id === draft.timelineBand)?.label ?? draft.timelineBand,
+      editor: 'select',
+      options: timelineBandOptions
+    },
+    {
+      label: 'Budget',
+      key: 'budgetBand',
+      raw: draft.budgetBand,
+      display: budgetBandOptions.find((b) => b.id === draft.budgetBand)?.label ?? draft.budgetBand,
+      editor: 'select',
+      options: budgetBandOptions
+    },
+    {
+      label: 'Contact name',
+      key: 'contactName',
+      raw: draft.contactName,
+      display: draft.contactName.trim(),
+      editor: 'text'
+    },
+    {
+      label: 'Company',
+      key: 'contactCompany',
+      raw: draft.contactCompany ?? '',
+      display: (draft.contactCompany ?? '').trim(),
+      editor: 'text'
+    },
+    {
+      label: 'Email',
+      key: 'contactEmail',
+      raw: draft.contactEmail,
+      display: draft.contactEmail.trim(),
+      editor: 'text'
+    }
+  ];
+
+  const completed = rows.filter((row) => row.raw.trim().length > 0).length;
 
   const labelFontSize = compact ? 9 : 10;
   const bodyFontSize = compact ? 11 : 12;
@@ -446,12 +515,14 @@ export function ProjectBriefCard({
       </div>
 
       <div style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
-        {rows.map(([label, value]) => {
-          const filled = value.trim().length > 0;
+        {rows.map((row) => {
+          const filled = row.raw.trim().length > 0;
           if (compact) {
             return (
               <div
-                key={label}
+                key={row.label}
+                data-testid="brief-row"
+                data-row-key={row.key}
                 style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: bodyFontSize }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -483,13 +554,32 @@ export function ProjectBriefCard({
                       color: brandTokens.colors.lightText,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      textOverflow: 'ellipsis',
+                      textTransform: 'capitalize'
                     }}
                   >
-                    {label}
+                    {row.label}
                   </span>
+                  {onChange && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingKey(row.key)}
+                      aria-label={`Edit ${row.label.toLowerCase()}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: brandTokens.colors.mutedText,
+                        cursor: 'pointer',
+                        padding: 2,
+                        fontSize: 10,
+                        lineHeight: 1
+                      }}
+                    >
+                      ✎
+                    </button>
+                  )}
                 </div>
-                {filled && (
+                {filled && editingKey !== row.key && (
                   <div
                     data-testid="brief-row-value"
                     style={{
@@ -498,20 +588,36 @@ export function ProjectBriefCard({
                       color: brandTokens.colors.lightText,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      textOverflow: 'ellipsis',
+                      textTransform: 'capitalize'
                     }}
                   >
-                    {value}
+                    {row.display}
                   </div>
+                )}
+                {filled && editingKey === row.key && (
+                  <BriefRowEditor
+                    row={row}
+                    onCommit={(value) => {
+                      onChange?.(row.key, value);
+                      setEditingKey(null);
+                    }}
+                    onCancel={() => setEditingKey(null)}
+                  />
                 )}
               </div>
             );
           }
           return (
-            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', fontSize: bodyFontSize }}>
-              <span style={{ color: brandTokens.colors.mutedText }}>{label}</span>
-              <span style={{ color: filled ? brandTokens.colors.lightText : brandTokens.colors.mutedText, textAlign: 'right', maxWidth: '60%' }}>
-                {filled ? value : 'Unfilled'}
+            <div
+              key={row.label}
+              data-testid="brief-row"
+              data-row-key={row.key}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', fontSize: bodyFontSize }}
+            >
+              <span style={{ color: brandTokens.colors.mutedText, textTransform: 'capitalize' }}>{row.label}</span>
+              <span style={{ color: filled ? brandTokens.colors.lightText : brandTokens.colors.mutedText, textAlign: 'right', maxWidth: '60%', textTransform: 'capitalize' }}>
+                {filled ? row.display : 'Unfilled'}
               </span>
             </div>
           );
@@ -580,3 +686,132 @@ export function ProjectBriefCard({
     </div>
   );
 }
+
+type BriefRow = {
+  label: string;
+  key: string;
+  raw: string;
+  display: string;
+  editor: 'text' | 'select';
+  options?: ReadonlyArray<{ id: string; label: string }>;
+};
+
+function formatProjectType(value: string | undefined): string {
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) return '';
+  const withSpaces = trimmed.replace(/-/g, ' ');
+  return withSpaces.charAt(0).toUpperCase() + withSpaces.slice(1);
+}
+
+function BriefRowEditor({
+  row,
+  onCommit,
+  onCancel
+}: {
+  row: BriefRow;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(row.raw);
+
+  function commit() {
+    onCommit(value);
+  }
+
+  if (row.editor === 'select' && row.options) {
+    return (
+      <div style={{ marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <select
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onBlur={commit}
+          autoFocus
+          style={{
+            flex: 1,
+            background: 'rgba(255,255,255,0.04)',
+            border: `1px solid ${brandTokens.colors.border}`,
+            color: brandTokens.colors.lightText,
+            borderRadius: 6,
+            padding: '4px 6px',
+            fontSize: 12
+          }}
+        >
+          {row.options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            onCancel();
+          }}
+          aria-label={`Cancel editing ${row.label.toLowerCase()}`}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: brandTokens.colors.mutedText,
+            cursor: 'pointer',
+            fontSize: 11
+          }}
+        >
+          ×
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <input
+        type="text"
+        value={value}
+        autoFocus
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+        onBlur={commit}
+        style={{
+          flex: 1,
+          background: 'rgba(255,255,255,0.04)',
+          border: `1px solid ${brandTokens.colors.border}`,
+          color: brandTokens.colors.lightText,
+          borderRadius: 6,
+          padding: '4px 6px',
+          fontSize: 12,
+          outline: 'none',
+          minWidth: 0
+        }}
+      />
+      <button
+        type="button"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onCancel();
+        }}
+        aria-label={`Cancel editing ${row.label.toLowerCase()}`}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: brandTokens.colors.mutedText,
+          cursor: 'pointer',
+          fontSize: 11
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+// Re-export option-id types for downstream casts (kept here to avoid an extra import line elsewhere).
+export type { ServiceOptionId, TimelineBandId, BudgetBandId };

@@ -101,13 +101,15 @@ export function ReviewPanel({
   approved,
   mode,
   onApprove,
-  onContinueRefining
+  onContinueRefining,
+  onChange
 }: {
   draft: LeadDraft;
   approved: boolean;
   mode: 'essentials' | 'summary';
   onApprove: () => void;
   onContinueRefining: () => void;
+  onChange?: (key: string, value: string) => void;
 }) {
   const ready = isBriefReadyForApproval(draft);
 
@@ -145,28 +147,54 @@ export function ReviewPanel({
         readyForApproval={false}
         approved={approved}
         compact={mode === 'essentials'}
+        onChange={onChange}
       />
 
       {mode === 'summary' && ready && !approved && (
         <div style={{ display: 'grid', gap: 8 }}>
-          <PrimaryButton onClick={onApprove}>Approve &amp; send to team</PrimaryButton>
+          <button
+            type="button"
+            data-pulse="true"
+            data-testid="approve-button"
+            onClick={onApprove}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              border: 'none',
+              background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+              color: brandTokens.colors.baseBlack,
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              boxShadow: '0 4px 18px rgba(219, 181, 128, 0.45)',
+              animation: 'approve-pulse 1.6s ease-in-out infinite'
+            }}
+          >
+            Approve &amp; send to team
+          </button>
           <SecondaryButton onClick={onContinueRefining}>Continue refining</SecondaryButton>
         </div>
       )}
 
       {approved && (
         <div
+          data-testid="approve-confirmation"
           style={{
             fontSize: 11,
             color: '#4ade80',
             lineHeight: 1.5,
-            padding: '8px 10px',
-            border: `1px solid ${brandTokens.colors.subtleBorder}`,
+            padding: '10px 12px',
+            border: `1px solid rgba(74, 222, 128, 0.45)`,
             borderRadius: 8,
-            background: 'rgba(74, 222, 128, 0.06)'
+            background: 'rgba(74, 222, 128, 0.08)',
+            fontWeight: 600,
+            animation: 'approve-confirm 0.4s ease-out'
           }}
         >
-          Brief approved. The Balance team has been notified.
+          ✓ Brief approved. The Balance team has been notified.
         </div>
       )}
     </div>

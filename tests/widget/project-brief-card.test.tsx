@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, expect, test, vi } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { ProjectBriefCard } from '@/components/widget/widget-overlay-parts';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
@@ -105,5 +105,105 @@ describe('ProjectBriefCard', () => {
       />
     );
     expect(screen.queryByText(/key fields captured/i)).not.toBeInTheDocument();
+  });
+
+  test('compact mode renders human-readable service / timeline / budget labels', () => {
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+      />
+    );
+    expect(screen.getByText('Production')).toBeInTheDocument();
+    expect(screen.getByText('1-2 months')).toBeInTheDocument();
+    expect(screen.getByText('$20,000-$50,000')).toBeInTheDocument();
+  });
+
+  test('compact mode capitalizes projectType and converts dashes to spaces', () => {
+    render(
+      <ProjectBriefCard
+        draft={{ ...readyDraft, projectType: 'live-action' }}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+      />
+    );
+    expect(screen.getByText('Live action')).toBeInTheDocument();
+  });
+
+  test('compact mode label and value spans carry text-transform: capitalize', () => {
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+      />
+    );
+    const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]');
+    expect(serviceRow).not.toBeNull();
+    const labelSpan = within(serviceRow as HTMLElement).getByText('Service');
+    expect((labelSpan as HTMLElement).style.textTransform).toBe('capitalize');
+    const valueSpan = within(serviceRow as HTMLElement).getByText('Production');
+    expect((valueSpan as HTMLElement).style.textTransform).toBe('capitalize');
+  });
+
+  test('clicking the edit button on a free-text row opens an inline input', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const projectScopeRow = screen.getByText('Project scope').closest('[data-testid="brief-row"]') as HTMLElement;
+    const editButton = within(projectScopeRow).getByRole('button', { name: /edit project scope/i });
+    fireEvent.click(editButton);
+    const input = within(projectScopeRow).getByRole('textbox');
+    expect(input).toBeInTheDocument();
+    expect((input as HTMLInputElement).value).toBe('30s launch animation');
+  });
+
+  test('pressing Enter on the inline input fires onChange with the new value', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const projectScopeRow = screen.getByText('Project scope').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(projectScopeRow).getByRole('button', { name: /edit project scope/i }));
+    const input = within(projectScopeRow).getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '60s hero spot' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('projectScope', '60s hero spot');
+  });
+
+  test('select-style fields render a <select> with the human-readable option labels', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(serviceRow).getByRole('button', { name: /edit service/i }));
+    const select = within(serviceRow).getByRole('combobox') as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Production' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Post-Production' })).toBeInTheDocument();
   });
 });

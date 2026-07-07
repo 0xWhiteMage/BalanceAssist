@@ -120,7 +120,11 @@ test.describe('balance assist intake via persistent rail', () => {
 
     // Click approve. This calls /api/leads/finalize (mocked) and the
     // widget appends the post-approval confirmation message.
-    await approveButton.click();
+    // The Approve CTA runs a continuous pulse-glow animation (scale +
+    // box-shadow), so we click with `force: true` to bypass Playwright's
+    // "element is stable" wait — the click handler itself is what we
+    // care about, and the button is reachable throughout the animation.
+    await approveButton.click({ force: true });
 
     // The chat input must still be visible — the rail sits to the
     // left of the chat, never covering it.

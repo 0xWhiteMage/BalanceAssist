@@ -554,7 +554,15 @@ const startConversation = useCallback(async () => {
         return;
       }
 
-      const replyText: string = data.message?.trim() ? data.message : getFallbackResponse();
+      const replyChunks: string[] = (() => {
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          return data.messages.filter((chunk: unknown) => typeof chunk === 'string' && chunk.trim().length > 0);
+        }
+        if (typeof data.message === 'string' && data.message.trim().length > 0) {
+          return [data.message];
+        }
+        return [getFallbackResponse()];
+      })();
       const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
       const briefReady: boolean = Boolean(data.briefReady);
       const sharedWork = data.sharedWork;
@@ -576,7 +584,11 @@ const startConversation = useCallback(async () => {
         }
       }
 
-      await botSay(replyText, sharedWork ? { sharedWork } : undefined);
+      for (let i = 0; i < replyChunks.length; i++) {
+        const isFirst = i === 0;
+        const chunk = replyChunks[i];
+        await botSay(chunk, isFirst && sharedWork ? { sharedWork } : undefined);
+      }
     } catch {
       try {
         const localFallback = getLocalResponse(latestUserText, {
@@ -612,6 +624,30 @@ const startConversation = useCallback(async () => {
     const next = [...messagesRef.current, connectMsg];
     messagesRef.current = next;
     setMessages(next);
+  }
+
+  function handleDraftEdit(key: string, value: string) {
+    const editableKeys: ReadonlySet<keyof LeadDraft> = new Set([
+      'projectScope',
+      'projectType',
+      'service',
+      'timelineBand',
+      'budgetBand',
+      'contactName',
+      'contactCompany',
+      'contactEmail'
+    ]);
+    if (!editableKeys.has(key as keyof LeadDraft)) return;
+
+    const nextDraft = { ...draft, [key]: value } as LeadDraft;
+    setDraft(nextDraft);
+    setHasProjectIntent(detectProjectIntent(nextDraft));
+    setBriefApproved(false);
+
+    const nextStep = getNextConversationStep(nextDraft);
+    if (nextStep !== currentStep) {
+      setCurrentStep(nextStep);
+    }
   }
 
   async function appendReferenceLink(link: ReferenceLink) {
@@ -1049,6 +1085,7 @@ const startConversation = useCallback(async () => {
                     setBriefApproved(false);
                     setRailMode('essentials');
                   }}
+                  onChange={handleDraftEdit}
                 />
               </div>
             )}

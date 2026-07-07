@@ -122,3 +122,10 @@ test('system prompt includes the length-discipline rule for long answers', () =>
   expect(prompt).toMatch(/GENERAL ANSWERS — LENGTH DISCIPLINE/);
   expect(prompt).toMatch(/NEVER list more than 5 works/i);
 });
+
+test('system prompt instructs multi-bubble structure with double-newlines', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/MULTI-BUBBLE STRUCTURE/);
+  expect(prompt).toMatch(/double-newlines[\s\S]*separate your reply into 2-3 bubbles/i);
+  expect(prompt).toMatch(/Hard cap: 3 bubbles per reply/i);
+});

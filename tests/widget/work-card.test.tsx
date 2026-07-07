@@ -46,6 +46,37 @@ describe('WorkCard', () => {
   });
 });
 
+describe('WorkCard sizing and grab affordance', () => {
+  test('renders cards with a min-width of 280px for a more grabbable feel', () => {
+    render(<WorkCard entry={baseEntry} category="reference" />);
+    const card = screen.getByTestId('work-card');
+    expect(card.style.minWidth).toBe('280px');
+  });
+
+  test('renders the card with cursor: grab so users know it can be swiped', () => {
+    render(<WorkCard entry={baseEntry} category="reference" />);
+    expect(screen.getByTestId('work-card').style.cursor).toBe('grab');
+  });
+
+  test('the whole card is clickable (display: flex + min-height: 220px)', () => {
+    render(<WorkCard entry={baseEntry} category="reference" />);
+    const card = screen.getByTestId('work-card');
+    expect(card.style.display).toBe('flex');
+    expect(card.style.minHeight).toBe('220px');
+  });
+
+  test('cards do not get text-selected while swiping', () => {
+    render(<WorkCard entry={baseEntry} category="reference" />);
+    expect(screen.getByTestId('work-card').style.userSelect).toBe('none');
+  });
+
+  test('thumbnail uses a 160px image real estate', () => {
+    render(<WorkCard entry={baseEntry} category="reference" />);
+    const img = screen.getByTestId('work-card-image');
+    expect(img.style.height).toBe('160px');
+  });
+});
+
 describe('WorkCardRow', () => {
   test('renders nothing when entries array is empty', () => {
     const { container } = render(<WorkCardRow entries={[]} />);
@@ -65,5 +96,56 @@ describe('WorkCardRow', () => {
       />
     );
     expect(screen.getAllByTestId('work-card')).toHaveLength(2);
+  });
+
+  test('uses horizontal scroll-snap on the row so cards snap to the start', () => {
+    render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          {
+            entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' },
+            category: 'pitch'
+          }
+        ]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row');
+    expect(row.style.scrollSnapType).toBe('x mandatory');
+    const cards = screen.getAllByTestId('work-card');
+    for (const card of cards) {
+      expect(card.style.scrollSnapAlign).toBe('start');
+    }
+  });
+
+  test('row has a 14px gap and 12px vertical padding for touch comfort', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row');
+    expect(row.style.gap).toBe('14px');
+    expect(row.style.padding).toBe('12px 0px');
+  });
+
+  test('row has a right-edge fade to signal there are more cards', () => {
+    const { container } = render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          {
+            entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' },
+            category: 'pitch'
+          }
+        ]}
+      />
+    );
+    const fade = container.querySelector('[data-testid="work-card-row-fade"]');
+    expect(fade).not.toBeNull();
+    expect((fade as HTMLElement).style.pointerEvents).toBe('none');
+    expect((fade as HTMLElement).style.position).toBe('absolute');
+    expect((fade as HTMLElement).style.right).toBe('0px');
+    expect((fade as HTMLElement).style.width).toBe('28px');
   });
 });
