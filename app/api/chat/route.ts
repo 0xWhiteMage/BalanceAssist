@@ -10,10 +10,16 @@ import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
 import { checkRateLimit } from '@/lib/conversation/rate-limit';
 import { isBriefReadyForApproval, missingReviewFields, REVIEW_PROMPT } from '@/lib/conversation/review-state';
 import {
+  guardAgainstFabricatedBriefFields,
   recordBriefUpdatesJsonSchema,
-  recordBriefUpdatesSchema
+  recordBriefUpdatesSchema,
+  sanitizeShareWork,
+  shareWorkJsonSchema
 } from '@/lib/conversation/tool-schema';
+import { listAllWorks, type WorkEntry } from '@/lib/conversation/works-search';
 import type { ConversationStepId } from '@/lib/conversation/types';
+import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
+import type { LeadDraft } from '@/lib/onboarding/types';
 
 const chatMessageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant']),
@@ -39,6 +45,43 @@ export async function OPTIONS() {
 type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 const PROVIDER_TIMEOUT_MS = 15000;
 const TOOL_NAME = 'record_brief_updates';
+const SHARE_WORK_TOOL_NAME = 'share_work';
+
+type SharedWorkEntry = {
+  title: string;
+  url: string;
+  description: string;
+  image_url: string;
+  category: 'reference' | 'mood' | 'pitch';
+  slug: string;
+};
+
+type SharedWork = {
+  entries: SharedWorkEntry[];
+};
+
+function buildSharedWorkFromEntries(
+  slugs: string[],
+  category: 'reference' | 'mood' | 'pitch'
+): SharedWork {
+  const all = listAllWorks();
+  const bySlug = new Map<string, WorkEntry>();
+  for (const w of all) bySlug.set(w.slug, w);
+  const entries: SharedWorkEntry[] = [];
+  for (const slug of slugs) {
+    const w = bySlug.get(slug);
+    if (!w) continue;
+    entries.push({
+      title: w.title,
+      url: w.url,
+      description: w.description,
+      image_url: w.image_url,
+      category,
+      slug: w.slug
+    });
+  }
+  return { entries };
+}
 
 async function fetchProvider(input: string, init: RequestInit) {
   const controller = new AbortController();
@@ -92,6 +135,7 @@ function readMinimaxContent(data: unknown): string | null {
 type ProviderResult = {
   content: string;
   toolArguments: Record<string, unknown> | null;
+  sharedWork: SharedWork | null;
 };
 
 async function callOpenAICompatible(
@@ -99,13 +143,18 @@ async function callOpenAICompatible(
   apiKey: string,
   model: string,
   messages: OpenAIMessage[],
-  options?: { useTools?: boolean; sessionId?: string }
+  options?: {
+    useTools?: boolean;
+    sessionId?: string;
+    priorDraft?: Record<string, string>;
+    userMessage?: string;
+  }
 ): Promise<ProviderResult> {
   const useTools = options?.useTools ?? false;
   const body: Record<string, unknown> = {
     model,
     messages,
-    max_tokens: useTools ? 1600 : 512,
+    max_tokens: useTools ? 2400 : 600,
     temperature: useTools ? 0.4 : 0.6
   };
   if (useTools) {
@@ -115,6 +164,13 @@ async function callOpenAICompatible(
         function: {
           name: TOOL_NAME,
           parameters: recordBriefUpdatesJsonSchema
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: SHARE_WORK_TOOL_NAME,
+          parameters: shareWorkJsonSchema
         }
       }
     ];
@@ -147,28 +203,61 @@ async function callOpenAICompatible(
   }
 
   if (useTools && Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
-    const firstCall = message.tool_calls[0];
-    if (firstCall?.function?.name === TOOL_NAME && typeof firstCall.function.arguments === 'string') {
-      try {
-        const parsed = JSON.parse(firstCall.function.arguments);
-        const result = recordBriefUpdatesSchema.safeParse(parsed);
-        if (result.success) {
-          return { content, toolArguments: result.data };
+    let toolArguments: Record<string, unknown> | null = null;
+    let sharedWork: SharedWork | null = null;
+
+    for (const call of message.tool_calls) {
+      if (!call || typeof call !== 'object') continue;
+      const functionName = call.function?.name;
+      if (typeof call.function?.arguments !== 'string') continue;
+      if (functionName === TOOL_NAME) {
+        try {
+          const parsed = JSON.parse(call.function.arguments);
+          const result = recordBriefUpdatesSchema.safeParse(parsed);
+          if (result.success) {
+            const guarded = guardAgainstFabricatedBriefFields(
+              result.data as Record<string, unknown>,
+              {
+                ...createDefaultLeadDraft(),
+                ...(options?.priorDraft as Partial<LeadDraft> | undefined)
+              },
+              options?.userMessage ?? ''
+            );
+            toolArguments = guarded;
+          } else {
+            console.warn('[chat] record_brief_updates tool arguments failed schema validation', {
+              sessionId: options?.sessionId,
+              issues: result.error.issues
+            });
+          }
+        } catch (error) {
+          console.warn('[chat] record_brief_updates tool arguments failed to parse as JSON', {
+            sessionId: options?.sessionId,
+            message: error instanceof Error ? error.message : 'unknown'
+          });
         }
-        console.warn('[chat] record_brief_updates tool arguments failed schema validation', {
-          sessionId: options?.sessionId,
-          issues: result.error.issues
-        });
-      } catch (error) {
-        console.warn('[chat] record_brief_updates tool arguments failed to parse as JSON', {
-          sessionId: options?.sessionId,
-          message: error instanceof Error ? error.message : 'unknown'
-        });
+      } else if (functionName === SHARE_WORK_TOOL_NAME) {
+        try {
+          const parsed = JSON.parse(call.function.arguments);
+          const cleaned = sanitizeShareWork(parsed);
+          if (cleaned.slugs.length > 0) {
+            sharedWork = buildSharedWorkFromEntries(cleaned.slugs, cleaned.category);
+          }
+        } catch (error) {
+          console.warn('[chat] share_work tool arguments failed to parse as JSON', {
+            sessionId: options?.sessionId,
+            message: error instanceof Error ? error.message : 'unknown'
+          });
+        }
       }
+    }
+
+    if (toolArguments !== null || sharedWork !== null) {
+      return { content, toolArguments, sharedWork };
     }
   }
 
-  return { content, toolArguments: null };
+  return { content, toolArguments: null, sharedWork: null };
 }
 
 async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<string> {
@@ -294,6 +383,7 @@ export async function POST(request: Request) {
 
   let visibleContent: string;
   let toolArguments: Record<string, unknown> | null = null;
+  let sharedWork: SharedWork | null = null;
   let category: 'reply' | 'refusal' | 'local_fallback' = 'reply';
 
   try {
@@ -307,10 +397,11 @@ export async function POST(request: Request) {
         env.DEEPSEEK_API_KEY,
         model,
         llmMessages,
-        { useTools: true, sessionId }
+        { useTools: true, sessionId, priorDraft: ctx.priorDraft, userMessage: lastUserMessage }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
+      sharedWork = providerResult.sharedWork;
     } else if (env.MINIMAX_API_KEY) {
       const ctx = buildLlmContext(context);
       const systemPrompt = ctx.systemPrompt;
@@ -327,10 +418,11 @@ export async function POST(request: Request) {
         env.OPENAI_API_KEY,
         model,
         llmMessages,
-        { useTools: true, sessionId }
+        { useTools: true, sessionId, priorDraft: ctx.priorDraft, userMessage: lastUserMessage }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
+      sharedWork = providerResult.sharedWork;
     } else {
       category = 'local_fallback';
       const localResponse = getLocalResponse(lastUserMessage, {
@@ -371,7 +463,8 @@ export async function POST(request: Request) {
       draftUpdates,
       briefReady,
       reviewPrompt: briefReady ? REVIEW_PROMPT : null,
-      missingFields
+      missingFields,
+      sharedWork: sharedWork ?? undefined
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

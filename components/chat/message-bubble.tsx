@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
 import type { ChatMessage, InlineCard, QuickReply } from '@/lib/conversation/types';
+import { WorkCardRow, type WorkCardCategory } from '@/components/chat/work-card';
 
 type MessageBubbleProps = {
   message: ChatMessage;
@@ -180,6 +181,17 @@ export const MessageBubble = memo(function MessageBubble({ message, onQuickReply
             {message.inlineCards.map((card, i) => (
               <InlineCardView key={i} card={card} onClick={onInlineCardClick} />
             ))}
+          </div>
+        )}
+
+        {message.sharedWork && message.sharedWork.entries.length > 0 && (
+          <div style={{ marginLeft: '36px', width: '100%' }}>
+            <WorkCardRow
+              entries={message.sharedWork.entries.map((entry) => ({
+                entry,
+                category: (entry.category as WorkCardCategory) ?? 'reference'
+              }))}
+            />
           </div>
         )}
 

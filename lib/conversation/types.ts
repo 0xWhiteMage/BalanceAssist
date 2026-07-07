@@ -12,6 +12,17 @@ export type QuickReply = {
   value: string;
 };
 
+export type SharedWorkEntryView = {
+  title: string;
+  url: string;
+  description: string;
+  image_url: string;
+  category: 'reference' | 'mood' | 'pitch';
+  slug: string;
+  clients?: string;
+  year?: number | null;
+};
+
 export type ChatMessage = {
   id: string;
   sender: Sender;
@@ -19,6 +30,7 @@ export type ChatMessage = {
   timestamp: number;
   quickReplies?: QuickReply[];
   inlineCards?: InlineCard[];
+  sharedWork?: { entries: SharedWorkEntryView[] };
   attachment?: {
     name: string;
     size: string;

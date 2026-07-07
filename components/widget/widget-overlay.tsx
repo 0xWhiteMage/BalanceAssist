@@ -341,6 +341,7 @@ export function WidgetOverlay({
       options?: {
         quickReplies?: ChatMessage['quickReplies'];
         inlineCards?: InlineCard[];
+        sharedWork?: ChatMessage['sharedWork'];
         isDisclaimer?: boolean;
         isSystem?: boolean;
         delay?: number;
@@ -362,6 +363,7 @@ export function WidgetOverlay({
         timestamp: Date.now(),
         quickReplies: options?.quickReplies,
         inlineCards: options?.inlineCards,
+        sharedWork: options?.sharedWork,
         isDisclaimer: options?.isDisclaimer
       };
       const nextMessages = [...messagesRef.current, botMessage];
@@ -555,6 +557,7 @@ const startConversation = useCallback(async () => {
       const replyText: string = data.message?.trim() ? data.message : getFallbackResponse();
       const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
       const briefReady: boolean = Boolean(data.briefReady);
+      const sharedWork = data.sharedWork;
 
       if (Object.keys(draftUpdates).length > 0) {
         const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
@@ -573,7 +576,7 @@ const startConversation = useCallback(async () => {
         }
       }
 
-      await botSay(replyText);
+      await botSay(replyText, sharedWork ? { sharedWork } : undefined);
     } catch {
       try {
         const localFallback = getLocalResponse(latestUserText, {
