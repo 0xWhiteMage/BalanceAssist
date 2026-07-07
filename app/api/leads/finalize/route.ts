@@ -147,13 +147,25 @@ export async function POST(request: Request) {
         .filter((value): value is { name?: string } => Boolean(value) && typeof value === 'object')
         .map((file) => `• File: ${file.name ?? ''}`);
 
-      if (linkLines.length || fileLines.length) {
-        const body = ['Attachments:', ...linkLines, ...fileLines].join('\n');
-        try {
-          await sendTelegramMessage(body, { threadId: snap.telegram_thread_id });
-        } catch (error) {
-          console.warn('[leads-finalize] failed to send attachment summary', { sessionId, error });
-        }
+      const summaryLines = [
+        `Project type: ${leadDraft?.projectType || leadDraft?.service || 'n/a'}`,
+        `Scope: ${leadDraft?.projectScope || 'n/a'}`,
+        `Timeline: ${leadDraft?.timelineBand || 'n/a'}`,
+        `Budget: ${leadDraft?.budgetBand || 'n/a'}`,
+        `Contact: ${leadDraft?.contactName || 'n/a'} <${leadDraft?.contactEmail || ''}>`
+      ];
+      const messageParts = ['✅ Brief approved', '', ...summaryLines];
+      if (linkLines.length) {
+        messageParts.push('', 'Reference links:', ...linkLines);
+      }
+      if (fileLines.length) {
+        messageParts.push('', 'Reference files:', ...fileLines);
+      }
+
+      try {
+        await sendTelegramMessage(messageParts.join('\n'), { threadId: snap.telegram_thread_id });
+      } catch (error) {
+        console.warn('[leads-finalize] failed to send approval notification', { sessionId, error });
       }
     }
   } catch (error) {

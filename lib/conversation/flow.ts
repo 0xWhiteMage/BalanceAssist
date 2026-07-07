@@ -12,7 +12,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
     botMessages: [
       'Hi! I\'m **Balance Assist** — Balance Studio\'s intelligent AI agent.',
       "I can help you explore services, share a project brief, or connect you with the right person on our team.\n\nJust so you know — I'm an AI assistant, not a human. Our team may review our conversation to serve you better.",
-      "What can I help you with today? I can answer questions about Balance Studio, help with a project brief, draft text, or assist with a job application — whichever is most useful."
+      "What can I help you with today? I can answer questions about Balance Studio, help with a project brief, or assist with a job application — whichever is most useful."
     ],
     freeText: true,
     next: 'scope'
@@ -91,14 +91,14 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   handoff: {
     id: 'handoff',
     botMessages: [
-      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also book a discovery call below if you'd like to talk sooner."
+      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also book a quick catch-up below if you'd like to talk sooner."
     ],
     inlineCards: [
       {
         type: 'calendly',
-        url: 'https://calendly.com/balancestudio/intro-call',
-        label: 'Book a Discovery Call',
-        subtitle: '30 min · Video call · Pick a time'
+        url: 'https://calendly.com/haiha-dang/catch-up',
+        label: 'Book a catch-up',
+        subtitle: '15 min · Pick a time'
       }
     ],
     next: 'free-chat'

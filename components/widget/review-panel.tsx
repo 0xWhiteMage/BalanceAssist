@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { ProjectBriefCard } from '@/components/widget/widget-overlay-parts';
 import { brandTokens } from '@/lib/brand-tokens';
 import { isBriefReadyForApproval, missingReviewFields } from '@/lib/conversation/review-state';
@@ -112,6 +113,21 @@ export function ReviewPanel({
   onChange?: (key: string, value: string) => void;
 }) {
   const ready = isBriefReadyForApproval(draft);
+  const [isApproveInFlight, setIsApproveInFlight] = useState(false);
+
+  useEffect(() => {
+    if (approved) {
+      setIsApproveInFlight(false);
+    }
+  }, [approved]);
+
+  function handleApproveClick() {
+    if (approved || isApproveInFlight) return;
+    setIsApproveInFlight(true);
+    onApprove();
+  }
+
+  const approveDisabled = approved || isApproveInFlight;
 
   // Progress must match the 8 visible rows on the brief card. Mirroring the exact substitution ProjectBriefCard applies.
   const projectScopeFilled = (draft.scopePolished ?? draft.projectScope ?? '').trim().length > 0;
@@ -155,7 +171,10 @@ export function ReviewPanel({
           <button
             type="button"
             data-testid="approve-button"
-            onClick={onApprove}
+            onClick={handleApproveClick}
+            disabled={approveDisabled}
+            data-in-flight={isApproveInFlight ? 'true' : 'false'}
+            aria-busy={isApproveInFlight || undefined}
             style={{
               width: '100%',
               padding: '10px 12px',
@@ -165,19 +184,21 @@ export function ReviewPanel({
               color: brandTokens.colors.baseBlack,
               fontSize: 11,
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: approveDisabled ? 'not-allowed' : 'pointer',
+              opacity: approveDisabled ? 0.5 : 1,
               textTransform: 'uppercase',
               letterSpacing: '0.12em',
               boxShadow: '0 4px 18px rgba(219, 181, 128, 0.45)'
             }}
             onMouseEnter={(e) => {
+              if (approveDisabled) return;
               e.currentTarget.style.filter = 'brightness(1.06)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.filter = 'brightness(1)';
             }}
           >
-            Approve &amp; send to team
+            {isApproveInFlight ? 'Sending…' : 'Approve & send to team'}
           </button>
           <SecondaryButton onClick={onContinueRefining}>Continue refining</SecondaryButton>
         </div>

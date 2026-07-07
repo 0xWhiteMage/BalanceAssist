@@ -179,6 +179,7 @@ export function WidgetOverlay({
   const isPollingRef = useRef<boolean>(false);
   const seenTeamMessageIdsRef = useRef<Set<number>>(new Set());
   const submitInFlightRef = useRef<boolean>(false);
+  const approveInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollImmediateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -571,6 +572,7 @@ const startConversation = useCallback(async () => {
     setAttachmentOpen(false);
     setView('chat');
     setAllowAttachment(false);
+    approveInFlightRef.current = false;
     cancelRef.current = false;
     resetTimerRef.current = setTimeout(() => {
       resetTimerRef.current = null;
@@ -723,27 +725,34 @@ const startConversation = useCallback(async () => {
   }
 
   async function handleApproveBrief() {
-    await ensureSession();
-    if (!sessionIdRef.current) return;
-
-    const result = scoreLead(draftRef.current);
-    const payload = {
-      sessionId: sessionIdRef.current,
-      qualificationStatus: result.status,
-      score: result.score,
-      recommendedNextStep: result.recommendedNextStep,
-      leadDraft: {
-        ...draftRef.current,
-        referenceLinks,
-        referenceFiles
-      }
-    } as const;
-
-    await finalizeLead(payload);
+    if (approveInFlightRef.current || briefApproved) return;
+    approveInFlightRef.current = true;
     setBriefApproved(true);
-    setCurrentStep('handoff');
-    await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
-    await advanceStep('handoff', draftRef.current);
+
+    try {
+      await ensureSession();
+      if (!sessionIdRef.current) return;
+
+      const result = scoreLead(draftRef.current);
+      const payload = {
+        sessionId: sessionIdRef.current,
+        qualificationStatus: result.status,
+        score: result.score,
+        recommendedNextStep: result.recommendedNextStep,
+        leadDraft: {
+          ...draftRef.current,
+          referenceLinks,
+          referenceFiles
+        }
+      } as const;
+
+      await finalizeLead(payload);
+      setCurrentStep('handoff');
+      await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
+      await advanceStep('handoff', draftRef.current);
+    } finally {
+      // keep approveInFlightRef true once approved, so future calls remain no-ops.
+    }
   }
 
   async function processFlowAnswer(value: string, displayLabel?: string) {

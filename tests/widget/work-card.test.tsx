@@ -518,3 +518,173 @@ describe('WorkCardRow magnetic snap is instant (no smooth scroll, no mandatory s
     expect(callArgs!.left).toBe(Math.round(scrollLeft / clientWidth) * clientWidth);
   });
 });
+
+describe('WorkCardRow prev/next arrow buttons', () => {
+  function setupOverflowRow(numCards: number) {
+    const entries = Array.from({ length: numCards }, (_, i) => ({
+      entry: { ...baseEntry, slug: `card-${i}`, title: `Card ${i}`, url: `https://www.balancestudio.tv/card-${i}` },
+      category: 'reference' as const
+    }));
+    const result = render(<WorkCardRow entries={entries} />);
+    const row = result.container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
+    const clientWidth = 320;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => clientWidth });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => clientWidth * 3 });
+    let scrollLeft = 0;
+    Object.defineProperty(row, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (v: number) => {
+        scrollLeft = v;
+      }
+    });
+    fireEvent.scroll(row);
+    return { row };
+  }
+
+  test('renders prev and next buttons inside an overflowing row', async () => {
+    setupOverflowRow(4);
+    await waitFor(() => {
+      expect(screen.queryByTestId('work-card-row-prev')).not.toBeNull();
+      expect(screen.queryByTestId('work-card-row-next')).not.toBeNull();
+    });
+  });
+
+  test('does NOT render arrow buttons when the row does not overflow (single page)', async () => {
+    render(<WorkCardRow entries={[{ entry: baseEntry, category: 'reference' }]} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('work-card-row-prev')).toBeNull();
+    expect(screen.queryByTestId('work-card-row-next')).toBeNull();
+  });
+
+  test('clicking "next" calls scrollBy with the row clientWidth (positive direction)', async () => {
+    const { row } = setupOverflowRow(4);
+    const scrollBySpy = vi.fn(function scrollBy(this: HTMLDivElement, opts: ScrollToOptions) {
+      (this as unknown as { scrollLeft: number }).scrollLeft += opts.left ?? 0;
+    });
+    Object.defineProperty(row, 'scrollBy', {
+      configurable: true,
+      writable: true,
+      value: scrollBySpy
+    });
+    let nextButton: HTMLElement | null = null;
+    await waitFor(() => {
+      nextButton = screen.getByTestId('work-card-row-next');
+    });
+    fireEvent.mouseEnter(row);
+    fireEvent.click(nextButton!);
+    expect(scrollBySpy).toHaveBeenCalled();
+    const opts = scrollBySpy.mock.calls[0]?.[0] as ScrollToOptions | undefined;
+    expect(opts).toBeDefined();
+    expect(opts!.behavior).toBe('auto');
+    expect(opts!.left).toBe(320);
+  });
+
+  test('clicking "prev" calls scrollBy with the row clientWidth (negative direction)', async () => {
+    const { row } = setupOverflowRow(4);
+    const scrollBySpy = vi.fn(function scrollBy(this: HTMLDivElement, opts: ScrollToOptions) {
+      (this as unknown as { scrollLeft: number }).scrollLeft += opts.left ?? 0;
+    });
+    Object.defineProperty(row, 'scrollBy', {
+      configurable: true,
+      writable: true,
+      value: scrollBySpy
+    });
+    let prevButton: HTMLElement | null = null;
+    let nextButton: HTMLElement | null = null;
+    await waitFor(() => {
+      prevButton = screen.getByTestId('work-card-row-prev');
+      nextButton = screen.getByTestId('work-card-row-next');
+    });
+    fireEvent.mouseEnter(row);
+    fireEvent.click(nextButton!);
+
+    // First click moves forward (activePage=0 → activePage=1, but the row scroll didn't change
+    // because scrollBy is a stub that updates scrollLeft by 320 anyway).
+    // Force scrollLeft to 320 so the prev button is enabled.
+    fireEvent.scroll(row);
+    fireEvent.click(prevButton!);
+    expect(scrollBySpy).toHaveBeenCalledTimes(2);
+    const prevOpts = scrollBySpy.mock.calls[1]?.[0] as ScrollToOptions | undefined;
+    expect(prevOpts).toBeDefined();
+    expect(prevOpts!.behavior).toBe('auto');
+    expect(prevOpts!.left).toBe(-320);
+  });
+
+  test('at scroll position 0, the "prev" button has data-disabled="true" and is not clickable', async () => {
+    setupOverflowRow(4);
+    let prevButton: HTMLElement | null = null;
+    await waitFor(() => {
+      prevButton = screen.getByTestId('work-card-row-prev');
+    });
+    const btn = prevButton as HTMLButtonElement;
+    expect(btn.getAttribute('data-disabled')).toBe('true');
+    expect(btn.hasAttribute('disabled')).toBe(true);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  test('at the last page, the "next" button has data-disabled="true"', async () => {
+    const { row } = setupOverflowRow(4);
+    let nextButton: HTMLElement | null = null;
+    await waitFor(() => {
+      nextButton = screen.getByTestId('work-card-row-next');
+    });
+    const realNext = nextButton as HTMLButtonElement;
+    Object.defineProperty(row, 'scrollLeft', { configurable: true, get: () => 640, set: () => undefined });
+    fireEvent.scroll(row);
+    await waitFor(() => {
+      expect(realNext.getAttribute('data-disabled')).toBe('true');
+    });
+    expect(realNext.hasAttribute('disabled')).toBe(true);
+  });
+
+  test('arrow buttons are visually hidden (opacity: 0) until the row is hovered', async () => {
+    setupOverflowRow(4);
+    let prevButton: HTMLElement | null = null;
+    let nextButton: HTMLElement | null = null;
+    await waitFor(() => {
+      prevButton = screen.getByTestId('work-card-row-prev');
+      nextButton = screen.getByTestId('work-card-row-next');
+    });
+    const prev = prevButton as HTMLButtonElement;
+    const next = nextButton as HTMLButtonElement;
+    // Initially the row is not hovered, so opacity is 0 even when the button is scrollable.
+    expect(prev.style.opacity).toBe('0');
+    expect(next.style.opacity).toBe('0');
+
+    fireEvent.mouseEnter(screen.getByTestId('work-card-row'));
+    // After hover, the next button (scrollable forward) becomes visible.
+    await waitFor(() => {
+      expect(next.style.opacity).toBe('1');
+    });
+
+    fireEvent.mouseLeave(screen.getByTestId('work-card-row'));
+    await waitFor(() => {
+      expect(next.style.opacity).toBe('0');
+    });
+  });
+
+  test('clicking next does not start a row drag (prevents underlying card link)', async () => {
+    const { row } = setupOverflowRow(4);
+    // jsdom does not implement scrollBy/scrollTo on HTMLElement; stub them so
+    // the click handler does not throw before we can assert the click guards.
+    if (typeof row.scrollBy !== 'function') {
+      Object.defineProperty(row, 'scrollBy', { configurable: true, writable: true, value: vi.fn() });
+    }
+    if (typeof row.scrollTo !== 'function') {
+      Object.defineProperty(row, 'scrollTo', { configurable: true, writable: true, value: vi.fn() });
+    }
+    let nextButton: HTMLElement | null = null;
+    await waitFor(() => {
+      nextButton = screen.getByTestId('work-card-row-next');
+    });
+    const preventDefaultSpy = vi.spyOn(MouseEvent.prototype, 'preventDefault');
+    const stopPropagationSpy = vi.spyOn(MouseEvent.prototype, 'stopPropagation');
+    fireEvent.mouseEnter(row);
+    fireEvent.click(nextButton!);
+    expect(preventDefaultSpy).toHaveBeenCalled();
+    expect(stopPropagationSpy).toHaveBeenCalled();
+    preventDefaultSpy.mockRestore();
+    stopPropagationSpy.mockRestore();
+  });
+});

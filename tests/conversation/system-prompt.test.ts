@@ -226,3 +226,33 @@ test('system prompt does not use "My apologies" as a positive example', () => {
   const forbiddenContext = /Forbidden phrases[\s\S]*My apologies/i.test(prompt);
   expect(forbiddenContext).toBe(true);
 });
+
+test('system prompt forbids auto-filling brief fields from low-info replies', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/INFERENCE DISCIPLINE/i);
+  expect(prompt).toMatch(/do not auto-fill/i);
+  expect(prompt).toMatch(/5k of which currency/i);
+});
+
+test('system prompt forbids silent coercion of bare durations like "3 weeks" into a timeline band', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/3 weeks/i);
+  expect(prompt).toMatch(/must NOT be silently coerced/i);
+});
+
+test('system prompt forbids duplicating projectType into service', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/do not set service and projectType to the same value/i);
+});
+
+test('system prompt requires projectScope to be set any time the user describes the project', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/brief field discipline/i);
+  expect(prompt).toMatch(/must set projectscope or scopePolished/i);
+});
+
+test('system prompt treats low-info confirmations as confirmations, not new answers', () => {
+  const prompt = buildSystemPrompt();
+  const window = /INFERENCE DISCIPLINE[\s\S]*?(?=INFERENCE|BRIEF FIELD|$)/i.exec(prompt)?.[0] ?? '';
+  expect(window.toLowerCase()).toMatch(/confirmations.*do not fill new fields|confirmations.*confirm what was just said/i);
+});
