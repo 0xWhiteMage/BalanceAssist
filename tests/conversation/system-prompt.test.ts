@@ -61,6 +61,18 @@ test('system prompt tells the model not to punt on low-information replies durin
   expect(prompt).toMatch(/Do NOT punt to the human team/i);
 });
 
+test('system prompt explicitly handles "ok / go on" replies while in brief-building mode', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/low-information/i);
+  expect(prompt).toMatch(/brief-building mode/i);
+  expect(prompt).toMatch(/human team is a fallback/i);
+});
+
+test('system prompt does not contain the bad fallback phrase "I\'m not sure about that"', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).not.toContain("I'm not sure about that");
+});
+
 test('system prompt suppresses the follow-up question when the brief is already reviewable', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/do NOT emit the review sentence/i);
