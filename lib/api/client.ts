@@ -199,3 +199,67 @@ export async function addReferenceLink(payload: ReferenceLinkPayload): Promise<b
   const result = await postJson<{ ok?: boolean; persisted?: boolean }>('/api/attachments/link', payload);
   return Boolean(result?.ok);
 }
+
+export type ChatSharedWorkEntry = {
+  title: string;
+  url: string;
+  description?: string;
+  image_url?: string;
+  category?: 'reference' | 'mood' | 'pitch';
+  slug: string;
+  clients?: string;
+  year?: number | null;
+};
+
+export type ChatSharedWork = {
+  entries: ChatSharedWorkEntry[];
+};
+
+export type ChatReplyItem = {
+  text: string;
+};
+
+export type ChatRequestPayload = {
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  context?: {
+    step?: string;
+    isTeamConnected?: boolean;
+    draft?: string;
+    sessionId?: string;
+  };
+};
+
+export type ChatResponse = {
+  replies: ChatReplyItem[];
+  draftUpdates: Record<string, string>;
+  briefReady: boolean;
+  sharedWork: ChatSharedWork | null;
+};
+
+export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResponse | null> {
+  const data = await postJson<{
+    message?: string;
+    messages?: string[];
+    draftUpdates?: Record<string, string>;
+    briefReady?: boolean;
+    sharedWork?: ChatSharedWork;
+  }>('/api/chat', payload);
+  if (!data) return null;
+
+  const textChunks: string[] = (() => {
+    if (Array.isArray(data.messages) && data.messages.length > 0) {
+      return data.messages;
+    }
+    if (typeof data.message === 'string' && data.message.trim().length > 0) {
+      return [data.message];
+    }
+    return [];
+  })();
+
+  return {
+    replies: textChunks.map((text) => ({ text })),
+    draftUpdates: data.draftUpdates ?? {},
+    briefReady: Boolean(data.briefReady),
+    sharedWork: data.sharedWork ?? null
+  };
+}

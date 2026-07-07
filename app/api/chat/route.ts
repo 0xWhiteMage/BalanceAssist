@@ -458,6 +458,18 @@ export async function POST(request: Request) {
       void logLlmEvent(baseUrl, sessionId, category, Object.keys(draftUpdates).length > 0);
     }
 
+    const replyChunks = splitReplyIntoMessages(replyText);
+    if (replyChunks.length > 1) {
+      return jsonWithCors({
+        messages: replyChunks,
+        draftUpdates,
+        briefReady,
+        reviewPrompt: briefReady ? REVIEW_PROMPT : null,
+        missingFields,
+        sharedWork: sharedWork ?? undefined
+      });
+    }
+
     return jsonWithCors({
       message: replyText,
       draftUpdates,
@@ -470,4 +482,66 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return jsonWithCors({ error: 'Chat service error', detail: message }, { status: 500 });
   }
+}
+
+function splitReplyIntoMessages(text: string): string[] {
+  const cleaned = text.trim();
+  if (!cleaned) return [text];
+
+  const hasRuleSeparator = /(^|\n)\s*---\s*(\n|$)/.test(cleaned);
+  if (hasRuleSeparator) {
+    const parts = cleaned
+      .split(/\s*---\s*/g)
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    if (parts.length > 1) {
+      return parts.map((part) => splitLongChunk(part)).flat();
+    }
+  }
+
+  const doubleNewlineParts = cleaned
+    .split(/\n\s*\n+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (doubleNewlineParts.length > 1) {
+    return doubleNewlineParts.map((part) => splitLongChunk(part)).flat();
+  }
+
+  return [cleaned];
+}
+
+function splitLongChunk(chunk: string): string[] {
+  const MAX_CHUNK = 600;
+  if (chunk.length <= MAX_CHUNK) return [chunk];
+
+  const sentenceBoundary = /([.!?])\s+/g;
+  const pieces: string[] = [];
+  let buffer = '';
+  let lastBoundary = -1;
+  let cursor = 0;
+
+  for (const match of chunk.matchAll(sentenceBoundary)) {
+    const boundaryIndex = match.index ?? 0;
+    const sentenceEnd = boundaryIndex + match[0].length;
+    if (sentenceEnd > MAX_CHUNK && buffer.trim().length > 0) {
+      pieces.push(buffer.trim());
+      buffer = '';
+    }
+    buffer += chunk.slice(cursor, sentenceEnd);
+    lastBoundary = sentenceEnd;
+    cursor = sentenceEnd;
+    if (buffer.length > MAX_CHUNK) {
+      pieces.push(buffer.trim());
+      buffer = '';
+    }
+  }
+
+  if (cursor < chunk.length) {
+    buffer += chunk.slice(cursor);
+  }
+  if (buffer.trim().length > 0) {
+    pieces.push(buffer.trim());
+  }
+
+  return pieces.length > 0 ? pieces : [chunk];
 }

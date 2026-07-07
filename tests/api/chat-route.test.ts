@@ -371,4 +371,70 @@ describe('POST /api/chat', () => {
     expect(data.draftUpdates.projectScope).toBe('30s animation');
     expect(data.briefReady).toBe(false);
   });
+
+  test('splits a reply with double-newline separators into a messages[] array', async () => {
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Hello.\n\nThere.\n\nFriend.', 'stop')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'say something with three bubbles' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBeUndefined();
+    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend.']);
+  });
+
+  test('splits a reply with --- separators into a messages[] array', async () => {
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Hello.\n---\nThere.\n---\nFriend.', 'stop')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'three bubbles with rules' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBeUndefined();
+    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend.']);
+  });
+
+  test('keeps the single-message shape when there are no separators (backwards-compatible)', async () => {
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Just one short reply.', 'stop')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'short reply please' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBe('Just one short reply.');
+    expect(data.messages).toBeUndefined();
+  });
+
+  test('sharedWork and briefReady stay attached to the FIRST message in the split array', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'A few examples:\n\nWant me to walk through the event pieces?',
+      'share_work',
+      JSON.stringify({ slugs: ['milo', 'razer'], category: 'reference' })
+    )) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'show me event examples' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.messages).toEqual(['A few examples:', 'Want me to walk through the event pieces?']);
+    expect(data.sharedWork).toBeDefined();
+    expect(data.sharedWork.entries).toHaveLength(2);
+    expect(data.briefReady).toBe(false);
+  });
 });
