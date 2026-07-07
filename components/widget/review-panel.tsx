@@ -101,13 +101,15 @@ export function ReviewPanel({
   approved,
   mode,
   onApprove,
-  onContinueRefining
+  onContinueRefining,
+  onChange
 }: {
   draft: LeadDraft;
   approved: boolean;
   mode: 'essentials' | 'summary';
   onApprove: () => void;
   onContinueRefining: () => void;
+  onChange?: (key: string, value: string) => void;
 }) {
   const ready = isBriefReadyForApproval(draft);
 
@@ -145,6 +147,7 @@ export function ReviewPanel({
         readyForApproval={false}
         approved={approved}
         compact={mode === 'essentials'}
+        onChange={onChange}
       />
 
       {mode === 'summary' && ready && !approved && (

@@ -626,6 +626,30 @@ const startConversation = useCallback(async () => {
     setMessages(next);
   }
 
+  function handleDraftEdit(key: string, value: string) {
+    const editableKeys: ReadonlySet<keyof LeadDraft> = new Set([
+      'projectScope',
+      'projectType',
+      'service',
+      'timelineBand',
+      'budgetBand',
+      'contactName',
+      'contactCompany',
+      'contactEmail'
+    ]);
+    if (!editableKeys.has(key as keyof LeadDraft)) return;
+
+    const nextDraft = { ...draft, [key]: value } as LeadDraft;
+    setDraft(nextDraft);
+    setHasProjectIntent(detectProjectIntent(nextDraft));
+    setBriefApproved(false);
+
+    const nextStep = getNextConversationStep(nextDraft);
+    if (nextStep !== currentStep) {
+      setCurrentStep(nextStep);
+    }
+  }
+
   async function appendReferenceLink(link: ReferenceLink) {
     setReferenceLinks((prev) => [...prev, link]);
     const id = sessionIdRef.current ?? (await ensureSession());
@@ -1061,6 +1085,7 @@ const startConversation = useCallback(async () => {
                     setBriefApproved(false);
                     setRailMode('essentials');
                   }}
+                  onChange={handleDraftEdit}
                 />
               </div>
             )}
