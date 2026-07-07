@@ -8,10 +8,12 @@ export type ReferenceFile = { name: string; sizeBytes: number; mime: string; tel
 
 export function AttachmentDropzone({
   onAddLink,
-  onAddFile
+  onAddFile,
+  sessionId
 }: {
   onAddLink: (link: ReferenceLink) => void;
   onAddFile: (file: ReferenceFile) => void;
+  sessionId?: string | null;
 }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +28,7 @@ export function AttachmentDropzone({
     const res = await fetch('/api/attachments/link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, kind })
+      body: JSON.stringify({ url, kind, sessionId: sessionId ?? undefined })
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -44,6 +46,9 @@ export function AttachmentDropzone({
       const fd = new FormData();
       fd.append('files', file, file.name);
       fd.append('kind', 'reference');
+      if (sessionId) {
+        fd.append('sessionId', sessionId);
+      }
       const res = await fetch('/api/telegram/upload', { method: 'POST', body: fd });
       if (!res.ok) continue;
       const data = await res.json();
