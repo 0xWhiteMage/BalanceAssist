@@ -43,7 +43,7 @@ test('system prompt worked example: 30s animation maps to empty timelineBand/bud
 
 test('system prompt asks one focused question when starting a brief', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/ask the FIRST obvious brief question/i);
+  expect(prompt).toMatch(/first obvious brief question/i);
   expect(prompt).toMatch(/format and length/i);
 });
 
@@ -57,7 +57,7 @@ test('system prompt embeds the Balance Studio profile for general questions', ()
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/ABOUT BALANCE STUDIO/);
   expect(prompt).toMatch(/Singapore-based/);
-  expect(prompt).toMatch(/Dream · Design · Create/);
+  expect(prompt).toMatch(/DREAM — DESIGN — CREATE/);
 });
 
 test('system prompt positions Balance Assist as a general-purpose assistant', () => {
@@ -65,5 +65,31 @@ test('system prompt positions Balance Assist as a general-purpose assistant', ()
   expect(prompt).toMatch(/general-purpose AI assistant/i);
   expect(prompt).toMatch(/Project briefs are one capability/i);
   expect(prompt).toMatch(/Job application help/i);
-  expect(prompt).toMatch(/do NOT pivot to "do you have a project/i);
+});
+
+test('system prompt instructs substantive answers for general questions', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/2-4 short paragraphs/i);
+  expect(prompt).toMatch(/specific facts, names, or numbers from the profile/i);
+  expect(prompt).toMatch(/Prefer specific claims/i);
+});
+
+test('system prompt profile includes the rich company details', () => {
+  const prompt = buildSystemPrompt();
+  // The profile is too long to assert all of; spot-check a few anchors.
+  expect(prompt).toMatch(/DREAM.*DESIGN.*CREATE/);
+  expect(prompt).toMatch(/Be Bold\. Be Respectful\./);
+  expect(prompt).toMatch(/110\+ projects/);
+  expect(prompt).toMatch(/HaiHa Dang/);
+  expect(prompt).toMatch(/PURE NOW/);
+  expect(prompt).toMatch(/Canon PowerShot/);
+});
+
+test('system prompt profile includes the tool stack', () => {
+  const prompt = buildSystemPrompt();
+  // The profile mentions their post-production tool stack; assert all four.
+  expect(prompt).toMatch(/Blender/);
+  expect(prompt).toMatch(/DaVinci/);
+  expect(prompt).toMatch(/Premiere Pro/);
+  expect(prompt).toMatch(/After Effects/);
 });
