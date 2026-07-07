@@ -34,6 +34,21 @@ describe('POST /api/chat', () => {
     };
   }
 
+  function makeMultiToolCallResponse(content: string, calls: Array<{ name: string; argumentsStr: string }>) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content,
+            tool_calls: calls.map((c) => ({ function: { name: c.name, arguments: c.argumentsStr } }))
+          }
+        }]
+      })
+    };
+  }
+
   function makeTruncatedResponse(content: string, finishReason: string) {
     return {
       ok: true,
@@ -201,5 +216,128 @@ describe('POST /api/chat', () => {
     expect(warnSpy).toHaveBeenCalledWith('[chat] response truncated: finish_reason=length');
 
     warnSpy.mockRestore();
+  });
+
+  test('share_work tool call returns sharedWork.entries with the resolved work data', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'A few examples of our event work:',
+      'share_work',
+      JSON.stringify({ slugs: ['milo', 'razer', 'msi'], category: 'reference' })
+    )) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'show me event examples' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBe('A few examples of our event work:');
+    expect(data.sharedWork).toBeDefined();
+    expect(data.sharedWork.entries).toHaveLength(3);
+    const slugs = data.sharedWork.entries.map((e: { slug: string }) => e.slug);
+    expect(slugs).toEqual(['milo', 'razer', 'msi']);
+    expect(data.sharedWork.entries[0].category).toBe('reference');
+    expect(data.sharedWork.entries[0].title).toBe('MILO — Energy and the Spirit to Success');
+    expect(data.sharedWork.entries[0].url).toMatch(/balancestudio\.tv\/milo/);
+    expect(data.sharedWork.entries[0].image_url).toMatch(/squarespace-cdn/);
+  });
+
+  test('share_work tool call drops invalid slugs and caps the result at 8 entries', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'Here are a few pieces.',
+      'share_work',
+      JSON.stringify({
+        slugs: [
+          'milo',
+          'razer',
+          'msi',
+          'handshakes',
+          'compare-club',
+          'filmninja',
+          'sccc5x',
+          'sccc-kaki-says',
+          'made-up-slug',
+          'sph-the-future-of-skills'
+        ],
+        category: 'pitch'
+      })
+    )) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'show me your video work' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.sharedWork.entries.length).toBe(8);
+    const slugs = data.sharedWork.entries.map((e: { slug: string }) => e.slug);
+    expect(slugs).not.toContain('made-up-slug');
+    expect(data.sharedWork.entries[0].category).toBe('pitch');
+  });
+
+  test('share_work tool call with no valid slugs returns no sharedWork', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'Nothing to show.',
+      'share_work',
+      JSON.stringify({ slugs: ['nope-1', 'nope-2'], category: 'reference' })
+    )) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'show me your stuff' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.sharedWork).toBeUndefined();
+  });
+
+  test('record_brief_updates and share_work in the same response populate both fields', async () => {
+    global.fetch = vi.fn(async () => makeMultiToolCallResponse(
+      'Updated your brief.',
+      [
+        {
+          name: 'record_brief_updates',
+          argumentsStr: JSON.stringify({
+            service: 'production',
+            projectType: 'Video',
+            projectScope: '30s animation',
+            scopePolished: '30s animation',
+            timelineBand: '1-2-months',
+            budgetBand: '20k-50k',
+            contactEmail: 'tool@example.com',
+            contactName: 'Tool',
+            contactCompany: ''
+          })
+        },
+        {
+          name: 'share_work',
+          argumentsStr: JSON.stringify({ slugs: ['milo'], category: 'mood' })
+        }
+      ]
+    )) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: '30s animation with mood reference' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.draftUpdates.contactName).toBe('Tool');
+    expect(data.briefReady).toBe(true);
+    expect(data.sharedWork).toBeDefined();
+    expect(data.sharedWork.entries).toHaveLength(1);
+    expect(data.sharedWork.entries[0].category).toBe('mood');
   });
 });
