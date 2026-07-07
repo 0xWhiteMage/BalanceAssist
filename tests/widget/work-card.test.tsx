@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, expect, test, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { WorkCard, WorkCardRow } from '@/components/chat/work-card';
 
 const baseEntry = {
@@ -147,5 +147,99 @@ describe('WorkCardRow', () => {
     expect((fade as HTMLElement).style.position).toBe('absolute');
     expect((fade as HTMLElement).style.right).toBe('0px');
     expect((fade as HTMLElement).style.width).toBe('28px');
+  });
+
+  test('row starts with cursor: grab so users know it can be dragged', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row');
+    expect(row.style.cursor).toBe('grab');
+    expect(row.getAttribute('data-dragging')).toBe('false');
+  });
+});
+
+describe('WorkCardRow drag-to-scroll', () => {
+  test('mousedown + mousemove updates the row scrollLeft in the dragging direction', () => {
+    render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' }
+        ]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row') as HTMLDivElement;
+    Object.defineProperty(row, 'scrollLeft', { value: 0, writable: true, configurable: true });
+
+    fireEvent.mouseDown(row, { clientX: 200, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 80 }); // user dragged left by 120px
+    fireEvent.mouseUp(document);
+
+    // Drag left → scrollLeft = startScrollLeft(0) - delta(80-200=-120) = +120
+    expect(Number((row as unknown as { scrollLeft: number }).scrollLeft)).toBeGreaterThan(0);
+  });
+
+  test('mousedown on a card with no movement lets the link click fire (no preventDefault)', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const card = screen.getByTestId('work-card');
+
+    fireEvent.mouseDown(card, { clientX: 100, button: 0 });
+    fireEvent.mouseUp(document);
+
+    // Listen at the window level (bubble phase) — React's onClick handler delegates
+    // from the root, so the row's preventDefault() runs BEFORE this listener only if
+    // the listener is attached as a bubble-phase listener on an ancestor of the row.
+    let defaultPrevented = false;
+    const handler = (event: MouseEvent) => {
+      defaultPrevented = event.defaultPrevented;
+    };
+    window.addEventListener('click', handler);
+    fireEvent.click(card);
+    window.removeEventListener('click', handler);
+    expect(defaultPrevented).toBe(false);
+  });
+
+  test('mousedown + 50px movement before mouseup prevents the subsequent click', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const card = screen.getByTestId('work-card');
+
+    fireEvent.mouseDown(card, { clientX: 100, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 50 }); // 50px drag
+    fireEvent.mouseUp(document);
+
+    // Spy on Event.prototype.preventDefault: if the row's onClick handler fires
+    // and calls preventDefault (the drag-vs-click branch), the spy gets called.
+    const preventDefaultSpy = vi.spyOn(MouseEvent.prototype, 'preventDefault');
+    fireEvent.click(card);
+    expect(preventDefaultSpy).toHaveBeenCalled();
+    preventDefaultSpy.mockRestore();
+  });
+
+  test('row flips cursor to grabbing and data-dragging=true while dragging', () => {
+    render(
+      <WorkCardRow
+        entries={[{ entry: baseEntry, category: 'reference' }]}
+      />
+    );
+    const row = screen.getByTestId('work-card-row');
+
+    fireEvent.mouseDown(row, { clientX: 100, button: 0 });
+    expect(row.getAttribute('data-dragging')).toBe('true');
+    expect((row as HTMLElement).style.cursor).toBe('grabbing');
+
+    fireEvent.mouseUp(document);
+    expect(row.getAttribute('data-dragging')).toBe('false');
+    expect((row as HTMLElement).style.cursor).toBe('grab');
   });
 });
