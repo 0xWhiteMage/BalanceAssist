@@ -127,6 +127,7 @@ export function ReviewPanel({
         title="Project Brief"
         readyForApproval={false}
         approved={approved}
+        compact={mode === 'essentials'}
       />
 
       {mode === 'summary' && ready && !approved && (

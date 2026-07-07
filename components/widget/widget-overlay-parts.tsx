@@ -385,7 +385,8 @@ export function ProjectBriefCard({
   approved,
   title,
   onApprove,
-  onContinueRefining
+  onContinueRefining,
+  compact = false
 }: {
   draft: {
     projectScope: string;
@@ -404,6 +405,7 @@ export function ProjectBriefCard({
   title?: string;
   onApprove?: () => void;
   onContinueRefining?: () => void;
+  compact?: boolean;
 }) {
   const rows = [
     ['Project scope', draft.scopePolished ?? draft.projectScope],
@@ -418,33 +420,99 @@ export function ProjectBriefCard({
 
   const completed = rows.filter(([, value]) => value.trim().length > 0).length;
 
+  const labelFontSize = compact ? 9 : 10;
+  const subheadFontSize = compact ? 11 : 12;
+  const bodyFontSize = compact ? 11 : 12;
+  const nudgeFontSize = compact ? 10 : 11;
+
   return (
     <div
+      data-testid="project-brief-card"
+      data-compact={compact ? 'true' : 'false'}
       style={{
         border: `1px solid ${brandTokens.colors.border}`,
         background: 'rgba(255,255,255,0.03)',
         borderRadius: '12px',
-        padding: '12px 14px',
+        padding: compact ? '10px 10px' : '12px 14px',
         display: 'grid',
-        gap: '8px'
+        gap: compact ? '6px' : '8px'
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
         <div>
-          <div style={{ fontSize: '10px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
+          <div style={{ fontSize: labelFontSize, fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
             {title ?? 'Project Brief'}
           </div>
-          <div style={{ marginTop: '3px', fontSize: '12px', color: brandTokens.colors.mutedText }}>
+          <div style={{ marginTop: '3px', fontSize: subheadFontSize, color: brandTokens.colors.mutedText }}>
             {completed} of {rows.length} key fields captured
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: '6px' }}>
+      <div style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
         {rows.map(([label, value]) => {
           const filled = value.trim().length > 0;
+          if (compact) {
+            return (
+              <div
+                key={label}
+                style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: bodyFontSize }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span
+                    data-testid={filled ? 'brief-row-status' : undefined}
+                    aria-hidden="true"
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      color: filled ? '#4ade80' : brandTokens.colors.mutedText,
+                      border: filled ? '1px solid #4ade80' : `1px dashed ${brandTokens.colors.subtleBorder}`,
+                      background: filled ? 'rgba(74,222,128,0.10)' : 'transparent'
+                    }}
+                  >
+                    {filled ? '✓' : '·'}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      color: brandTokens.colors.lightText,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                  >
+                    {label}
+                  </span>
+                </div>
+                {filled && (
+                  <div
+                    data-testid="brief-row-value"
+                    style={{
+                      marginLeft: 20,
+                      fontSize: bodyFontSize,
+                      color: brandTokens.colors.lightText,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                  >
+                    {value}
+                  </div>
+                )}
+              </div>
+            );
+          }
           return (
-            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', fontSize: '12px' }}>
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', fontSize: bodyFontSize }}>
               <span style={{ color: brandTokens.colors.mutedText }}>{label}</span>
               <span style={{ color: filled ? brandTokens.colors.lightText : brandTokens.colors.mutedText, textAlign: 'right', maxWidth: '60%' }}>
                 {filled ? value : 'Unfilled'}
@@ -455,7 +523,7 @@ export function ProjectBriefCard({
       </div>
 
       {showNudge && completed < rows.length && (
-        <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
+        <div style={{ fontSize: nudgeFontSize, color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
           Tip: filling the missing fields helps Balance respond faster and more accurately.
         </div>
       )}
