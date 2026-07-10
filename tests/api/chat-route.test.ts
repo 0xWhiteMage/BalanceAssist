@@ -174,7 +174,7 @@ describe('POST /api/chat', () => {
         budgetBand: '20k-50k',
         contactEmail: 'tool@example.com',
         contactName: 'Tool',
-        contactCompany: '',
+        contactCompany: 'Acme',
         projectType: 'Video',
         scopePolished: '30s animation'
       })
@@ -184,7 +184,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: 'I have a 30s animation, my name is Tool' }],
+      messages: [{ role: 'user', content: 'I have a 30s animation for Acme, my name is Tool, email tool@example.com' }],
       context: { step: 'intro', draft: '{}' }
     });
 
@@ -203,7 +203,7 @@ describe('POST /api/chat', () => {
         budgetBand: '20k-50k',
         contactEmail: 'tool@example.com',
         contactName: 'Tool',
-        contactCompany: '',
+        contactCompany: 'Acme',
         projectType: 'Video',
         scopePolished: '30s animation'
       })
@@ -213,7 +213,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: 'I have a 30s animation, my name is Tool' }],
+      messages: [{ role: 'user', content: 'I have a 30s animation for Acme, my name is Tool, email tool@example.com' }],
       context: { step: 'intro', draft: '{}' }
     });
 
@@ -456,7 +456,7 @@ describe('POST /api/chat', () => {
             budgetBand: '20k-50k',
             contactEmail: 'tool@example.com',
             contactName: 'Tool',
-            contactCompany: ''
+            contactCompany: 'Acme'
           })
         },
         {
@@ -470,7 +470,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: '30s animation with mood reference, my name is Tool' }],
+      messages: [{ role: 'user', content: '30s animation for Acme with mood reference, my name is Tool, email tool@example.com' }],
       context: { step: 'intro', draft: '{}' }
     });
 

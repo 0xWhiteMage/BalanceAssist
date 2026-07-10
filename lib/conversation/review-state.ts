@@ -5,10 +5,13 @@ export const REVIEW_PROMPT = 'Your brief is ready. Tap the tab on the right to r
 export function missingReviewFields(draft: Partial<LeadDraft>): string[] {
   const missing: string[] = [];
   if (!draft.projectScope?.trim()) missing.push('projectScope');
-  if (!draft.projectType?.trim() && !draft.service?.trim()) missing.push('projectType');
-  if (!draft.timelineBand) missing.push('timelineBand');
-  if (!draft.budgetBand) missing.push('budgetBand');
-  if (!draft.contactName?.trim() && !draft.contactEmail?.trim()) missing.push('contact');
+  if (!draft.projectType?.trim()) missing.push('projectType');
+  if (!draft.service?.trim()) missing.push('service');
+  if (!draft.timelineBand?.trim()) missing.push('timelineBand');
+  if (!draft.budgetBand?.trim()) missing.push('budgetBand');
+  if (!draft.contactName?.trim()) missing.push('contactName');
+  if (!draft.contactCompany?.trim()) missing.push('contactCompany');
+  if (!draft.contactEmail?.trim()) missing.push('contactEmail');
   return missing;
 }
 
