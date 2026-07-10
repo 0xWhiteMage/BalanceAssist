@@ -3,9 +3,7 @@ import React, { useState } from 'react';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { brandTokens } from '@/lib/brand-tokens';
 import {
-  budgetBandOptions,
-  serviceOptions,
-  timelineBandOptions
+  serviceOptions
 } from '@/lib/onboarding/service-options';
 import type { BudgetBandId, ServiceOptionId, TimelineBandId } from '@/lib/onboarding/types';
 import { HUMAN_UPLOAD_GUIDANCE } from '@/lib/uploads/file-policy';
@@ -452,17 +450,15 @@ export function ProjectBriefCard({
       label: 'Timeline',
       key: 'timelineBand',
       raw: draft.timelineBand,
-      display: timelineBandOptions.find((t) => t.id === draft.timelineBand)?.label ?? draft.timelineBand,
-      editor: 'select',
-      options: timelineBandOptions
+      display: draft.timelineBand,
+      editor: 'text'
     },
     {
       label: 'Budget',
       key: 'budgetBand',
       raw: draft.budgetBand,
-      display: budgetBandOptions.find((b) => b.id === draft.budgetBand)?.label ?? draft.budgetBand,
-      editor: 'select',
-      options: budgetBandOptions
+      display: draft.budgetBand,
+      editor: 'text'
     },
     {
       label: 'Contact name',

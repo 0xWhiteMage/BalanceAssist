@@ -24,8 +24,14 @@ const timelineMatrix: Record<TimelineBandId, TimelineGuidance> = {
   }
 };
 
-export function getTimelineGuidance(timelineBand: TimelineBandId | '') {
-  return timelineBand
-    ? timelineMatrix[timelineBand]
-    : { label: 'Unknown', guidance: 'Timeline guidance is not available until a band is selected.' };
+export function getTimelineGuidance(timelineBand: string) {
+  if (!timelineBand) {
+    return { label: 'Unknown', guidance: 'Timeline guidance is not available until a window is provided.' };
+  }
+  return (
+    timelineMatrix[timelineBand as TimelineBandId] ?? {
+      label: timelineBand,
+      guidance: 'The team can confirm feasibility for this timeline.'
+    }
+  );
 }

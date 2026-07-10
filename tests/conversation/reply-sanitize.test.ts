@@ -35,7 +35,7 @@ test('draft updates are sanitized', () => {
   );
   expect(result.draft.service).toBe('production');
   expect(result.draft.evil).toBeUndefined();
-  expect(result.draft.budgetBand).toBe('');
+  expect(result.draft.budgetBand).toBe('free');
   expect(result.draft.contactEmail).toBe('');
 });
 
@@ -48,7 +48,7 @@ test('recovers structured fields from a truncated draft line', () => {
   expect(result.reply).toBe('Thanks, Michael.');
   expect(result.draft.contactName).toBe('Michael');
   expect(result.draft.contactEmail).toBe('michael@skype.com');
-  expect(result.draft.timelineBand).toBe('asap');
+  expect(result.draft.timelineBand).toBe('under-1-month');
 });
 
 test('passes through normal conversation', () => {

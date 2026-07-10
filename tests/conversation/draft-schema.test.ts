@@ -24,7 +24,12 @@ test('caps long strings to 200 chars', () => {
   expect(result.projectScope?.length).toBe(200);
 });
 
-test('normalizes short timeline labels from the model', () => {
-  const result = sanitizeDraftUpdates({ timelineBand: 'under-1-month' });
-  expect(result.timelineBand).toBe('asap');
+test('timeline passes through verbatim (no band normalization)', () => {
+  const result = sanitizeDraftUpdates({ timelineBand: '3 weeks' });
+  expect(result.timelineBand).toBe('3 weeks');
+});
+
+test('budget passes through verbatim (no band normalization)', () => {
+  const result = sanitizeDraftUpdates({ budgetBand: '$5,000 SGD' });
+  expect(result.budgetBand).toBe('$5,000 SGD');
 });

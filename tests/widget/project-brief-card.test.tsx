@@ -9,8 +9,8 @@ const readyDraft = {
   projectType: 'Video',
   projectScope: '30s launch animation',
   scopePolished: '30s launch animation',
-  timelineBand: '1-2-months' as const,
-  budgetBand: '20k-50k' as const,
+  timelineBand: '3 weeks',
+  budgetBand: '$20,000 SGD',
   contactName: 'Jayden',
   contactEmail: 'jayden@example.com'
 };
@@ -119,8 +119,30 @@ describe('ProjectBriefCard', () => {
       />
     );
     expect(screen.getByText('Production')).toBeInTheDocument();
-    expect(screen.getByText('1-2 months')).toBeInTheDocument();
-    expect(screen.getByText('$20,000-$50,000')).toBeInTheDocument();
+    expect(screen.getByText('3 weeks')).toBeInTheDocument();
+    expect(screen.getByText('$20,000 SGD')).toBeInTheDocument();
+  });
+
+  test('timeline and budget rows use free-text editors (no <select>)', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const timelineRow = screen.getByText('Timeline').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(timelineRow).getByRole('button', { name: /edit timeline/i }));
+    expect(within(timelineRow).getByRole('textbox')).toBeInTheDocument();
+    expect(within(timelineRow).queryByRole('combobox')).toBeNull();
+
+    const budgetRow = screen.getByText('Budget').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(budgetRow).getByRole('button', { name: /edit budget/i }));
+    expect(within(budgetRow).getByRole('textbox')).toBeInTheDocument();
+    expect(within(budgetRow).queryByRole('combobox')).toBeNull();
   });
 
   test('compact mode capitalizes projectType and converts dashes to spaces', () => {

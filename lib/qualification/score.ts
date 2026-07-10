@@ -42,7 +42,9 @@ function scoreTimeline(timelineBand: LeadDraft['timelineBand']) {
     return 0;
   }
 
-  return timelineBand === 'asap' ? 1 : 2;
+  // Free-text timeline: treat fast-turnaround phrasing ("3 weeks", "asap",
+  // "urgent") as a quicker engagement. Everything else is standard.
+  return /week|asap|urgent/.test(timelineBand.toLowerCase()) ? 1 : 2;
 }
 
 function scoreCompleteness(draft: LeadDraft) {
