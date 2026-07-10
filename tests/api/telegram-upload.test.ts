@@ -269,4 +269,32 @@ describe('POST /api/telegram/upload', () => {
     expect(fileInserts).toHaveLength(1);
     expect(fileInserts[0].row.kind).toBe('reference');
   });
+
+  test('returns extractedText for an uploaded text file (AI auto-fill payload)', async () => {
+    const { client } = buildMockSupabase();
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    sendDocumentMock.mockResolvedValue({
+      ok: true,
+      fileId: 'mock-telegram-file-id',
+      raw: { ok: true, result: { message_id: 1, document: { file_id: 'mock-telegram-file-id' } } }
+    });
+
+    const textContent = 'Project: 30s animation. Timeline: 3 weeks. Budget: $5,000 SGD.';
+    const file = new File([Buffer.from(textContent, 'utf8')], 'brief.txt', { type: 'text/plain' });
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [file]
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(typeof data.extractedText).toBe('string');
+    expect(data.extractedText).toContain('30s animation');
+    expect(data.extractedText).toContain('3 weeks');
+    expect(data.extractedText).toContain('$5,000 SGD');
+  });
 });

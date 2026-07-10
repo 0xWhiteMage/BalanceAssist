@@ -2,6 +2,7 @@ import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { sendDocument } from '@/lib/telegram';
 import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-policy';
+import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
 type SupabaseClient = NonNullable<ReturnType<typeof createServerSupabaseClient>>;
 
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
 
   let lastTelegramFileId: string | null = null;
   let uploadedCount = 0;
+  let extractedText = '';
 
   for (const file of files) {
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -114,6 +116,11 @@ export async function POST(request: Request) {
       return jsonWithCors({ ok: false, error: insertError.message }, { status: 500 });
     }
 
+    const fileText = extractTextFromBuffer(buffer, file.name);
+    if (fileText) {
+      extractedText = extractedText ? `${extractedText}\n${fileText}` : fileText;
+    }
+
     uploadedCount += 1;
   }
 
@@ -129,6 +136,7 @@ export async function POST(request: Request) {
   return jsonWithCors({
     ok: true,
     telegramFileId: lastTelegramFileId,
-    count: uploadedCount
+    count: uploadedCount,
+    ...(extractedText ? { extractedText } : {})
   });
 }

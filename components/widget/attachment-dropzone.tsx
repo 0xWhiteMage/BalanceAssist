@@ -9,10 +9,12 @@ export type ReferenceFile = { name: string; sizeBytes: number; mime: string; tel
 export function AttachmentDropzone({
   onAddLink,
   onAddFile,
+  onFileAnalyzed,
   sessionId
 }: {
   onAddLink: (link: ReferenceLink) => void;
   onAddFile: (file: ReferenceFile) => void;
+  onFileAnalyzed?: (fileName: string, extractedText: string) => void;
   sessionId?: string | null;
 }) {
   const [url, setUrl] = useState('');
@@ -58,6 +60,9 @@ export function AttachmentDropzone({
         mime: file.type,
         telegramFileId: data.telegramFileId ?? ''
       });
+      if (typeof data.extractedText === 'string' && data.extractedText.trim()) {
+        onFileAnalyzed?.(file.name, data.extractedText);
+      }
     }
   }
 

@@ -722,6 +722,20 @@ const startConversation = useCallback(async () => {
     setReferenceFiles((prev) => [...prev, file]);
   }
 
+  async function handleFileAnalyzed(fileName: string, extractedText: string) {
+    const trimmed = extractedText.trim();
+    if (!trimmed) return;
+    appendUserMessage(`Analyzed: ${fileName}`);
+    await botSay(`Reading ${fileName} — pulling out the key details…`, { delay: 150 });
+    if (cancelRef.current) return;
+    const prompt = `The user uploaded "${fileName}". Extracted text:\n\n${trimmed.slice(0, 3000)}\n\nPlease extract any project brief fields from this text and update the brief. Tell the user what you found.`;
+    const syntheticHistory: ChatMessage[] = [
+      ...messagesRef.current,
+      { id: nextId(), sender: 'user', text: prompt, timestamp: Date.now() }
+    ];
+    await handleLLMResponse(syntheticHistory);
+  }
+
   async function handleApproveBrief() {
     if (approveInFlightRef.current || briefApproved) return;
     approveInFlightRef.current = true;
@@ -1306,6 +1320,7 @@ const startConversation = useCallback(async () => {
                     <AttachmentDropzone
                       onAddLink={appendReferenceLink}
                       onAddFile={appendReferenceFile}
+                      onFileAnalyzed={handleFileAnalyzed}
                       sessionId={sessionId}
                     />
                   </div>
