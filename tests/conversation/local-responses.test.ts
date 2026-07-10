@@ -1,21 +1,29 @@
-import { getLocalResponse } from '@/lib/conversation/local-responses';
+import { afterEach, expect, test, vi } from 'vitest';
+import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
 
-test('refuses pricing', () => {
-  const reply = getLocalResponse('how much does it cost', {
-    draft: {} as never,
-    step: 'free-chat',
-    isTeamConnected: false
-  });
-  expect(reply).toMatch(/price|quote|human team/i);
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
-test('refuses off-topic job application', () => {
-  const reply = getLocalResponse('apply for a job', {
+test('routes past-work questions through the LLM path', () => {
+  const reply = getLocalResponse('show me past work', {
     draft: {} as never,
     step: 'free-chat',
     isTeamConnected: false
   });
-  expect(reply).toMatch(/Balance Assist|hello@balancestudio.tv/i);
+  expect(reply).toBeNull();
+});
+
+test('help response lists the three supported capabilities without a handoff push', () => {
+  const reply = getLocalResponse('help me', {
+    draft: {} as never,
+    step: 'free-chat',
+    isTeamConnected: false
+  });
+
+  expect(reply).toBe(
+    'I can help with three things: understanding Balance Studio, shaping a project brief for our team, or helping you apply to work here. What would you like to do?'
+  );
 });
 
 test('refuses prompt-injection attempts', () => {
@@ -45,4 +53,16 @@ test('does not reset greeting mid-brief', () => {
   });
   expect(reply).toMatch(/I'm here|timeline|missing|email|name|approve/i);
   expect(reply).not.toMatch(/How can I help you today/i);
+});
+
+test('fallback replies stay neutral', () => {
+  const samples = [0, 0.5, 0.75, 0.99].map((value) => {
+    vi.spyOn(Math, 'random').mockReturnValueOnce(value);
+    return getFallbackResponse();
+  });
+
+  for (const sample of samples) {
+    expect(sample).not.toMatch(/team would be best equipped/i);
+    expect(sample).not.toMatch(/I'm not sure about that/i);
+  }
 });

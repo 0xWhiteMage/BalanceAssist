@@ -15,8 +15,9 @@ vi.mock('@/lib/supabase/server', () => ({
   createServerSupabaseClient: createServerSupabaseClientMock
 }));
 
-function buildMockSupabase() {
+function buildMockSupabase(options?: { fileRequestOpen?: boolean }) {
   const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
+  const fileRequestOpen = options?.fileRequestOpen ?? true;
 
   const client = {
     storage: {
@@ -32,7 +33,7 @@ function buildMockSupabase() {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { telegram_thread_id: 42, file_request_open: true },
+                data: { telegram_thread_id: 42, file_request_open: fileRequestOpen },
                 error: null
               }))
             }))
@@ -192,6 +193,55 @@ describe('POST /api/telegram/upload', () => {
 
     const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
     expect(fileInserts).toHaveLength(0);
+  });
+
+  test('returns 403 when a deliverable upload was not requested by the team', async () => {
+    const { client } = buildMockSupabase({ fileRequestOpen: false });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'deliverable' },
+      [makeFile('deck.pdf', 12_345, 'application/pdf')]
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.error).toMatch(/not been requested by the team/i);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
+  });
+
+  test('allows a reference upload in AI mode even when no team file request is open', async () => {
+    const { client, inserts } = buildMockSupabase({ fileRequestOpen: false });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    sendDocumentMock.mockResolvedValue({
+      ok: true,
+      fileId: 'mock-telegram-file-id',
+      raw: { ok: true, result: { message_id: 1, document: { file_id: 'mock-telegram-file-id' } } }
+    });
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pptx', 12_345, 'application/vnd.openxmlformats-officedocument.presentationml.presentation')]
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(sendDocumentMock).toHaveBeenCalledTimes(1);
+    expect(sendDocumentMock.mock.calls[0][3]).toBe('deck.pptx');
+    expect(inserts).toContainEqual({
+      table: 'uploaded_files',
+      row: expect.objectContaining({
+        name: 'deck.pptx',
+        kind: 'reference',
+        mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      })
+    });
   });
 
   test('coerces unexpected kind values to "reference"', async () => {

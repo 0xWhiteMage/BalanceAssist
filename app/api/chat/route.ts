@@ -5,6 +5,7 @@ import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-responses';
+import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
 import { checkRateLimit } from '@/lib/conversation/rate-limit';
@@ -16,7 +17,7 @@ import {
   sanitizeShareWork,
   shareWorkJsonSchema
 } from '@/lib/conversation/tool-schema';
-import { listAllWorks, type WorkEntry } from '@/lib/conversation/works-search';
+import { listAllWorks, searchWorks, type WorkEntry } from '@/lib/conversation/works-search';
 import type { ConversationStepId } from '@/lib/conversation/types';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
@@ -368,6 +369,7 @@ export async function POST(request: Request) {
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const sessionId = context?.sessionId;
   const baseUrl = new URL(request.url).origin;
+  const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
 
   if (sessionId) {
     const limit = checkRateLimit(sessionId);
@@ -380,6 +382,25 @@ export async function POST(request: Request) {
         { status: 429 }
       );
     }
+  }
+
+  if (faqResponse) {
+    const sharedWork = faqResponse.sharedWorkQuery
+      ? buildSharedWorkFromEntries(
+          searchWorks(faqResponse.sharedWorkQuery, 5).map((entry) => entry.slug),
+          'reference'
+        )
+      : undefined;
+
+    return jsonWithCors({
+      messages: faqResponse.messages,
+      draftUpdates: {},
+      briefReady: false,
+      reviewPrompt: null,
+      missingFields: [],
+      sharedWork: sharedWork && sharedWork.entries.length > 0 ? sharedWork : undefined,
+      truncated: false
+    });
   }
 
   let visibleContent: string;

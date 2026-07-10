@@ -193,7 +193,6 @@ export function WorkCardRow({
   });
   const [rowWidth, setRowWidth] = useState<number>(0);
   const [hasScrolled, setHasScrolled] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
 
   function beginDrag(clientX: number) {
     if (!rowRef.current) return;
@@ -361,34 +360,67 @@ export function WorkCardRow({
     if (isDragging) {
       endDrag();
     }
-    setIsHovered(false);
-  }
-
-  function handleRowMouseEnter() {
-    setIsHovered(true);
   }
 
   if (entries.length === 0) return null;
   const isOverflowing = scrollMetrics.pageCount > 1 && rowWidth > 0;
   const canPrev = scrollMetrics.activePage > 0;
   const canNext = scrollMetrics.activePage < scrollMetrics.pageCount - 1;
-  const showArrows = isOverflowing && isHovered;
   return (
     <div
-      ref={rowRef}
-      data-testid="work-card-row"
-      data-dragging={isDragging ? 'true' : 'false'}
-      data-hovered={isHovered ? 'true' : 'false'}
-      onMouseDown={handleMouseDown}
-      onTouchStart={handleTouchStart}
-      onClick={handleRowClick}
-      onMouseEnter={handleRowMouseEnter}
-      onMouseLeave={handleRowMouseLeave}
+      data-testid="work-card-carousel"
       style={{
         position: 'relative',
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'stretch',
+        minHeight: '220px'
+      }}
+    >
+      {isOverflowing && canPrev && (
+        <button
+          type="button"
+          data-testid="work-card-row-prev"
+          data-disabled="false"
+          aria-label="Previous cards"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            scrollByPage(-1);
+          }}
+          style={{
+            position: 'absolute',
+            left: '4px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            border: `1px solid ${brandTokens.colors.border}`,
+            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+            color: brandTokens.colors.baseBlack,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            opacity: 1,
+            zIndex: 2
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M9 2L4 7l5 5" stroke="#101010" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+      <div
+        ref={rowRef}
+        data-testid="work-card-row"
+        data-dragging={isDragging ? 'true' : 'false'}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onClick={handleRowClick}
+        onMouseLeave={handleRowMouseLeave}
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'stretch',
         gap: '14px',
         overflowX: 'auto',
         overflowY: 'hidden',
@@ -396,106 +428,51 @@ export function WorkCardRow({
         scrollbarWidth: 'thin',
         scrollSnapType: 'x proximity',
         WebkitOverflowScrolling: 'touch',
-        cursor: isDragging ? 'grabbing' : 'grab',
-        userSelect: isDragging ? 'none' : 'auto',
-        touchAction: 'pan-x',
-        overscrollBehaviorX: 'contain',
-        minHeight: '220px'
-      }}
-    >
-      {entries.map(({ entry, category }) => (
-        <WorkCard key={entry.slug} entry={entry} category={category} />
-      ))}
-      <div
-        data-testid="work-card-row-fade"
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          right: 0,
-          top: 0,
-          width: '28px',
-          height: '100%',
-          background: 'linear-gradient(to right, transparent, rgba(16,16,16,0.85))',
-          pointerEvents: 'none'
+          cursor: isDragging ? 'grabbing' : 'grab',
+          userSelect: isDragging ? 'none' : 'auto',
+          touchAction: 'pan-x',
+          overscrollBehaviorX: 'contain',
+          minHeight: '220px'
         }}
-      />
-      {isOverflowing && (
-        <>
-          <button
-            type="button"
-            data-testid="work-card-row-prev"
-            data-disabled={canPrev ? 'false' : 'true'}
-            aria-label="Previous cards"
-            aria-disabled={!canPrev}
-            disabled={!canPrev}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (canPrev) scrollByPage(-1);
-            }}
-            style={{
-              position: 'absolute',
-              left: '4px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              border: `1px solid ${brandTokens.colors.border}`,
-              background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-              color: brandTokens.colors.baseBlack,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: canPrev ? 'pointer' : 'not-allowed',
-              opacity: showArrows && canPrev ? 1 : 0,
-              pointerEvents: canPrev ? 'auto' : 'none',
-              transition: 'opacity 0.15s ease',
-              zIndex: 2
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M9 2L4 7l5 5" stroke="#101010" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            data-testid="work-card-row-next"
-            data-disabled={canNext ? 'false' : 'true'}
-            aria-label="Next cards"
-            aria-disabled={!canNext}
-            disabled={!canNext}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (canNext) scrollByPage(1);
-            }}
-            style={{
-              position: 'absolute',
-              right: '4px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              border: `1px solid ${brandTokens.colors.border}`,
-              background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-              color: brandTokens.colors.baseBlack,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: canNext ? 'pointer' : 'not-allowed',
-              opacity: showArrows && canNext ? 1 : 0,
-              pointerEvents: canNext ? 'auto' : 'none',
-              transition: 'opacity 0.15s ease',
-              zIndex: 2
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M5 2l5 5-5 5" stroke="#101010" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </>
+      >
+        {entries.map(({ entry, category }) => (
+          <WorkCard key={entry.slug} entry={entry} category={category} />
+        ))}
+      </div>
+      {isOverflowing && canNext && (
+        <button
+          type="button"
+          data-testid="work-card-row-next"
+          data-disabled="false"
+          aria-label="Next cards"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            scrollByPage(1);
+          }}
+          style={{
+            position: 'absolute',
+            right: '4px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            border: `1px solid ${brandTokens.colors.border}`,
+            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+            color: brandTokens.colors.baseBlack,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            opacity: 1,
+            zIndex: 2
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M5 2l5 5-5 5" stroke="#101010" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       )}
       {isOverflowing && !hasScrolled && (
         <div
