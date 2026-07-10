@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'Session not found' }, { status: 404 });
   }
 
-  if (!session.file_request_open) {
+  if (kind === 'deliverable' && !session.file_request_open) {
     return jsonWithCors({ ok: false, error: 'File upload has not been requested by the team' }, { status: 403 });
   }
 
