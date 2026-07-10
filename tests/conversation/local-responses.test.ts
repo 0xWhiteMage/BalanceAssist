@@ -62,6 +62,9 @@ test('fallback replies stay neutral', () => {
   });
 
   for (const sample of samples) {
+    expect(sample).not.toMatch(/That's a good question! I'm best at helping with project inquiries/i);
+    expect(sample).not.toMatch(/I appreciate that! I'm still learning/i);
+    expect(sample).not.toMatch(/Great question! Our team would be best equipped to answer that/i);
     expect(sample).not.toMatch(/team would be best equipped/i);
     expect(sample).not.toMatch(/I'm not sure about that/i);
   }

@@ -6,7 +6,7 @@ export type BalanceFaqResponse = {
 export function getBalanceFaqResponse(message: string): BalanceFaqResponse | null {
   const normalized = message.toLowerCase();
 
-  if (/what is balance|who are you|tell me about the company|know more about balance|tell me about balance studio/.test(normalized)) {
+  if (/what is balance|tell me about the company|know more about balance|tell me about balance studio/.test(normalized)) {
     return {
       messages: [
         'Balance Studio is a Singapore-based, full-service video and creative production house with 10+ years of experience, 100+ clients, and 110+ projects delivered worldwide.',
@@ -37,7 +37,8 @@ export function getBalanceFaqResponse(message: string): BalanceFaqResponse | nul
   if (/past work|previous work|case stud|references|portfolio|show me(?: your)? work|share(?: your)? work/.test(normalized)) {
     return {
       messages: [
-        "Absolutely — I can share a few relevant references. If you tell me the format or service you're interested in (for example 2D animation, event visuals, or product launch work), I'll pull the most relevant projects."
+        'Absolutely — I can share a few relevant references.',
+        "If you tell me the format or service you're interested in (for example 2D animation, event visuals, or product launch work), I'll pull the most relevant projects."
       ]
     };
   }
