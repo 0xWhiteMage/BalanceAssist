@@ -277,3 +277,12 @@ test('system prompt accumulates additional project context into projectScope acr
   expect(prompt).toMatch(/30s 2D animation/i);
   expect(prompt).toMatch(/IKEA/i);
 });
+
+test('system prompt tells the AI to always end update replies with a next-missing-field question or confirmation', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/UPDATES:/);
+  expect(prompt).toMatch(/Got it — I've updated that/i);
+  expect(prompt).toMatch(/end with the next-missing-field question/i);
+  expect(prompt).toMatch(/Do NOT say generic phrases like "Let me update it with what we've got\."/i);
+  expect(prompt).toMatch(/Do NOT leave the user hanging with no next step/i);
+});
