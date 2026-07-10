@@ -783,14 +783,16 @@ const startConversation = useCallback(async () => {
       setBriefApproved(false);
     }
 
-    const isFreeTextIntakeStep =
-      (step.freeText || currentStep === 'intro') &&
-      currentStep !== 'qualification' &&
-      currentStep !== 'offer-upload' &&
-      currentStep !== 'upload' &&
-      currentStep !== 'handoff';
+    const isLlmIntakeStep =
+      currentStep === 'intro' ||
+      currentStep === 'scope' ||
+      currentStep === 'service' ||
+      currentStep === 'timeline' ||
+      currentStep === 'budget' ||
+      currentStep === 'contact-name' ||
+      currentStep === 'contact-email';
 
-    if (isFreeTextIntakeStep && value.trim().length >= 3) {
+    if (isLlmIntakeStep && value.trim().length > 0) {
       await handleLLMResponse(nextMessages);
       return;
     }
