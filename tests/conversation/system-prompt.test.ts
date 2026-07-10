@@ -286,3 +286,14 @@ test('system prompt tells the AI to always end update replies with a next-missin
   expect(prompt).toMatch(/Do NOT say generic phrases like "Let me update it with what we've got\."/i);
   expect(prompt).toMatch(/Do NOT leave the user hanging with no next step/i);
 });
+
+test('system prompt share_work tool section tells the AI to confirm context before showing references', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/SHARE WORK TOOL — WHEN TO USE IT/);
+  // Must confirm what kind the user wants before showing references for "for my project".
+  expect(prompt).toMatch(/before sharing, confirm/i);
+  // The "for my project" branch must trigger a confirmation step, not an immediate dump.
+  expect(prompt).toMatch(/If the user says "for my project" — first confirm what kind/i);
+  // The follow-up line must echo the project context.
+  expect(prompt).toMatch(/Based on your project \([^)]*\), here are a few references/i);
+});
