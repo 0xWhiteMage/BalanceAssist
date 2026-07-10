@@ -858,6 +858,14 @@ const startConversation = useCallback(async () => {
 
     try {
       const step = conversationSteps[currentStep];
+      const isIntakeStep =
+        currentStep === 'intro' ||
+        currentStep === 'scope' ||
+        currentStep === 'service' ||
+        currentStep === 'timeline' ||
+        currentStep === 'budget' ||
+        currentStep === 'contact-name' ||
+        currentStep === 'contact-email';
 
       const memoryResetPattern = /forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i;
       if (!isTeamConnected && memoryResetPattern.test(trimmed)) {
@@ -943,6 +951,29 @@ const startConversation = useCallback(async () => {
         }
 
         await handleLLMResponse(messagesRef.current);
+        return;
+      }
+
+      if (isIntakeStep) {
+        const rememberPattern = /what.*do.*you.*remember|what.*have.*i.*shared|what.*do.*you.*know.*about.*my.*project/i;
+        const aiDisclosurePattern =
+          /are.*you.*(?:bot|ai|robot|machine)|is.*this.*(?:bot|ai|automated)|are.*you.*real|are.*you.*human|am.*i.*talking.*to.*(?:bot|ai|human|person)|what.*model|which.*model|what.*llm|are.*you.*gpt|are.*you.*chatgpt|are.*you.*claude|what.*ai.*model/i;
+
+        if (rememberPattern.test(trimmed) || aiDisclosurePattern.test(trimmed)) {
+          const localResponse = getLocalResponse(trimmed, {
+            draft,
+            step: currentStep,
+            isTeamConnected
+          });
+
+          if (localResponse) {
+            appendUserMessage(trimmed);
+            await botSay(localResponse);
+            return;
+          }
+        }
+
+        processFlowAnswer(trimmed);
         return;
       }
 
