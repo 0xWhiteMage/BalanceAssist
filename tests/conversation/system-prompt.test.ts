@@ -278,12 +278,16 @@ test('system prompt accumulates additional project context into projectScope acr
   expect(prompt).toMatch(/IKEA/i);
 });
 
-test('system prompt tells the AI to always end update replies with a next-missing-field question or confirmation', () => {
+test('system prompt tells the AI to always end update replies with exactly one follow-up question', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/UPDATES:/);
   expect(prompt).toMatch(/Got it — I've updated that/i);
-  expect(prompt).toMatch(/end with the next-missing-field question/i);
+  // The follow-up is now mandatory: ALWAYS end with a question.
+  expect(prompt).toMatch(/ALWAYS end with exactly one follow-up question/i);
   expect(prompt).toMatch(/Do NOT say generic phrases like "Let me update it with what we've got\."/i);
+  // Every update message must end with a question, even when the brief is complete.
+  expect(prompt).toMatch(/Even when the brief is complete/i);
+  expect(prompt).toMatch(/Anything else I can help with/i);
   expect(prompt).toMatch(/Do NOT leave the user hanging with no next step/i);
 });
 
