@@ -197,6 +197,25 @@ describe('POST /api/chat', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  test('answers filming FAQs deterministically with messages[] and sharedWork without calling the LLM', async () => {
+    global.fetch = vi.fn();
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'can you do filming?' }],
+      context: { step: 'intro', draft: '{}', isTeamConnected: false }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toBeUndefined();
+    expect(data.messages).toHaveLength(2);
+    expect(data.messages[0]).toMatch(/production is one of our core service pillars/i);
+    expect(data.sharedWork.entries.length).toBeGreaterThan(0);
+    expect(data.sharedWork.entries.length).toBeLessThanOrEqual(5);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   test('truncated response (finish_reason=length) prefixes the partial with "(continuing…)" and sets truncated=true', async () => {
     const partial = 'Balance Studio has shipped 110+ projects across APAC, working with clients like Heineken, ' +
       'Red Bull, and Visa. Their team includes directors, producers, cinematographers, animators, VFX artists, editors -';
