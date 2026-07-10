@@ -64,3 +64,31 @@ test('fallback replies stay neutral', () => {
     expect(sample).not.toMatch(/I'm not sure about that/i);
   }
 });
+
+test('fallback replies never contain the killed "Happy to help" phrase', () => {
+  const samples = [0, 0.33, 0.5, 0.66, 0.75, 0.99].map((value) => {
+    vi.spyOn(Math, 'random').mockReturnValueOnce(value);
+    return getFallbackResponse();
+  });
+
+  for (const sample of samples) {
+    expect(sample).not.toMatch(/Happy to help/i);
+    expect(sample).not.toMatch(/What's the part/i);
+  }
+});
+
+test('getFallbackResponse returns one of the three brief-flow-aware prompts', () => {
+  const allowed = [
+    "I didn't quite catch that — could you tell me a bit more about the project?",
+    'I want to make sure I capture this right. Could you rephrase that?',
+    "Let's keep going — what else can you tell me about the project?"
+  ];
+  const seen = new Set<string>();
+  for (let i = 0; i < 40; i += 1) {
+    seen.add(getFallbackResponse());
+  }
+  for (const sample of seen) {
+    expect(allowed).toContain(sample);
+  }
+  expect(seen.size).toBeGreaterThan(0);
+});

@@ -21,7 +21,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
-import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
+import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
 import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, verifySession, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
@@ -622,7 +622,7 @@ const startConversation = useCallback(async () => {
         if (typeof data.message === 'string' && data.message.trim().length > 0) {
           return [data.message];
         }
-        return [getFallbackResponse()];
+        return [getNextMissingFieldPrompt(draftRef.current)];
       })();
       const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
       const briefReady: boolean = Boolean(data.briefReady);
