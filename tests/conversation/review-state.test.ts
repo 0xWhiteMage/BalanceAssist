@@ -13,8 +13,8 @@ test('ready when all reviewable fields are present', () => {
     projectType: 'Video',
     projectScope: '30s animation',
     scopePolished: '30s animation',
-    timelineBand: '1-2-months',
-    budgetBand: '20k-50k',
+    timelineBand: '3 weeks',
+    budgetBand: '$20,000 SGD',
     contactName: 'Jayden',
     contactCompany: 'Samsung',
     contactEmail: 'jayden@example.com'

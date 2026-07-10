@@ -21,7 +21,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
-import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
+import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
 import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, verifySession, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
@@ -622,7 +622,7 @@ const startConversation = useCallback(async () => {
         if (typeof data.message === 'string' && data.message.trim().length > 0) {
           return [data.message];
         }
-        return [getFallbackResponse()];
+        return [getNextMissingFieldPrompt(draftRef.current)];
       })();
       const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
       const briefReady: boolean = Boolean(data.briefReady);
@@ -720,6 +720,20 @@ const startConversation = useCallback(async () => {
 
   function appendReferenceFile(file: ReferenceFile) {
     setReferenceFiles((prev) => [...prev, file]);
+  }
+
+  async function handleFileAnalyzed(fileName: string, extractedText: string) {
+    const trimmed = extractedText.trim();
+    if (!trimmed) return;
+    appendUserMessage(`Analyzed: ${fileName}`);
+    await botSay(`Reading ${fileName} — pulling out the key details…`, { delay: 150 });
+    if (cancelRef.current) return;
+    const prompt = `The user uploaded "${fileName}". Extracted text:\n\n${trimmed.slice(0, 3000)}\n\nPlease extract any project brief fields from this text and update the brief. Tell the user what you found.`;
+    const syntheticHistory: ChatMessage[] = [
+      ...messagesRef.current,
+      { id: nextId(), sender: 'user', text: prompt, timestamp: Date.now() }
+    ];
+    await handleLLMResponse(syntheticHistory);
   }
 
   async function handleApproveBrief() {
@@ -1306,6 +1320,7 @@ const startConversation = useCallback(async () => {
                     <AttachmentDropzone
                       onAddLink={appendReferenceLink}
                       onAddFile={appendReferenceFile}
+                      onFileAnalyzed={handleFileAnalyzed}
                       sessionId={sessionId}
                     />
                   </div>

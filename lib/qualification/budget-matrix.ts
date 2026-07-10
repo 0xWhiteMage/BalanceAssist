@@ -28,6 +28,14 @@ const budgetMatrix: Record<BudgetBandId, BudgetGuidance> = {
   }
 };
 
-export function getBudgetGuidance(budgetBand: BudgetBandId | '') {
-  return budgetBand ? budgetMatrix[budgetBand] : { label: 'Unknown', guidance: 'Budget guidance is not available until a band is selected.' };
+export function getBudgetGuidance(budgetBand: string) {
+  if (!budgetBand) {
+    return { label: 'Unknown', guidance: 'Budget guidance is not available until a range is provided.' };
+  }
+  return (
+    budgetMatrix[budgetBand as BudgetBandId] ?? {
+      label: budgetBand,
+      guidance: 'The team can confirm the right scope and resourcing for this budget.'
+    }
+  );
 }

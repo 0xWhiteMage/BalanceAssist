@@ -3,9 +3,7 @@ import React, { useState } from 'react';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { brandTokens } from '@/lib/brand-tokens';
 import {
-  budgetBandOptions,
-  serviceOptions,
-  timelineBandOptions
+  serviceOptions
 } from '@/lib/onboarding/service-options';
 import type { BudgetBandId, ServiceOptionId, TimelineBandId } from '@/lib/onboarding/types';
 import { HUMAN_UPLOAD_GUIDANCE } from '@/lib/uploads/file-policy';
@@ -423,67 +421,54 @@ export function ProjectBriefCard({
     key: string;
     raw: string;
     display: string;
-    editor: 'text' | 'select';
-    options?: ReadonlyArray<{ id: string; label: string }>;
   }> = [
     {
       label: 'Project scope',
       key: 'projectScope',
       raw: draft.scopePolished ?? draft.projectScope,
-      display: (draft.scopePolished ?? draft.projectScope).trim(),
-      editor: 'text'
+      display: (draft.scopePolished ?? draft.projectScope).trim()
     },
     {
       label: 'Project type',
       key: 'projectType',
       raw: draft.projectType ?? '',
-      display: formatProjectType(draft.projectType),
-      editor: 'text'
+      display: formatProjectType(draft.projectType)
     },
     {
       label: 'Service',
       key: 'service',
       raw: draft.service,
-      display: serviceOptions.find((s) => s.id === draft.service)?.label ?? draft.service,
-      editor: 'select',
-      options: serviceOptions
+      display: serviceOptions.find((s) => s.id === draft.service)?.label ?? draft.service
     },
     {
       label: 'Timeline',
       key: 'timelineBand',
       raw: draft.timelineBand,
-      display: timelineBandOptions.find((t) => t.id === draft.timelineBand)?.label ?? draft.timelineBand,
-      editor: 'select',
-      options: timelineBandOptions
+      display: draft.timelineBand
     },
     {
       label: 'Budget',
       key: 'budgetBand',
       raw: draft.budgetBand,
-      display: budgetBandOptions.find((b) => b.id === draft.budgetBand)?.label ?? draft.budgetBand,
-      editor: 'select',
-      options: budgetBandOptions
+      display: draft.budgetBand
     },
     {
       label: 'Contact name',
       key: 'contactName',
       raw: draft.contactName,
-      display: draft.contactName.trim(),
-      editor: 'text'
+      display: draft.contactName.trim()
     },
     {
       label: 'Company',
       key: 'contactCompany',
       raw: draft.contactCompany ?? '',
-      display: (draft.contactCompany ?? '').trim(),
-      editor: 'text'
+      display: (draft.contactCompany ?? '').trim()
     },
     {
       label: 'Email',
       key: 'contactEmail',
       raw: draft.contactEmail,
-      display: draft.contactEmail.trim(),
-      editor: 'text'
+      display: draft.contactEmail.trim()
     }
   ];
 
@@ -515,7 +500,7 @@ export function ProjectBriefCard({
       </div>
 
       <div style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
-        {rows.map((row) => {
+        {rows.map((row, rowIndex) => {
           const filled = row.raw.trim().length > 0;
           const editing = editingKey === row.key;
           const openEditor = () => {
@@ -527,20 +512,37 @@ export function ProjectBriefCard({
                 openEditor();
               }
             : undefined;
+          const isLastRow = rowIndex === rows.length - 1;
+          const labelStyle: React.CSSProperties = {
+            fontSize: labelFontSize,
+            fontWeight: 400,
+            color: brandTokens.colors.mutedText,
+            textTransform: 'uppercase',
+            letterSpacing: '0.12em'
+          };
+          const valueStyle: React.CSSProperties = {
+            fontSize: bodyFontSize,
+            fontWeight: 600,
+            color: brandTokens.colors.lightText
+          };
           const baseRowStyle = compact
             ? {
                 display: 'flex',
                 flexDirection: 'column' as const,
                 gap: '2px',
                 fontSize: bodyFontSize,
-                cursor: onChange ? 'pointer' : 'default'
+                cursor: onChange ? 'pointer' : 'default',
+                borderBottom: isLastRow ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
+                paddingBottom: isLastRow ? 0 : 4
               }
             : {
                 display: 'flex',
                 flexDirection: 'column' as const,
                 gap: '6px',
                 fontSize: bodyFontSize,
-                cursor: onChange ? 'pointer' : 'default'
+                cursor: onChange ? 'pointer' : 'default',
+                borderBottom: isLastRow ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
+                paddingBottom: isLastRow ? 0 : 6
               };
 
           if (compact) {
@@ -578,13 +580,12 @@ export function ProjectBriefCard({
                   </span>
                   <span
                     style={{
+                      ...labelStyle,
                       flex: 1,
                       minWidth: 0,
-                      color: brandTokens.colors.lightText,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      textTransform: 'capitalize'
+                      textOverflow: 'ellipsis'
                     }}
                   >
                     {row.label}
@@ -616,13 +617,11 @@ export function ProjectBriefCard({
                   <div
                     data-testid="brief-row-value"
                     style={{
+                      ...valueStyle,
                       marginLeft: 20,
-                      fontSize: bodyFontSize,
-                      color: brandTokens.colors.lightText,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      textTransform: 'capitalize'
+                      textOverflow: 'ellipsis'
                     }}
                   >
                     {row.display}
@@ -655,30 +654,40 @@ export function ProjectBriefCard({
               <div
                 style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}
               >
-                <span style={{ color: brandTokens.colors.mutedText, textTransform: 'capitalize' }}>{row.label}</span>
+                <span style={labelStyle}>{row.label}</span>
                 <span
                   data-testid={filled ? 'brief-row-value' : undefined}
                   style={{
                     color: filled ? brandTokens.colors.lightText : brandTokens.colors.mutedText,
                     textAlign: 'right',
                     maxWidth: '60%',
-                    textTransform: 'capitalize',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
                     justifyContent: 'flex-end'
                   }}
                 >
+                  {filled && (
+                    <span aria-hidden="true" style={{ color: '#4ade80', fontSize: 11, flexShrink: 0 }}>
+                      ✓
+                    </span>
+                  )}
                   <span
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
-                    }}
+                    style={
+                      filled
+                        ? { ...valueStyle, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+                        : {
+                            flex: 1,
+                            minWidth: 0,
+                            fontStyle: 'italic',
+                            color: brandTokens.colors.mutedText,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }
+                    }
                   >
-                    {filled ? row.display : 'Unfilled'}
+                    {filled ? row.display : 'Not yet captured'}
                   </span>
                   {onChange && (
                     <button
@@ -789,8 +798,6 @@ type BriefRow = {
   key: string;
   raw: string;
   display: string;
-  editor: 'text' | 'select';
-  options?: ReadonlyArray<{ id: string; label: string }>;
 };
 
 function formatProjectType(value: string | undefined): string {
@@ -820,61 +827,6 @@ function BriefRowEditor({
   const containerStyle: React.CSSProperties = compact
     ? { marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }
     : { display: 'flex', alignItems: 'center', gap: 6, width: '100%' };
-
-  if (row.editor === 'select' && row.options) {
-    return (
-      <div style={containerStyle}>
-        <select
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          onBlur={commit}
-          autoFocus
-          style={{
-            flex: 1,
-            background: 'rgba(255,255,255,0.04)',
-            border: `1px solid ${brandTokens.colors.border}`,
-            color: brandTokens.colors.lightText,
-            borderRadius: 6,
-            padding: '4px 6px',
-            fontSize: 12,
-            colorScheme: 'dark',
-            caretColor: brandTokens.colors.warmGold
-          }}
-        >
-          {row.options.map((option) => (
-            <option
-              key={option.id}
-              value={option.id}
-              style={{
-                background: brandTokens.colors.charcoal,
-                color: brandTokens.colors.lightText
-              }}
-            >
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onCancel();
-          }}
-          aria-label={`Cancel editing ${row.label.toLowerCase()}`}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: brandTokens.colors.mutedText,
-            cursor: 'pointer',
-            fontSize: 11
-          }}
-        >
-          ×
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div style={containerStyle}>

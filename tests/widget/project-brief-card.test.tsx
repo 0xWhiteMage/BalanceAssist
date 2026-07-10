@@ -9,8 +9,8 @@ const readyDraft = {
   projectType: 'Video',
   projectScope: '30s launch animation',
   scopePolished: '30s launch animation',
-  timelineBand: '1-2-months' as const,
-  budgetBand: '20k-50k' as const,
+  timelineBand: '3 weeks',
+  budgetBand: '$20,000 SGD',
   contactName: 'Jayden',
   contactEmail: 'jayden@example.com'
 };
@@ -119,8 +119,30 @@ describe('ProjectBriefCard', () => {
       />
     );
     expect(screen.getByText('Production')).toBeInTheDocument();
-    expect(screen.getByText('1-2 months')).toBeInTheDocument();
-    expect(screen.getByText('$20,000-$50,000')).toBeInTheDocument();
+    expect(screen.getByText('3 weeks')).toBeInTheDocument();
+    expect(screen.getByText('$20,000 SGD')).toBeInTheDocument();
+  });
+
+  test('timeline and budget rows use free-text editors (no <select>)', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const timelineRow = screen.getByText('Timeline').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(timelineRow).getByRole('button', { name: /edit timeline/i }));
+    expect(within(timelineRow).getByRole('textbox')).toBeInTheDocument();
+    expect(within(timelineRow).queryByRole('combobox')).toBeNull();
+
+    const budgetRow = screen.getByText('Budget').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(budgetRow).getByRole('button', { name: /edit budget/i }));
+    expect(within(budgetRow).getByRole('textbox')).toBeInTheDocument();
+    expect(within(budgetRow).queryByRole('combobox')).toBeNull();
   });
 
   test('compact mode capitalizes projectType and converts dashes to spaces', () => {
@@ -135,11 +157,11 @@ describe('ProjectBriefCard', () => {
     expect(screen.getByText('Live action')).toBeInTheDocument();
   });
 
-  test('compact mode label and value spans carry text-transform: capitalize', () => {
+  test('labels are uppercase with letter-spacing and values are fontWeight 600', () => {
     render(
       <ProjectBriefCard
         draft={readyDraft}
-        compact={true}
+        compact={false}
         readyForApproval={false}
         approved={false}
       />
@@ -147,9 +169,10 @@ describe('ProjectBriefCard', () => {
     const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]');
     expect(serviceRow).not.toBeNull();
     const labelSpan = within(serviceRow as HTMLElement).getByText('Service');
-    expect((labelSpan as HTMLElement).style.textTransform).toBe('capitalize');
+    expect((labelSpan as HTMLElement).style.textTransform).toBe('uppercase');
+    expect((labelSpan as HTMLElement).style.letterSpacing).toBe('0.12em');
     const valueSpan = within(serviceRow as HTMLElement).getByText('Production');
-    expect((valueSpan as HTMLElement).style.textTransform).toBe('capitalize');
+    expect((valueSpan as HTMLElement).style.fontWeight).toBe('600');
   });
 
   test('clicking the edit button on a free-text row opens an inline input', () => {
@@ -190,7 +213,7 @@ describe('ProjectBriefCard', () => {
     expect(onChange).toHaveBeenCalledWith('projectScope', '60s hero spot');
   });
 
-  test('select-style fields render a <select> with the human-readable option labels', () => {
+  test('service row uses a free-text editor (no <select>)', () => {
     const onChange = vi.fn();
     render(
       <ProjectBriefCard
@@ -203,54 +226,39 @@ describe('ProjectBriefCard', () => {
     );
     const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]') as HTMLElement;
     fireEvent.click(within(serviceRow).getByRole('button', { name: /edit service/i }));
-    const select = within(serviceRow).getByRole('combobox') as HTMLSelectElement;
-    expect(select).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: 'Production' })).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: 'Post-Production' })).toBeInTheDocument();
+    expect(within(serviceRow).getByRole('textbox')).toBeInTheDocument();
+    expect(within(serviceRow).queryByRole('combobox')).toBeNull();
   });
 
-  test('select element carries colorScheme=dark + brand caret color so the native chrome renders dark', () => {
+  test('no <select> elements exist anywhere in the brief card', () => {
     const onChange = vi.fn();
-    render(
+    const { container } = render(
       <ProjectBriefCard
         draft={readyDraft}
-        compact={true}
+        compact={false}
         readyForApproval={false}
         approved={false}
         onChange={onChange}
       />
     );
+    // Open an editor to make sure no select lazily renders during editing.
     const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]') as HTMLElement;
     fireEvent.click(within(serviceRow).getByRole('button', { name: /edit service/i }));
-    const select = within(serviceRow).getByRole('combobox') as HTMLSelectElement;
-    expect(select.style.colorScheme).toBe('dark');
-    expect(select.style.caretColor).toBeTruthy();
-    expect(select.style.caretColor).not.toBe('');
+    expect(container.querySelector('select')).toBeNull();
   });
 
-  test('each <option> inside the brief-editing select carries an inline dark-style color', () => {
-    const onChange = vi.fn();
+  test('empty rows show an italic "Not yet captured" placeholder in non-compact mode', () => {
     render(
       <ProjectBriefCard
-        draft={readyDraft}
-        compact={true}
+        draft={{ ...readyDraft, contactCompany: '' }}
+        compact={false}
         readyForApproval={false}
         approved={false}
-        onChange={onChange}
       />
     );
-    const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]') as HTMLElement;
-    fireEvent.click(within(serviceRow).getByRole('button', { name: /edit service/i }));
-    const select = within(serviceRow).getByRole('combobox') as HTMLSelectElement;
-    const options = Array.from(select.querySelectorAll('option')) as HTMLOptionElement[];
-    expect(options.length).toBeGreaterThan(0);
-    for (const option of options) {
-      // jsdom returns the inline style string; just confirm color is set.
-      expect(option.style.color).toBeTruthy();
-      expect(option.style.color).not.toBe('');
-      expect(option.style.background).toBeTruthy();
-      expect(option.style.background).not.toBe('');
-    }
+    const placeholder = screen.getByText('Not yet captured');
+    expect(placeholder).toBeInTheDocument();
+    expect((placeholder as HTMLElement).style.fontStyle).toBe('italic');
   });
 
   test('compact mode: every row (filled or unfilled) exposes a pencil edit affordance', () => {

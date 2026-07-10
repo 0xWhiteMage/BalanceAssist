@@ -55,7 +55,6 @@ export function WorkCard({
         WebkitUserSelect: 'none',
         MozUserSelect: 'none',
         msUserSelect: 'none',
-        scrollSnapAlign: 'start',
         transition: 'border-color 0.15s ease, background 0.15s ease'
       }}
       onMouseEnter={(e) => {
@@ -185,14 +184,12 @@ export function WorkCardRow({
 }) {
   const rowRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
-  const hasScrolledRef = useRef<boolean>(false);
   const [isDragging, setIsDragging] = useState(false);
   const [scrollMetrics, setScrollMetrics] = useState<{ pageCount: number; activePage: number }>({
     pageCount: 1,
     activePage: 0
   });
   const [rowWidth, setRowWidth] = useState<number>(0);
-  const [hasScrolled, setHasScrolled] = useState(false);
 
   function beginDrag(clientX: number) {
     if (!rowRef.current) return;
@@ -330,10 +327,6 @@ export function WorkCardRow({
       const el = rowRef.current;
       if (!el) return;
       recompute();
-      if (el.scrollLeft > 4 && !hasScrolledRef.current) {
-        hasScrolledRef.current = true;
-        setHasScrolled(true);
-      }
     }
 
     recompute();
@@ -366,12 +359,14 @@ export function WorkCardRow({
   const isOverflowing = scrollMetrics.pageCount > 1 && rowWidth > 0;
   const canPrev = scrollMetrics.activePage > 0;
   const canNext = scrollMetrics.activePage < scrollMetrics.pageCount - 1;
+  const isActivePage = (index: number) => index === scrollMetrics.activePage;
   return (
     <div
       data-testid="work-card-carousel"
       style={{
         position: 'relative',
-        minHeight: '220px'
+        minHeight: '220px',
+        overflow: 'hidden'
       }}
     >
       {isOverflowing && canPrev && (
@@ -401,7 +396,7 @@ export function WorkCardRow({
             justifyContent: 'center',
             cursor: 'pointer',
             opacity: 1,
-            zIndex: 2
+            zIndex: 3
           }}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -424,9 +419,9 @@ export function WorkCardRow({
         gap: '14px',
         overflowX: 'auto',
         overflowY: 'hidden',
-        padding: '12px 0',
+        padding: '12px 40px',
         scrollbarWidth: 'thin',
-        scrollSnapType: 'x proximity',
+        scrollSnapType: 'x mandatory',
         WebkitOverflowScrolling: 'touch',
           cursor: isDragging ? 'grabbing' : 'grab',
           userSelect: isDragging ? 'none' : 'auto',
@@ -435,8 +430,20 @@ export function WorkCardRow({
           minHeight: '220px'
         }}
       >
-        {entries.map(({ entry, category }) => (
-          <WorkCard key={entry.slug} entry={entry} category={category} />
+        {entries.map(({ entry, category }, index) => (
+          <div
+            key={entry.slug}
+            data-testid="work-card-slide"
+            data-active={isActivePage(index) ? 'true' : 'false'}
+            style={{
+              flexShrink: 0,
+              scrollSnapAlign: 'center',
+              opacity: isActivePage(index) ? 1 : 0.35,
+              transition: 'opacity 0.2s ease'
+            }}
+          >
+            <WorkCard entry={entry} category={category} />
+          </div>
         ))}
       </div>
       {isOverflowing && canNext && (
@@ -466,49 +473,13 @@ export function WorkCardRow({
             justifyContent: 'center',
             cursor: 'pointer',
             opacity: 1,
-            zIndex: 2
+            zIndex: 3
           }}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <path d="M5 2l5 5-5 5" stroke="#101010" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-      )}
-      {isOverflowing && !hasScrolled && (
-        <div
-          data-testid="work-card-row-swipe-hint"
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            right: '14px',
-            bottom: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '4px 10px',
-            borderRadius: '999px',
-            background: 'rgba(16, 16, 16, 0.55)',
-            border: `1px solid ${brandTokens.colors.subtleBorder}`,
-            pointerEvents: 'none',
-            fontSize: 10,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: brandTokens.colors.mutedText,
-            opacity: hasScrolled ? 0 : 0.85,
-            transition: 'opacity 0.4s ease'
-          }}
-        >
-          <span>Swipe</span>
-          <svg width="14" height="10" viewBox="0 0 14 10" fill="none" aria-hidden="true">
-            <path
-              d="M1 5h11M8 1l4 4-4 4"
-              stroke={brandTokens.colors.warmGold}
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
       )}
     </div>
   );

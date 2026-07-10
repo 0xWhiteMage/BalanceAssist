@@ -1,10 +1,9 @@
-import { budgetBandOptions, serviceOptions, timelineBandOptions } from '@/lib/onboarding/service-options';
-import type { BudgetBandId, LeadDraft, ServiceOptionId, TimelineBandId } from '@/lib/onboarding/types';
+import { serviceOptions } from '@/lib/onboarding/service-options';
+import type { LeadDraft, ServiceOptionId } from '@/lib/onboarding/types';
 import type { ConversationStepId } from '@/lib/conversation/types';
 
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const strictEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const numberBudgetPattern = /(\d+(?:[.,]\d+)?)\s*(k\b|m\b|thousand\b|million\b)?/i;
 
 const PROJECT_SIGNAL_PATTERN =
   /\b(video|film|animation|graphic|design|brand|campaign|ad|advert|promo|content|photo|3d|2d|edit|footage|shoot|launch|event|exhibit|production|project|script|storyboard|animatic)\b/i;
@@ -71,61 +70,6 @@ function detectProjectType(text: string): string | null {
   if (/animation/.test(normalized)) return 'Animation';
 
   return null;
-}
-
-function detectTimeline(text: string): TimelineBandId | null {
-  const normalized = normalize(text);
-
-  if (normalized.includes('asap') || normalized.includes('urgent') || normalized.includes('immediately') || normalized.includes('this week')) {
-    return 'asap';
-  }
-  if (normalized.includes('flexible') || normalized.includes('open ended') || normalized.includes('open-ended') || normalized.includes('no fixed timeline')) {
-    return 'flexible';
-  }
-  if (/(1\s*(to|-)?\s*2\s*months?|next month|two months?|in\s+1\s+month|in\s+2\s+months?)/i.test(text)) {
-    return '1-2-months';
-  }
-  if (/(3\+?\s*months?|three months?|next quarter|later this year)/i.test(text)) {
-    return '3-plus-months';
-  }
-
-  for (const option of timelineBandOptions) {
-    if (normalized.includes(option.label.toLowerCase())) {
-      return option.id;
-    }
-  }
-
-  return null;
-}
-
-function detectBudget(text: string): BudgetBandId | null {
-  const normalized = normalize(text);
-
-  if (normalized.includes('not sure')) return 'not-sure-yet';
-  if (normalized.includes('under 20k') || normalized.includes('below 20k') || normalized.includes('less than 20k')) return 'under-20k';
-  if (normalized.includes('150k+') || normalized.includes('150k plus') || normalized.includes('over 150k') || normalized.includes('above 150k')) return '150k-plus';
-
-  const budgetAnchorIndex = normalized.search(/budget|cost|spend|spending|around|about|roughly|approximately/);
-  const budgetSlice = budgetAnchorIndex >= 0 ? text.slice(budgetAnchorIndex) : text;
-  const match = budgetSlice.match(numberBudgetPattern);
-  if (!match) return null;
-
-  const hasBudgetSignal = budgetAnchorIndex >= 0 || /[$€£]|\b(?:usd|sgd|aud|cad)\b/i.test(budgetSlice) || Boolean(match[2]);
-  if (!hasBudgetSignal) return null;
-
-  const rawNumber = Number(match[1].replace(',', '.'));
-  const unit = normalize(match[2] ?? '');
-
-  if (!Number.isFinite(rawNumber)) return null;
-
-  let value = rawNumber;
-  if (unit === 'k' || unit === 'thousand') value *= 1000;
-  if (unit === 'm' || unit === 'million') value *= 1000000;
-
-  if (value < 20000) return 'under-20k';
-  if (value < 50000) return '20k-50k';
-  if (value < 150000) return '50k-150k';
-  return '150k-plus';
 }
 
 const NAME_BLACKLIST = new Set([
@@ -206,16 +150,12 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
 
   const detectedService = detectService(text);
   const detectedProjectType = detectProjectType(text);
-  const detectedTimeline = detectTimeline(text);
-  const detectedBudget = detectBudget(text);
   const detectedEmail = text.match(emailPattern)?.[0] ?? null;
   const detectedName = detectName(text);
   const detectedCompany = detectCompany(text);
 
   if (detectedService && (!currentDraft.service || overwrite)) updates.service = detectedService;
   if (detectedProjectType && (!(currentDraft.projectType ?? '') || overwrite)) updates.projectType = detectedProjectType;
-  if (detectedTimeline && (!currentDraft.timelineBand || overwrite)) updates.timelineBand = detectedTimeline;
-  if (detectedBudget && (!currentDraft.budgetBand || overwrite)) updates.budgetBand = detectedBudget;
   if (detectedEmail && (!currentDraft.contactEmail || overwrite)) updates.contactEmail = detectedEmail;
   if (detectedName && (!currentDraft.contactName || overwrite)) updates.contactName = detectedName;
 

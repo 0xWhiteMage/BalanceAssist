@@ -234,6 +234,17 @@ test('system prompt forbids auto-filling brief fields from low-info replies', ()
   expect(prompt).toMatch(/5k of which currency/i);
 });
 
+test('system prompt tells the AI to record timeline/budget verbatim and never references bands', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/Record the timeline and budget EXACTLY as the user stated them/i);
+  expect(prompt).toMatch(/Do NOT force them into predefined categories/i);
+  expect(prompt).not.toContain('ASAP (urgent');
+  // No standalone "band" concept words outside of the camelCase field names
+  // (timelineBand / budgetBand), which are the tool-call parameter names.
+  const withoutFieldNames = prompt.replace(/timelineBand|budgetBand/gi, '');
+  expect(withoutFieldNames.toLowerCase()).not.toMatch(/\bband\b/);
+});
+
 test('system prompt forbids silent coercion of bare durations like "3 weeks" into a timeline band', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/3 weeks/i);

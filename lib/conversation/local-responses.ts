@@ -22,6 +22,8 @@ function getNextMissingFieldPrompt(draft: LeadDraft): string {
   return 'Would you like to approve the brief for the team or continue refining it?';
 }
 
+export { getNextMissingFieldPrompt };
+
 function hasAnyProjectContext(draft: LeadDraft) {
   return Boolean(
     draft.projectScope.trim() ||
@@ -98,9 +100,9 @@ const intents: LocalIntent[] = [
 ];
 
 const fallbackResponses = [
-  'Let me try to help with that. Could you tell me a bit more?',
-  'I want to make sure I understand. Can you say a little more?',
-  "Happy to help. What's the part you want to focus on?"
+  "I didn't quite catch that — could you tell me a bit more about the project?",
+  'I want to make sure I capture this right. Could you rephrase that?',
+  "Let's keep going — what else can you tell me about the project?"
 ];
 
 export function getLocalResponse(message: string, ctx: ConversationContext): string | null {
