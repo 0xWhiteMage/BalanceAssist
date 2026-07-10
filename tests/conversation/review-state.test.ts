@@ -74,5 +74,5 @@ test('missingReviewFields returns one entry per empty visible row (8 total)', ()
 });
 
 test('exports the review prompt', () => {
-  expect(REVIEW_PROMPT).toBe('Your brief is ready. Tap the tab on the right to review.');
+  expect(REVIEW_PROMPT).toBe('Your brief is ready. Review it in the panel on the left.');
 });

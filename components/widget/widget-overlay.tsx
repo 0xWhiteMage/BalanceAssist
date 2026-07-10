@@ -738,9 +738,6 @@ const startConversation = useCallback(async () => {
 
   async function appendReferenceLink(link: ReferenceLink) {
     setReferenceLinks((prev) => [...prev, link]);
-    const id = sessionIdRef.current ?? (await loadOrCreateSession());
-    if (!id) return;
-    void addReferenceLink({ sessionId: id, url: link.url, kind: link.kind });
   }
 
   function appendReferenceFile(file: ReferenceFile) {
@@ -764,12 +761,15 @@ const startConversation = useCallback(async () => {
   async function handleApproveBrief() {
     if (approveInFlightRef.current || briefApproved) return;
     approveInFlightRef.current = true;
-    setBriefApproved(true);
     setTelegramBroadcastStatus('pending');
 
     try {
       await ensureSession();
-      if (!sessionIdRef.current) return;
+      if (!sessionIdRef.current) {
+        approveInFlightRef.current = false;
+        setTelegramBroadcastStatus('unconfigured');
+        return;
+      }
 
       const result = scoreLead(draftRef.current);
       const payload = {
@@ -785,14 +785,26 @@ const startConversation = useCallback(async () => {
       } as const;
 
       const finalizeResponse = await finalizeLead(payload);
-      if (finalizeResponse && typeof finalizeResponse.telegramSent === 'boolean') {
-        setTelegramBroadcastStatus(finalizeResponse.telegramSent ? 'sent' : 'unconfigured');
-      } else {
+      if (!finalizeResponse || !finalizeResponse.ok) {
+        approveInFlightRef.current = false;
+        setTelegramBroadcastStatus('unconfigured');
+        await botSay('Sorry — the brief could not be saved. Please try again or contact the team directly.');
+        return;
+      }
+
+      setBriefApproved(true);
+      if (finalizeResponse.telegramSent === true) {
+        setTelegramBroadcastStatus('sent');
+      } else if (finalizeResponse.telegramSent === false) {
         setTelegramBroadcastStatus('unconfigured');
       }
       setCurrentStep('handoff');
       await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
       await advanceStep('handoff', draftRef.current);
+    } catch {
+      approveInFlightRef.current = false;
+      setTelegramBroadcastStatus('unconfigured');
+      await botSay('Sorry — something went wrong saving your brief. Please try again.');
     } finally {
       // keep approveInFlightRef true once approved, so future calls remain no-ops.
     }
@@ -917,21 +929,6 @@ const startConversation = useCallback(async () => {
           resetTimerRef.current = null;
           handleReset();
         }, 200);
-        return;
-      }
-
-      const memoryUpdatePattern = /\b(update that|correct that|change that|actually|correction)\b/i;
-      if (!isTeamConnected && memoryUpdatePattern.test(trimmed)) {
-        const updatedDraft = applyTextToDraft(trimmed, draft, currentStep);
-        setDraft(updatedDraft);
-        setBriefApproved(false);
-        appendUserMessage(trimmed);
-        const lines = getDraftSummaryLines(updatedDraft);
-        await botSay(
-          lines.length > 0
-            ? `Updated. I now have:\n\n${lines.map((line) => `• ${line}`).join('\n')}`
-            : 'Updated. What would you like me to capture next?'
-        );
         return;
       }
 

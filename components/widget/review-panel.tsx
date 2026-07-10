@@ -114,7 +114,7 @@ export function ReviewPanel({
   const approveDisabled = !ready || approved || isApproveInFlight;
 
   // Progress must match the 8 visible rows on the brief card. Mirroring the exact substitution ProjectBriefCard applies.
-  const projectScopeFilled = (draft.scopePolished ?? draft.projectScope ?? '').trim().length > 0;
+  const projectScopeFilled = (draft.scopePolished || draft.projectScope || '').trim().length > 0;
   const projectTypeFilled = (draft.projectType ?? '').trim().length > 0;
   const serviceFilled = Boolean(draft.service);
   const timelineFilled = Boolean(draft.timelineBand);
