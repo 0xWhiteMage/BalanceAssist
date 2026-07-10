@@ -130,7 +130,7 @@ describe('WorkCardRow', () => {
     expect(row.style.padding).toBe('12px 0px');
   });
 
-  test('row has a right-edge fade to signal there are more cards', () => {
+  test('row no longer renders a fade gradient overlay', () => {
     const { container } = render(
       <WorkCardRow
         entries={[
@@ -142,12 +142,7 @@ describe('WorkCardRow', () => {
         ]}
       />
     );
-    const fade = container.querySelector('[data-testid="work-card-row-fade"]');
-    expect(fade).not.toBeNull();
-    expect((fade as HTMLElement).style.pointerEvents).toBe('none');
-    expect((fade as HTMLElement).style.position).toBe('absolute');
-    expect((fade as HTMLElement).style.right).toBe('0px');
-    expect((fade as HTMLElement).style.width).toBe('28px');
+    expect(container.querySelector('[data-testid="work-card-row-fade"]')).toBeNull();
   });
 
   test('row starts with cursor: grab so users know it can be dragged', () => {
@@ -542,12 +537,14 @@ describe('WorkCardRow prev/next arrow buttons', () => {
     return { row };
   }
 
-  test('renders prev and next buttons inside an overflowing row', async () => {
-    setupOverflowRow(4);
+  test('renders arrow buttons outside the scroll container', async () => {
+    const { row } = setupOverflowRow(4);
     await waitFor(() => {
-      expect(screen.queryByTestId('work-card-row-prev')).not.toBeNull();
       expect(screen.queryByTestId('work-card-row-next')).not.toBeNull();
     });
+
+    expect(screen.queryByTestId('work-card-row-prev')).toBeNull();
+    expect(row.contains(screen.getByTestId('work-card-row-next'))).toBe(false);
   });
 
   test('does NOT render arrow buttons when the row does not overflow (single page)', async () => {
@@ -571,7 +568,6 @@ describe('WorkCardRow prev/next arrow buttons', () => {
     await waitFor(() => {
       nextButton = screen.getByTestId('work-card-row-next');
     });
-    fireEvent.mouseEnter(row);
     fireEvent.click(nextButton!);
     expect(scrollBySpy).toHaveBeenCalled();
     const opts = scrollBySpy.mock.calls[0]?.[0] as ScrollToOptions | undefined;
@@ -590,14 +586,16 @@ describe('WorkCardRow prev/next arrow buttons', () => {
       writable: true,
       value: scrollBySpy
     });
-    let prevButton: HTMLElement | null = null;
     let nextButton: HTMLElement | null = null;
     await waitFor(() => {
-      prevButton = screen.getByTestId('work-card-row-prev');
       nextButton = screen.getByTestId('work-card-row-next');
     });
-    fireEvent.mouseEnter(row);
     fireEvent.click(nextButton!);
+    fireEvent.scroll(row);
+    await waitFor(() => {
+      expect(screen.getByTestId('work-card-row-prev')).toBeInTheDocument();
+    });
+    const prevButton = screen.getByTestId('work-card-row-prev');
 
     // First click moves forward (activePage=0 → activePage=1, but the row scroll didn't change
     // because scrollBy is a stub that updates scrollLeft by 320 anyway).
@@ -613,55 +611,33 @@ describe('WorkCardRow prev/next arrow buttons', () => {
 
   test('at scroll position 0, the "prev" button has data-disabled="true" and is not clickable', async () => {
     setupOverflowRow(4);
-    let prevButton: HTMLElement | null = null;
     await waitFor(() => {
-      prevButton = screen.getByTestId('work-card-row-prev');
+      expect(screen.getByTestId('work-card-row-next')).toBeInTheDocument();
     });
-    const btn = prevButton as HTMLButtonElement;
-    expect(btn.getAttribute('data-disabled')).toBe('true');
-    expect(btn.hasAttribute('disabled')).toBe(true);
-    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.queryByTestId('work-card-row-prev')).toBeNull();
   });
 
   test('at the last page, the "next" button has data-disabled="true"', async () => {
     const { row } = setupOverflowRow(4);
-    let nextButton: HTMLElement | null = null;
     await waitFor(() => {
-      nextButton = screen.getByTestId('work-card-row-next');
+      expect(screen.getByTestId('work-card-row-next')).toBeInTheDocument();
     });
-    const realNext = nextButton as HTMLButtonElement;
     Object.defineProperty(row, 'scrollLeft', { configurable: true, get: () => 640, set: () => undefined });
     fireEvent.scroll(row);
     await waitFor(() => {
-      expect(realNext.getAttribute('data-disabled')).toBe('true');
+      expect(screen.queryByTestId('work-card-row-next')).toBeNull();
     });
-    expect(realNext.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByTestId('work-card-row-prev').getAttribute('data-disabled')).toBe('false');
   });
 
-  test('arrow buttons are visually hidden (opacity: 0) until the row is hovered', async () => {
+  test('arrow buttons stay visible without hover when scrolling is possible', async () => {
     setupOverflowRow(4);
-    let prevButton: HTMLElement | null = null;
     let nextButton: HTMLElement | null = null;
     await waitFor(() => {
-      prevButton = screen.getByTestId('work-card-row-prev');
       nextButton = screen.getByTestId('work-card-row-next');
     });
-    const prev = prevButton as HTMLButtonElement;
     const next = nextButton as HTMLButtonElement;
-    // Initially the row is not hovered, so opacity is 0 even when the button is scrollable.
-    expect(prev.style.opacity).toBe('0');
-    expect(next.style.opacity).toBe('0');
-
-    fireEvent.mouseEnter(screen.getByTestId('work-card-row'));
-    // After hover, the next button (scrollable forward) becomes visible.
-    await waitFor(() => {
-      expect(next.style.opacity).toBe('1');
-    });
-
-    fireEvent.mouseLeave(screen.getByTestId('work-card-row'));
-    await waitFor(() => {
-      expect(next.style.opacity).toBe('0');
-    });
+    expect(next.style.opacity).toBe('1');
   });
 
   test('clicking next does not start a row drag (prevents underlying card link)', async () => {
@@ -680,7 +656,6 @@ describe('WorkCardRow prev/next arrow buttons', () => {
     });
     const preventDefaultSpy = vi.spyOn(MouseEvent.prototype, 'preventDefault');
     const stopPropagationSpy = vi.spyOn(MouseEvent.prototype, 'stopPropagation');
-    fireEvent.mouseEnter(row);
     fireEvent.click(nextButton!);
     expect(preventDefaultSpy).toHaveBeenCalled();
     expect(stopPropagationSpy).toHaveBeenCalled();
