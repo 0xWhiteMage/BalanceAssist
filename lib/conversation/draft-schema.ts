@@ -58,7 +58,8 @@ export function sanitizeDraftUpdates(input: Record<string, unknown> | null | und
     if (typeof value !== 'string') continue;
     const trimmed = value.trim();
     if (!trimmed) {
-      result[key] = '';
+      // Empty string means the LLM did not provide a value for this field.
+      // Do NOT include it in the result so the prior draft value is preserved.
       continue;
     }
     if (key === 'service') {

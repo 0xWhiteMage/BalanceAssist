@@ -221,7 +221,7 @@ describe('POST /api/chat', () => {
     expect(data.message).toBe('Got it.');
     expect(data.draftUpdates.contactName).toBe('Tool');
     expect(data.briefReady).toBe(true);
-    expect(data.reviewPrompt).toBe('Your brief is ready. Tap the tab on the right to review.');
+    expect(data.reviewPrompt).toBe('Your brief is ready. Review it in the panel on the left.');
     expect(data.missingFields).toEqual([]);
   });
 
@@ -508,7 +508,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.draftUpdates.contactName).toBe('');
+    expect(data.draftUpdates.contactName).toBeUndefined();
     expect(data.draftUpdates.projectScope).toBe('30s animation');
     expect(data.briefReady).toBe(false);
   });

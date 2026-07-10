@@ -23,7 +23,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 
 const chatMessageSchema = z.object({
-  role: z.enum(['system', 'user', 'assistant']),
+  role: z.enum(['user', 'assistant']),
   content: z.string().max(8000)
 });
 
@@ -196,10 +196,10 @@ async function callOpenAICompatible(
   const data = await response.json();
   const choice = data?.choices?.[0];
   const message = choice?.message;
-  const content = typeof message?.content === 'string' ? message.content : getFallbackResponse();
-  const finishReason = choice?.finish_reason;
   const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
-  const truncated = finishReason === 'length' && !hasToolCalls && content.trim().length > 0;
+  const rawContent = typeof message?.content === 'string' ? message.content : null;
+  const finishReason = choice?.finish_reason;
+  const truncated = finishReason === 'length' && !hasToolCalls && (rawContent?.trim().length ?? 0) > 0;
 
   if (finishReason === 'length' && !hasToolCalls) {
     console.warn('[chat] response truncated: finish_reason=length');
@@ -256,11 +256,11 @@ async function callOpenAICompatible(
     }
 
     if (toolArguments !== null || sharedWork !== null) {
-      return { content, toolArguments, sharedWork, truncated };
+      return { content: rawContent ?? '', toolArguments, sharedWork, truncated };
     }
   }
 
-  return { content, toolArguments: null, sharedWork: null, truncated };
+  return { content: rawContent ?? getFallbackResponse(), toolArguments: null, sharedWork: null, truncated };
 }
 
 async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<string> {

@@ -1,3 +1,5 @@
+import { buildTopicName, TOPIC_STATUS_COLOR } from '@/lib/conversation/topic-status';
+
 type TelegramResponse = {
   ok: boolean;
   result?: {
@@ -302,4 +304,65 @@ export async function deleteForumTopic(threadId: number): Promise<boolean> {
 export function extractSessionIdFromText(text: string): string | null {
   const match = text.match(/\[Session ([a-f0-9-]+)\]/i);
   return match?.[1] ?? null;
+}
+
+type TopicSnapshot = {
+  telegram_thread_id?: number | null;
+  contact_name?: string | null;
+  contact_company?: string | null;
+} | null;
+
+type SupabaseLike = {
+  // eslint-disable-next-line
+  from: (table: string) => any;
+};
+
+/**
+ * Ensures a Telegram forum topic exists for the given session.
+ * If threadId is null, creates one with the race-safe claim pattern.
+ * Returns the resolved threadId (or null on failure).
+ */
+export async function ensureTelegramTopic(
+  supabase: SupabaseLike,
+  sessionId: string,
+  contactName: string | null,
+  contactCompany: string | null,
+  shortId: string
+): Promise<number | null> {
+  const { data: sessionRow } = await supabase
+    .from('sessions')
+    .select('telegram_thread_id, contact_name, contact_company')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  const snap = sessionRow as TopicSnapshot;
+  let threadId = snap?.telegram_thread_id ?? null;
+
+  if (snap && !threadId) {
+    const name = buildTopicName(contactName ?? snap.contact_name, contactCompany ?? snap.contact_company, shortId, 'new');
+    const topic = await createForumTopic(name, { iconColor: TOPIC_STATUS_COLOR.new });
+
+    if (topic) {
+      const { data: claimed } = await supabase
+        .from('sessions')
+        .update({ telegram_thread_id: topic.threadId })
+        .eq('id', sessionId)
+        .is('telegram_thread_id', null)
+        .select('telegram_thread_id');
+
+      if (claimed && claimed.length > 0) {
+        threadId = topic.threadId;
+      } else {
+        await closeForumTopic(topic.threadId).catch(() => undefined);
+        const { data: refreshed } = await supabase
+          .from('sessions')
+          .select('telegram_thread_id')
+          .eq('id', sessionId)
+          .maybeSingle();
+        threadId = (refreshed as { telegram_thread_id?: number | null } | null)?.telegram_thread_id ?? null;
+      }
+    }
+  }
+
+  return threadId;
 }

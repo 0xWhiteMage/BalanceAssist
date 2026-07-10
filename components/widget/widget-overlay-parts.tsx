@@ -425,8 +425,8 @@ export function ProjectBriefCard({
     {
       label: 'Project scope',
       key: 'projectScope',
-      raw: draft.scopePolished ?? draft.projectScope,
-      display: (draft.scopePolished ?? draft.projectScope).trim()
+      raw: draft.scopePolished || draft.projectScope,
+      display: (draft.scopePolished || draft.projectScope).trim()
     },
     {
       label: 'Project type',

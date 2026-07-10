@@ -52,7 +52,11 @@ export function AttachmentDropzone({
         fd.append('sessionId', sessionId);
       }
       const res = await fetch('/api/telegram/upload', { method: 'POST', body: fd });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.error ?? `Failed to upload ${file.name}. Please try again.`);
+        continue;
+      }
       const data = await res.json();
       onAddFile({
         name: file.name,
@@ -60,6 +64,7 @@ export function AttachmentDropzone({
         mime: file.type,
         telegramFileId: data.telegramFileId ?? ''
       });
+      setError(null);
       if (typeof data.extractedText === 'string' && data.extractedText.trim()) {
         onFileAnalyzed?.(file.name, data.extractedText);
       }

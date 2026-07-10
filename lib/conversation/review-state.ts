@@ -1,6 +1,6 @@
 import type { LeadDraft } from '@/lib/onboarding/types';
 
-export const REVIEW_PROMPT = 'Your brief is ready. Tap the tab on the right to review.';
+export const REVIEW_PROMPT = 'Your brief is ready. Review it in the panel on the left.';
 
 export function missingReviewFields(draft: Partial<LeadDraft>): string[] {
   const missing: string[] = [];

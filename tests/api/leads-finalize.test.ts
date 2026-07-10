@@ -1,16 +1,18 @@
 // @vitest-environment node
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 
-const { sendTelegramMessageMock, editForumTopicMock, hasSupabaseServerConfigMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
+const { sendTelegramMessageMock, editForumTopicMock, ensureTelegramTopicMock, hasSupabaseServerConfigMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
   sendTelegramMessageMock: vi.fn(async () => ({ messageId: 1 })),
   editForumTopicMock: vi.fn(async () => true),
+  ensureTelegramTopicMock: vi.fn(async () => null),
   hasSupabaseServerConfigMock: vi.fn(() => true),
   createServerSupabaseClientMock: vi.fn()
 }));
 
 vi.mock('@/lib/telegram', () => ({
   sendTelegramMessage: sendTelegramMessageMock,
-  editForumTopic: editForumTopicMock
+  editForumTopic: editForumTopicMock,
+  ensureTelegramTopic: ensureTelegramTopicMock
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -83,6 +85,7 @@ function buildMockSupabase({
 function attachSpyWrappers() {
   sendTelegramMessageMock.mockReset();
   editForumTopicMock.mockReset();
+  ensureTelegramTopicMock.mockReset();
   capturedMessages.length = 0;
   capturedEdits.length = 0;
   sendTelegramMessageMock.mockImplementation(async (text, options) => {
@@ -93,6 +96,7 @@ function attachSpyWrappers() {
     capturedEdits.push({ threadId, name, options });
     return true;
   });
+  ensureTelegramTopicMock.mockImplementation(async () => null);
 }
 
 async function callFinalizeRoute(body: Record<string, unknown>) {

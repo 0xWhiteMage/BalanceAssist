@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { closeForumTopic, createForumTopic, editForumTopic, sendTelegramMessage } from '@/lib/telegram';
+import { editForumTopic, ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
 import { buildTopicName, TOPIC_STATUS_COLOR } from '@/lib/conversation/topic-status';
 
 const relayPayloadSchema = z.object({
@@ -122,29 +122,10 @@ export async function POST(request: Request) {
     || (contactCompany && contactCompany !== sessionSnap?.contact_company);
 
   if (sessionSnap && !threadId) {
-    const topic = await createForumTopic(newTopicName, { iconColor: TOPIC_STATUS_COLOR.new });
-
-    if (topic) {
-      const { data: claimed } = await supabase
-        .from('sessions')
-        .update({ telegram_thread_id: topic.threadId })
-        .eq('id', sessionId)
-        .is('telegram_thread_id', null)
-        .select('telegram_thread_id');
-
-      if (claimed && claimed.length > 0) {
-        threadId = topic.threadId;
-        console.log('[telegram-relay] Created topic', { sessionId, threadId, name: newTopicName });
-      } else {
-        await closeForumTopic(topic.threadId).catch(() => undefined);
-        const { data: refreshed } = await supabase
-          .from('sessions')
-          .select('telegram_thread_id')
-          .eq('id', sessionId)
-          .maybeSingle();
-        threadId = (refreshed as { telegram_thread_id?: number | null } | null)?.telegram_thread_id ?? null;
-        console.log('[telegram-relay] Lost topic race, reused existing thread', { sessionId, threadId });
-      }
+    const created = await ensureTelegramTopic(supabase, sessionId, contactName, contactCompany, shortId);
+    if (created) {
+      threadId = created;
+      console.log('[telegram-relay] Created topic', { sessionId, threadId, name: newTopicName });
     } else {
       console.warn('[telegram-relay] createForumTopic failed; falling back to flat message');
     }

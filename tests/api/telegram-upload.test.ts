@@ -1,13 +1,15 @@
 // @vitest-environment node
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 
-const { sendDocumentMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
+const { sendDocumentMock, ensureTelegramTopicMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
   sendDocumentMock: vi.fn(),
+  ensureTelegramTopicMock: vi.fn(async (_supabase: unknown, _sessionId: string) => null),
   createServerSupabaseClientMock: vi.fn()
 }));
 
 vi.mock('@/lib/telegram', () => ({
-  sendDocument: sendDocumentMock
+  sendDocument: sendDocumentMock,
+  ensureTelegramTopic: ensureTelegramTopicMock
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -33,7 +35,7 @@ function buildMockSupabase(options?: { fileRequestOpen?: boolean }) {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { telegram_thread_id: 42, file_request_open: fileRequestOpen },
+                data: { telegram_thread_id: 42, file_request_open: fileRequestOpen, contact_name: null, contact_company: null },
                 error: null
               }))
             }))

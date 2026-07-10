@@ -27,14 +27,16 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
     setFallback(false);
 
     let scriptLoadStarted = false;
+    let inlineLoaded = false;
 
     const initWidget = () => {
-      if (containerRef.current && window.Calendly) {
+      if (containerRef.current && window.Calendly && !inlineLoaded) {
         containerRef.current.innerHTML = '';
         window.Calendly.initInlineWidget({
           url,
           parentElement: containerRef.current
         });
+        inlineLoaded = true;
         setLoaded(true);
       }
     };
@@ -51,8 +53,11 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
         script.async = true;
         script.onload = () => setTimeout(initWidget, 100);
         script.onerror = () => {
-          setLoaded(true);
-          setFallback(true);
+          if (!inlineLoaded) {
+            inlineLoaded = true;
+            setLoaded(true);
+            setFallback(true);
+          }
         };
         document.head.appendChild(script);
       } else {
@@ -61,7 +66,8 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
     }
 
     const fallbackTimer = window.setTimeout(() => {
-      if (!loaded) {
+      if (!inlineLoaded) {
+        inlineLoaded = true;
         setLoaded(true);
         setFallback(true);
       }
