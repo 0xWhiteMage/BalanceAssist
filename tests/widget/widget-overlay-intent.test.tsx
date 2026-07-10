@@ -280,4 +280,92 @@ describe('intake short replies stay on the LLM path', () => {
 
     expect(screen.queryByText(/So far I have:/i)).toBeNull();
   }, 10000);
+
+  test('sending "who are you" during the service step uses the FAQ or LLM path instead of the local canned intro', async () => {
+    const chatCalls: Array<{ step: string }> = [];
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        chatCalls.push({ step: body.context.step });
+
+        if (chatCalls.length === 1) {
+          return new Response(
+            JSON.stringify({
+              message: 'Got it. What kind of support do you need from Balance Studio?',
+              draftUpdates: {
+                projectScope: '30s animation for social media',
+                scopePolished: '30s animation for social media'
+              },
+              briefReady: false,
+              reviewPrompt: null,
+              missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            messages: [
+              'Balance Studio is a Singapore-based, full-service video and creative production house with 10+ years of experience, 100+ clients, and 110+ projects delivered worldwide.',
+              'We handle the whole pipeline in-house - concept, production, post-production, motion graphics, VFX, design, and generative-AI workflows, with work for clients like Rolls-Royce, Canon, Netflix, Chanel, HSBC, and Nestle.'
+            ],
+            draftUpdates: {},
+            briefReady: false,
+            reviewPrompt: null,
+            missingFields: []
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(
+          JSON.stringify({ sessionId: 'mock-session', persisted: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/events')) {
+        return new Response('{}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = (await waitFor(() => {
+      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
+      expect(el).toBeInTheDocument();
+      return el;
+    }, { timeout: 4000 })) as HTMLInputElement;
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
+    }, { timeout: 7000 });
+
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(screen.getByText(/What kind of support do you need/i)).toBeInTheDocument();
+    }, { timeout: 4000 });
+
+    fireEvent.change(input, { target: { value: 'who are you' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(chatCalls).toHaveLength(2);
+    }, { timeout: 4000 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Balance Studio is a Singapore-based, full-service video and creative production house/i)
+      ).toBeInTheDocument();
+    }, { timeout: 4000 });
+
+    expect(
+      screen.queryByText(/I'm \*\*Balance Assist\*\* - Balance Studio's intelligent AI agent/i)
+    ).toBeNull();
+  }, 10000);
 });
