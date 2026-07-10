@@ -141,6 +141,28 @@ function cleanupAttachmentPreviews(messages: ChatMessage[]) {
   }
 }
 
+const CAPTURED_FIELD_KEYS_FOR_LLM = [
+  'projectScope',
+  'projectType',
+  'service',
+  'timelineBand',
+  'budgetBand',
+  'contactName',
+  'contactCompany',
+  'contactEmail'
+] as const;
+
+function computeCapturedFieldsFromDraft(draft: LeadDraft): string[] {
+  const captured: string[] = [];
+  for (const key of CAPTURED_FIELD_KEYS_FOR_LLM) {
+    const value = (draft as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      captured.push(key);
+    }
+  }
+  return captured;
+}
+
 export function WidgetOverlay({
   autoOpen = false,
   calendlyUrlOverride
@@ -590,6 +612,8 @@ const startConversation = useCallback(async () => {
           content: message.text
         }));
 
+      const capturedFields = computeCapturedFieldsFromDraft(draftRef.current);
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -599,7 +623,8 @@ const startConversation = useCallback(async () => {
             step: stepRef.current,
             isTeamConnected: teamRef.current,
             draft: JSON.stringify(draftRef.current),
-            sessionId: sessionIdRef.current ?? undefined
+            sessionId: sessionIdRef.current ?? undefined,
+            capturedFields
           }
         })
       });

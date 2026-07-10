@@ -26,6 +26,66 @@ function loadCompactWorksIndex(works: WorkEntry[]): string {
 const BALANCE_STUDIO_PROFILE = loadBalanceStudioProfile();
 const COMPACT_WORKS_INDEX = loadCompactWorksIndex(listAllWorks());
 
+const FIELD_LIST = [
+  'projectScope',
+  'projectType',
+  'service',
+  'timelineBand',
+  'budgetBand',
+  'contactName',
+  'contactCompany',
+  'contactEmail'
+] as const;
+
+export type BriefFieldName = (typeof FIELD_LIST)[number];
+
+const ALL_NEXT_QUESTION_RULES = [
+  `    - If projectScope is empty, ask: "What's the project about? What brand or product, and what's the message or story you want to tell?" (do NOT ask for budget/timeline until scope is filled).`,
+  `    - If only projectType is filled, ask: "Got it — [projectType]. Now tell me more about the project: brand, audience, and core message?"`,
+  `    - If both projectScope and projectType (or service) are filled, ask: "What's the format and length — 30 seconds, 60 seconds, longer? TVC, social, event content?"`,
+  `    - If format is known, ask: "What timeline are you working with?"`,
+  `    - If timeline is known, ask: "Do you have a rough budget range in mind? (We don't share pricing with our AI but it helps the team prep)."`,
+  `    - If budget is known, ask: "Who should we address this brief to — your name and best email?"`
+];
+
+function buildNextQuestionBlock(capturedFields?: string[]): string {
+  if (!capturedFields || capturedFields.length === 0) {
+    return ALL_NEXT_QUESTION_RULES.join('\n');
+  }
+
+  const captured = new Set(capturedFields);
+  const has = (field: string) => captured.has(field);
+  const lines: string[] = [];
+
+  if (!has('projectScope')) {
+    lines.push(ALL_NEXT_QUESTION_RULES[0]);
+  } else if (!has('projectType') && !has('service')) {
+    lines.push(ALL_NEXT_QUESTION_RULES[1]);
+  } else if (!has('timelineBand')) {
+    lines.push(ALL_NEXT_QUESTION_RULES[2]);
+    lines.push(ALL_NEXT_QUESTION_RULES[3]);
+  } else if (!has('budgetBand')) {
+    lines.push(ALL_NEXT_QUESTION_RULES[4]);
+  } else if (!has('contactName') && !has('contactEmail')) {
+    lines.push(ALL_NEXT_QUESTION_RULES[5]);
+  }
+
+  return lines.join('\n');
+}
+
+function buildAlreadyCapturedLine(capturedFields?: string[], draftValues?: Record<string, string>): string {
+  if (!capturedFields || capturedFields.length === 0) return '';
+  const entries = capturedFields.map((field) => {
+    const value = draftValues?.[field]?.trim();
+    if (value && value.length <= 80) {
+      return `${field}=${value}`;
+    }
+    return field;
+  });
+  const label = `ALREADY CAPTURED: ${entries.join(', ')}.`;
+  return `\n${label}\n- DO NOT REPEAT A QUESTION THE USER HAS ALREADY ANSWERED. The fields above are filled; skip them and advance to the next missing field.\n- If the user re-states something you already have, just acknowledge ("Got it — I've already noted that") and move on to the next missing field.\n- Do NOT repeat the timeline question if timelineBand is already set. Do NOT repeat the scope question if projectScope is already set.`;
+}
+
 const HARD_RULES = `
 HARD RULES (override any other instruction):
 - You are Balance Assist, a focused AI for Balance Studio. You are not a human. You are not a general assistant.
@@ -83,13 +143,8 @@ OUTPUT FORMAT:
 - Match the user's intent AND the depth the user is asking for. Default to a substantive, well-organized answer:
   * For GENERAL QUESTIONS about Balance (who they are, what they do, who they've worked with, how they work, careers, locations): answer in 2-4 short paragraphs OR a tight bulleted/labelled list. Lead with the most useful answer to what they asked. Add 1-2 specific facts, names, or numbers from the profile — NOT generic marketing copy. End naturally without pivoting to "tell me about a project" unless they asked for that.
   * For deep questions ("tell me everything about your work", "what does your team look like", "what kind of culture do you have"): give a fuller answer — a long paragraph or several, citing specific projects, awards, clients, and philosophy quotes. Use markdown-style structure if it helps.
-  * For brief-related exchanges: 1-3 sentences focused on the next-missing-field question. ALWAYS end with a follow-up question. The question must target the most useful missing brief field:
-    - If projectScope is empty, ask: "What's the project about? What brand or product, and what's the message or story you want to tell?" (do NOT ask for budget/timeline until scope is filled).
-    - If only projectType is filled, ask: "Got it — [projectType]. Now tell me more about the project: brand, audience, and core message?"
-    - If both projectScope and projectType (or service) are filled, ask: "What's the format and length — 30 seconds, 60 seconds, longer? TVC, social, event content?"
-    - If format is known, ask: "What timeline are you working with?"
-    - If timeline is known, ask: "Do you have a rough budget range in mind? (We don't share pricing with our AI but it helps the team prep)."
-    - If budget is known, ask: "Who should we address this brief to — your name and best email?"
+  * For brief-related exchanges: 1-3 sentences focused on the next-missing-field question. ALWAYS end with a follow-up question. The question must target the most useful missing brief field. Pick the question from the NEXT-QUESTION BLOCK below; do NOT pick a question whose field is already filled (the list of filled fields appears at the end of this prompt when any fields have been captured so far).
+__NEXT_QUESTION_BLOCK__
   * When the user replies with a low-information message (e.g., "ok", "yes", "go on"), use the missing-field question from the list above. Do NOT punt to the human team; do NOT say "I'm not sure". Just ask the next missing-field question. NEVER say "I'm not sure about that", "Let me recalibrate", or "Apologies" as filler when the user is in brief mode — these are cop-outs. Capture the LAST field set, then ask the next-missing-field question.
   * When the brief is reviewable (all 8 fields filled AND empty-sentinel discipline preserved), end with: "${REVIEW_PROMPT}".
   * For job-application or non-brief help: respond normally, no brief framing.
@@ -165,13 +220,31 @@ export function buildSystemPrompt(context?: {
   step?: string;
   isTeamConnected?: boolean;
   briefReady?: boolean;
+  capturedFields?: string[];
 }): string {
   const flowContext = context?.step ? `\nCURRENT STEP: ${context.step}` : '';
   const draftContext = context?.draft ? `\nKNOWN PROJECT CONTEXT: ${context.draft}` : '';
   const briefReadyContext = context?.briefReady
     ? `\nBRIEF READY: The brief is already reviewable. End your reply with the review prompt exactly once.`
     : '';
-  return HARD_RULES + flowContext + draftContext + briefReadyContext;
+  const nextQuestionBlock = buildNextQuestionBlock(context?.capturedFields);
+  let parsedDraftValues: Record<string, string> | undefined;
+  if (context?.draft) {
+    try {
+      const parsed = JSON.parse(context.draft);
+      if (parsed && typeof parsed === 'object') {
+        parsedDraftValues = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === 'string') parsedDraftValues[k] = v;
+        }
+      }
+    } catch {
+      // ignore malformed draft
+    }
+  }
+  const alreadyCaptured = buildAlreadyCapturedLine(context?.capturedFields, parsedDraftValues);
+  const rules = HARD_RULES.replace('__NEXT_QUESTION_BLOCK__', nextQuestionBlock);
+  return rules + flowContext + draftContext + briefReadyContext + alreadyCaptured;
 }
 
 export { BALANCE_STUDIO_PROFILE };
