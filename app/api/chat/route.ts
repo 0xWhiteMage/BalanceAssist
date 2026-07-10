@@ -34,7 +34,8 @@ const chatRequestSchema = z.object({
       step: z.string().optional(),
       isTeamConnected: z.boolean().optional(),
       draft: z.string().optional(),
-      sessionId: z.string().optional()
+      sessionId: z.string().optional(),
+      capturedFields: z.array(z.string()).optional()
     })
     .optional()
 });
@@ -343,18 +344,45 @@ type ChatContext = {
   isTeamConnected?: boolean;
   draft?: string;
   sessionId?: string;
+  capturedFields?: string[];
 } | undefined;
+
+const CAPTURED_FIELD_KEYS = [
+  'projectScope',
+  'projectType',
+  'service',
+  'timelineBand',
+  'budgetBand',
+  'contactName',
+  'contactCompany',
+  'contactEmail'
+] as const;
+
+function computeCapturedFieldsFromDraft(draft: Record<string, string>): string[] {
+  const captured: string[] = [];
+  for (const key of CAPTURED_FIELD_KEYS) {
+    const value = draft[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      captured.push(key);
+    }
+  }
+  return captured;
+}
 
 function buildLlmContext(context: ChatContext) {
   const priorDraft = parsePriorDraft(context?.draft);
   const briefReady = isBriefReadyForApproval(priorDraft);
+  const derived = computeCapturedFieldsFromDraft(priorDraft);
+  const explicit = context?.capturedFields ?? [];
+  const capturedFields = Array.from(new Set([...derived, ...explicit]));
   const systemPrompt = buildSystemPrompt({
     isTeamConnected: context?.isTeamConnected,
     step: context?.step,
     draft: context?.draft,
-    briefReady
+    briefReady,
+    capturedFields
   });
-  return { priorDraft, briefReady, systemPrompt };
+  return { priorDraft, briefReady, capturedFields, systemPrompt };
 }
 
 export async function POST(request: Request) {

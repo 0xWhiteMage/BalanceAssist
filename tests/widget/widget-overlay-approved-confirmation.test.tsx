@@ -78,6 +78,7 @@ function mockWidgetFetch() {
           timelineBand: '1-2-months',
           budgetBand: '20k-50k',
           contactName: 'Jayden',
+          contactCompany: 'Acme',
           contactEmail: 'jayden@example.com'
         },
         briefReady: true,

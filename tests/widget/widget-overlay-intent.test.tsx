@@ -126,6 +126,161 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
   });
 });
 
+describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
+  test('request body includes capturedFields array (empty when no draft)', async () => {
+    const chatBodies: Array<{ context: { capturedFields?: string[] } }> = [];
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatBodies.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify({
+            message: 'Got it. What is your timeline?',
+            draftUpdates: {
+              service: 'production',
+              projectType: 'Video',
+              projectScope: '30s animation',
+              scopePolished: '30s animation'
+            },
+            briefReady: false,
+            reviewPrompt: null,
+            missingFields: ['timelineBand', 'budgetBand', 'contactName', 'contactEmail', 'contactCompany']
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(
+          JSON.stringify({ sessionId: 'mock-session', persisted: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/events')) {
+        return new Response('{}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = (await waitFor(() => {
+      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
+      expect(el).toBeInTheDocument();
+      return el;
+    }, { timeout: 4000 })) as HTMLInputElement;
+
+await waitFor(() => {
+      expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
+    }, { timeout: 7000 });
+
+    fireEvent.change(input, { target: { value: 'I want a 30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(chatBodies.length).toBeGreaterThan(0);
+    }, { timeout: 4000 });
+
+    // The /api/chat request body must always include capturedFields as an array.
+    // On the first call, no fields have been captured yet.
+    const ctx = chatBodies[0]?.context;
+    expect(ctx).toBeDefined();
+    expect(Array.isArray(ctx!.capturedFields)).toBe(true);
+    // No fields captured yet on the first turn.
+    expect(ctx!.capturedFields).toEqual([]);
+  }, 10000);
+
+  test('on subsequent /api/chat calls, capturedFields reflects the merged draft from previous LLM responses', async () => {
+    const chatBodies: Array<{ context: { capturedFields?: string[] } }> = [];
+    let callIndex = 0;
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        callIndex += 1;
+        chatBodies.push(JSON.parse(String(init.body)));
+        if (callIndex === 1) {
+          return new Response(
+            JSON.stringify({
+              message: 'Got it. What is your timeline?',
+              draftUpdates: {
+                service: 'production',
+                projectType: 'Video',
+                projectScope: '30s animation',
+                scopePolished: '30s animation'
+              },
+              briefReady: false,
+              reviewPrompt: null,
+              missingFields: ['timelineBand', 'budgetBand', 'contactName', 'contactEmail', 'contactCompany']
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            message: 'Got it. What is your budget?',
+            draftUpdates: {},
+            briefReady: false,
+            reviewPrompt: null,
+            missingFields: ['timelineBand', 'budgetBand', 'contactName', 'contactEmail', 'contactCompany']
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(
+          JSON.stringify({ sessionId: 'mock-session', persisted: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/events')) {
+        return new Response('{}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = (await waitFor(() => {
+      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
+      expect(el).toBeInTheDocument();
+      return el;
+    }, { timeout: 4000 })) as HTMLInputElement;
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
+    }, { timeout: 7000 });
+
+    fireEvent.change(input, { target: { value: 'I want a 30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // Wait for the LLM reply and the draft merge to complete.
+    await waitFor(() => {
+      expect(screen.getByText(/Got it\. What is your timeline\?/i)).toBeInTheDocument();
+    }, { timeout: 4000 });
+
+    // Now send another message; the captured fields should include
+    // projectScope, projectType, and service because the LLM set them
+    // on the previous turn and the widget merged them into the draft.
+    fireEvent.change(input, { target: { value: 'next' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(chatBodies.length).toBeGreaterThanOrEqual(2);
+    }, { timeout: 4000 });
+
+    const ctx2 = chatBodies[1]?.context;
+    expect(ctx2).toBeDefined();
+    expect(Array.isArray(ctx2!.capturedFields)).toBe(true);
+    expect(ctx2!.capturedFields).toContain('projectScope');
+    expect(ctx2!.capturedFields).toContain('projectType');
+    expect(ctx2!.capturedFields).toContain('service');
+    // Timeline, budget, contact still missing.
+    expect(ctx2!.capturedFields).not.toContain('timelineBand');
+    expect(ctx2!.capturedFields).not.toContain('budgetBand');
+  }, 15000);
+});
+
 describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
   test('after the user types a project description and the LLM tool-call sets projectScope, the brief card renders the scope', async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -403,6 +403,64 @@ describe('WorkCardRow drag-to-scroll', () => {
     );
     const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
     const clientWidth = 320;
+    const cardWidth = 200;
+    const gap = 20;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => clientWidth });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => (cardWidth + gap) * 3 + 80 });
+    let scrollLeft = 0;
+    Object.defineProperty(row, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (v: number) => {
+        scrollLeft = v;
+      }
+    });
+
+    // jsdom doesn't implement layout, so mock offsetLeft/offsetWidth on the slide elements.
+    const slides = container.querySelectorAll('[data-card-snap]') as NodeListOf<HTMLElement>;
+    slides.forEach((slide, i) => {
+      Object.defineProperty(slide, 'offsetLeft', { configurable: true, get: () => 40 + i * (cardWidth + gap) });
+      Object.defineProperty(slide, 'offsetWidth', { configurable: true, get: () => cardWidth });
+    });
+
+    fireEvent.scroll(row);
+
+    await waitFor(() => {
+      const slides = screen.getAllByTestId('work-card-slide');
+      expect(slides.length).toBe(3);
+      // activeIndex 0 -> slide 0 full opacity, neighbors faded
+      expect((slides[0] as HTMLElement).style.opacity).toBe('1');
+      expect((slides[1] as HTMLElement).style.opacity).toBe('0.35');
+      expect((slides[2] as HTMLElement).style.opacity).toBe('0.35');
+    });
+
+    // Scroll so that slide 1 is centered: scrollCenter = scrollLeft + clientWidth/2 = scrollLeft + 160.
+    // slide 1's center is at 40 + 1*220 + 100 = 360. So scrollLeft should be 360 - 160 = 200.
+    scrollLeft = 200;
+    fireEvent.scroll(row);
+
+    await waitFor(() => {
+      const slides = screen.getAllByTestId('work-card-slide');
+      expect((slides[1] as HTMLElement).style.opacity).toBe('1');
+      expect((slides[0] as HTMLElement).style.opacity).toBe('0.35');
+      expect((slides[2] as HTMLElement).style.opacity).toBe('0.35');
+    });
+  });
+
+  test('center card is the lit one when scrolled to an offset that does not align with page boundaries', async () => {
+    const { container } = render(
+      <WorkCardRow
+        entries={[
+          { entry: baseEntry, category: 'reference' },
+          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' },
+          { entry: { ...baseEntry, slug: 'f1', title: 'F1', url: 'https://www.balancestudio.tv/f1' }, category: 'pitch' }
+        ]}
+      />
+    );
+    const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
+    const clientWidth = 320;
+    const cardWidth = 100;
+    const gap = 14;
     Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => clientWidth });
     Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => clientWidth * 3 });
     let scrollLeft = 0;
@@ -413,26 +471,26 @@ describe('WorkCardRow drag-to-scroll', () => {
         scrollLeft = v;
       }
     });
-    fireEvent.scroll(row);
 
-    await waitFor(() => {
-      const slides = screen.getAllByTestId('work-card-slide');
-      expect(slides.length).toBe(3);
-      // activePage 0 -> slide 0 full opacity, neighbors faded
-      expect((slides[0] as HTMLElement).style.opacity).toBe('1');
-      expect((slides[1] as HTMLElement).style.opacity).toBe('0.35');
-      expect((slides[2] as HTMLElement).style.opacity).toBe('0.35');
+    const slides = container.querySelectorAll('[data-card-snap]') as NodeListOf<HTMLElement>;
+    slides.forEach((slide, i) => {
+      Object.defineProperty(slide, 'offsetLeft', { configurable: true, get: () => 40 + i * (cardWidth + gap) });
+      Object.defineProperty(slide, 'offsetWidth', { configurable: true, get: () => cardWidth });
     });
 
-    // Scroll to center the second card (page 1).
-    scrollLeft = clientWidth;
+    // Scroll so that the second card is centered. cardCenter for slide 1 = 40 + 114 + 50 = 204.
+    // To make it the closest to scrollCenter = scrollLeft + 160, set scrollLeft so that
+    // 204 ≈ scrollLeft + 160 → scrollLeft = 44.
+    scrollLeft = 44;
     fireEvent.scroll(row);
 
     await waitFor(() => {
       const slides = screen.getAllByTestId('work-card-slide');
+      // slide 1 is the closest to the viewport center
       expect((slides[1] as HTMLElement).style.opacity).toBe('1');
-      expect((slides[0] as HTMLElement).style.opacity).toBe('0.35');
-      expect((slides[2] as HTMLElement).style.opacity).toBe('0.35');
+      expect((slides[0] as HTMLElement).getAttribute('data-active')).toBe('false');
+      expect((slides[1] as HTMLElement).getAttribute('data-active')).toBe('true');
+      expect((slides[2] as HTMLElement).getAttribute('data-active')).toBe('false');
     });
   });
 });

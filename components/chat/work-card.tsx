@@ -185,9 +185,10 @@ export function WorkCardRow({
   const rowRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [scrollMetrics, setScrollMetrics] = useState<{ pageCount: number; activePage: number }>({
+  const [scrollMetrics, setScrollMetrics] = useState<{ pageCount: number; activePage: number; activeIndex: number }>({
     pageCount: 1,
-    activePage: 0
+    activePage: 0,
+    activeIndex: 0
   });
   const [rowWidth, setRowWidth] = useState<number>(0);
 
@@ -310,7 +311,7 @@ export function WorkCardRow({
       const clientWidth = el.clientWidth;
       const scrollWidth = el.scrollWidth;
       if (clientWidth <= 0) {
-        setScrollMetrics({ pageCount: 1, activePage: 0 });
+        setScrollMetrics({ pageCount: 1, activePage: 0, activeIndex: 0 });
         setRowWidth(0);
         return;
       }
@@ -319,7 +320,30 @@ export function WorkCardRow({
         pageCount - 1,
         Math.max(0, Math.round(el.scrollLeft / clientWidth))
       );
-      setScrollMetrics({ pageCount, activePage });
+
+      // Compute the centered-card index. The active card is the one whose
+      // center is closest to the carousel's viewport center, NOT the
+      // leftmost-visible page. This handles padding, partial cards, and
+      // gaps correctly.
+      const cardEls = el.querySelectorAll('[data-card-snap]');
+      let activeIndex = activePage;
+      if (cardEls.length > 0) {
+        const scrollCenter = el.scrollLeft + el.clientWidth / 2;
+        let bestIndex = 0;
+        let bestDist = Infinity;
+        for (let i = 0; i < cardEls.length; i++) {
+          const cardEl = cardEls[i] as HTMLElement;
+          const cardCenter = cardEl.offsetLeft + cardEl.offsetWidth / 2;
+          const dist = Math.abs(cardCenter - scrollCenter);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIndex = i;
+          }
+        }
+        activeIndex = Math.min(cardEls.length - 1, Math.max(0, bestIndex));
+      }
+
+      setScrollMetrics({ pageCount, activePage, activeIndex });
       setRowWidth(clientWidth);
     }
 
@@ -359,7 +383,7 @@ export function WorkCardRow({
   const isOverflowing = scrollMetrics.pageCount > 1 && rowWidth > 0;
   const canPrev = scrollMetrics.activePage > 0;
   const canNext = scrollMetrics.activePage < scrollMetrics.pageCount - 1;
-  const isActivePage = (index: number) => index === scrollMetrics.activePage;
+  const isActivePage = (index: number) => index === scrollMetrics.activeIndex;
   return (
     <div
       data-testid="work-card-carousel"
@@ -433,6 +457,8 @@ export function WorkCardRow({
         {entries.map(({ entry, category }, index) => (
           <div
             key={entry.slug}
+            data-card-snap
+            data-card-index={index}
             data-testid="work-card-slide"
             data-active={isActivePage(index) ? 'true' : 'false'}
             style={{

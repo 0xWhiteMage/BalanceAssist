@@ -73,6 +73,125 @@ describe('POST /api/chat', () => {
     return { res, data: await res.json() };
   }
 
+  test('when timelineBand is already captured, the LLM system prompt does NOT include the timeline question', async () => {
+    let capturedSystemPrompt = '';
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const systemMessage = body.messages?.find((m: { role: string }) => m.role === 'system');
+      capturedSystemPrompt = systemMessage?.content ?? '';
+      return makeToolCallResponse(
+        'Got it — what budget range works for you?',
+        'record_brief_updates',
+        JSON.stringify({
+          service: 'production',
+          projectType: 'Video',
+          projectScope: '30s animation',
+          scopePolished: '30s animation',
+          timelineBand: '3 weeks',
+          budgetBand: '',
+          contactEmail: '',
+          contactName: '',
+          contactCompany: ''
+        })
+      );
+    }) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res } = await postChat({
+      messages: [{ role: 'user', content: '3 weeks timeline, my name is Jayden' }],
+      context: {
+        step: 'timeline',
+        draft: JSON.stringify({
+          service: 'production',
+          projectType: 'Video',
+          projectScope: '30s animation',
+          timelineBand: '3 weeks'
+        }),
+        capturedFields: ['projectScope', 'projectType', 'service', 'timelineBand']
+      }
+    });
+
+    expect(res.status).toBe(200);
+    // The LLM system prompt must include the captured-fields summary.
+    expect(capturedSystemPrompt).toMatch(/ALREADY CAPTURED/i);
+    expect(capturedSystemPrompt).toMatch(/timelineBand\s*=\s*3 weeks/);
+    // The LLM system prompt must NOT include the timeline question text,
+    // because that field is already captured.
+    expect(capturedSystemPrompt).not.toMatch(/What timeline are you working with\?/);
+  });
+
+  test('when no fields are captured, the LLM system prompt includes the first-question template (full list)', async () => {
+    let capturedSystemPrompt = '';
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const systemMessage = body.messages?.find((m: { role: string }) => m.role === 'system');
+      capturedSystemPrompt = systemMessage?.content ?? '';
+      return makeToolCallResponse(
+        "Got it. Tell me about the project.",
+        'record_brief_updates',
+        JSON.stringify({
+          service: '',
+          projectScope: '',
+          timelineBand: '',
+          budgetBand: '',
+          contactEmail: '',
+          contactName: '',
+          contactCompany: '',
+          projectType: ''
+        })
+      );
+    }) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res } = await postChat({
+      messages: [{ role: 'user', content: 'I want to talk about a project' }],
+      context: {
+        step: 'intro',
+        draft: '{}',
+        capturedFields: []
+      }
+    });
+
+    expect(res.status).toBe(200);
+    // No ALREADY CAPTURED line when nothing is captured.
+    expect(capturedSystemPrompt).not.toMatch(/ALREADY CAPTURED/i);
+    // The full template of next-question rules is present so the LLM can pick the right one.
+    expect(capturedSystemPrompt).toMatch(/What timeline are you working with\?/);
+  });
+
+  test('capturedFields is optional in the request schema', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'Got it.',
+      'record_brief_updates',
+      JSON.stringify({
+        service: 'production',
+        projectScope: '30s animation',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactEmail: 'tool@example.com',
+        contactName: 'Tool',
+        contactCompany: 'Acme',
+        projectType: 'Video',
+        scopePolished: '30s animation'
+      })
+    )) as unknown as typeof fetch;
+
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'I have a 30s animation for Acme, my name is Tool, email tool@example.com' }],
+      context: { step: 'intro', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.briefReady).toBe(true);
+  });
+
   test('returns draft updates, briefReady, and reviewPrompt from a tool call', async () => {
     global.fetch = vi.fn(async () => makeToolCallResponse(
       'Got it.',
@@ -84,7 +203,7 @@ describe('POST /api/chat', () => {
         budgetBand: '20k-50k',
         contactEmail: 'tool@example.com',
         contactName: 'Tool',
-        contactCompany: '',
+        contactCompany: 'Acme',
         projectType: 'Video',
         scopePolished: '30s animation'
       })
@@ -94,7 +213,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: 'I have a 30s animation, my name is Tool' }],
+      messages: [{ role: 'user', content: 'I have a 30s animation for Acme, my name is Tool, email tool@example.com' }],
       context: { step: 'intro', draft: '{}' }
     });
 
@@ -337,7 +456,7 @@ describe('POST /api/chat', () => {
             budgetBand: '20k-50k',
             contactEmail: 'tool@example.com',
             contactName: 'Tool',
-            contactCompany: ''
+            contactCompany: 'Acme'
           })
         },
         {
@@ -351,7 +470,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: '30s animation with mood reference, my name is Tool' }],
+      messages: [{ role: 'user', content: '30s animation for Acme with mood reference, my name is Tool, email tool@example.com' }],
       context: { step: 'intro', draft: '{}' }
     });
 
