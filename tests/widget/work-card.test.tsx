@@ -98,7 +98,7 @@ describe('WorkCardRow', () => {
     expect(screen.getAllByTestId('work-card')).toHaveLength(2);
   });
 
-  test('uses horizontal scroll-snap on the row so cards snap to the start', () => {
+  test('uses horizontal scroll-snap (mandatory) on the row and center-aligns each card slide', () => {
     render(
       <WorkCardRow
         entries={[
@@ -111,15 +111,15 @@ describe('WorkCardRow', () => {
       />
     );
     const row = screen.getByTestId('work-card-row');
-    expect(row.style.scrollSnapType).not.toBe('x mandatory');
-    expect(row.style.scrollSnapType === '' || row.style.scrollSnapType === 'x proximity').toBe(true);
-    const cards = screen.getAllByTestId('work-card');
-    for (const card of cards) {
-      expect(card.style.scrollSnapAlign).toBe('start');
+    expect(row.style.scrollSnapType).toBe('x mandatory');
+    const slides = screen.getAllByTestId('work-card-slide');
+    expect(slides.length).toBe(2);
+    for (const slide of slides) {
+      expect((slide as HTMLElement).style.scrollSnapAlign).toBe('center');
     }
   });
 
-  test('row has a 14px gap and 12px vertical padding for touch comfort', () => {
+  test('row has a 14px gap and horizontal padding so side cards peek through', () => {
     render(
       <WorkCardRow
         entries={[{ entry: baseEntry, category: 'reference' }]}
@@ -127,7 +127,7 @@ describe('WorkCardRow', () => {
     );
     const row = screen.getByTestId('work-card-row');
     expect(row.style.gap).toBe('14px');
-    expect(row.style.padding).toBe('12px 0px');
+    expect(row.style.padding).toBe('12px 40px');
   });
 
   test('row no longer renders a fade gradient overlay', () => {
@@ -369,7 +369,7 @@ describe('WorkCardRow drag-to-scroll', () => {
     expect(callArgs!.behavior).not.toBe('smooth');
   });
 
-  test('row does NOT render any dot indicators (replaced with swipe hint)', () => {
+  test('row does NOT render any dot indicators or a swipe hint (faded side cards are the cue)', () => {
     render(
       <WorkCardRow
         entries={[
@@ -379,8 +379,8 @@ describe('WorkCardRow drag-to-scroll', () => {
         ]}
       />
     );
-    // Force the overflow computation to run with non-zero dimensions so the
-    // swipe hint would actually render. Even then, no dots should appear.
+    // Force the overflow computation to run with non-zero dimensions. The faded
+    // neighbor cards are the affordance now — no dots or swipe hint render.
     const row = screen.getByTestId('work-card-row') as HTMLDivElement;
     Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => 600 });
     Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => 1800 });
@@ -388,39 +388,10 @@ describe('WorkCardRow drag-to-scroll', () => {
 
     expect(screen.queryByTestId('work-card-row-dots')).toBeNull();
     expect(screen.queryAllByTestId('work-card-row-dot')).toHaveLength(0);
+    expect(screen.queryByTestId('work-card-row-swipe-hint')).toBeNull();
   });
 
-  test('row renders a swipe-hint element when content overflows and the user has not scrolled yet', async () => {
-    const { container } = render(
-      <WorkCardRow
-        entries={[
-          { entry: baseEntry, category: 'reference' },
-          { entry: { ...baseEntry, slug: 'razer', title: 'Razer', url: 'https://www.balancestudio.tv/razer' }, category: 'pitch' },
-          { entry: { ...baseEntry, slug: 'f1', title: 'F1', url: 'https://www.balancestudio.tv/f1' }, category: 'pitch' }
-        ]}
-      />
-    );
-    // jsdom defaults clientWidth to 0; the row's resize observer fires on
-    // mount, so we have to mutate the underlying element to make the row
-    // "overflow" before we look for the swipe hint.
-    const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
-    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => 600 });
-    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => 1800 });
-    let scrollLeft = 0;
-    Object.defineProperty(row, 'scrollLeft', {
-      configurable: true,
-      get: () => scrollLeft,
-      set: (v: number) => {
-        scrollLeft = v;
-      }
-    });
-    fireEvent.scroll(row);
-    await waitFor(() => {
-      expect(screen.getByTestId('work-card-row-swipe-hint')).toBeInTheDocument();
-    });
-  });
-
-  test('swipe-hint fades out (is removed) once the user has scrolled', async () => {
+  test('card slide opacity reflects the active page (centered card full, neighbors faded)', async () => {
     const { container } = render(
       <WorkCardRow
         entries={[
@@ -431,8 +402,9 @@ describe('WorkCardRow drag-to-scroll', () => {
       />
     );
     const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
-    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => 600 });
-    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => 1800 });
+    const clientWidth = 320;
+    Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => clientWidth });
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => clientWidth * 3 });
     let scrollLeft = 0;
     Object.defineProperty(row, 'scrollLeft', {
       configurable: true,
@@ -442,21 +414,31 @@ describe('WorkCardRow drag-to-scroll', () => {
       }
     });
     fireEvent.scroll(row);
+
     await waitFor(() => {
-      expect(screen.getByTestId('work-card-row-swipe-hint')).toBeInTheDocument();
+      const slides = screen.getAllByTestId('work-card-slide');
+      expect(slides.length).toBe(3);
+      // activePage 0 -> slide 0 full opacity, neighbors faded
+      expect((slides[0] as HTMLElement).style.opacity).toBe('1');
+      expect((slides[1] as HTMLElement).style.opacity).toBe('0.35');
+      expect((slides[2] as HTMLElement).style.opacity).toBe('0.35');
     });
 
-    // Simulate the user scrolling — the swipe hint should disappear.
-    scrollLeft = 50;
+    // Scroll to center the second card (page 1).
+    scrollLeft = clientWidth;
     fireEvent.scroll(row);
+
     await waitFor(() => {
-      expect(screen.queryByTestId('work-card-row-swipe-hint')).toBeNull();
+      const slides = screen.getAllByTestId('work-card-slide');
+      expect((slides[1] as HTMLElement).style.opacity).toBe('1');
+      expect((slides[0] as HTMLElement).style.opacity).toBe('0.35');
+      expect((slides[2] as HTMLElement).style.opacity).toBe('0.35');
     });
   });
 });
 
-describe('WorkCardRow magnetic snap is instant (no smooth scroll, no mandatory snap)', () => {
-  test('row uses scroll-snap-type: x proximity (NOT mandatory) so drag-only motion stays predictable', () => {
+describe('WorkCardRow magnetic snap is instant (no smooth scroll)', () => {
+  test('row uses scroll-snap-type: x mandatory so cards center reliably', () => {
     const { container } = render(
       <WorkCardRow
         entries={[
@@ -466,8 +448,7 @@ describe('WorkCardRow magnetic snap is instant (no smooth scroll, no mandatory s
       />
     );
     const row = container.querySelector('[data-testid="work-card-row"]') as HTMLDivElement;
-    expect(row.style.scrollSnapType).not.toBe('x mandatory');
-    expect(['x proximity', ''].includes(row.style.scrollSnapType)).toBe(true);
+    expect(row.style.scrollSnapType).toBe('x mandatory');
   });
 
   test('drag + release triggers scrollTo with behavior: "auto" (instant magnetic snap, no smooth scroll)', () => {
