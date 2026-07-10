@@ -1,7 +1,7 @@
 import { finalizeLeadPayloadSchema } from '@/lib/api/contracts';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { editForumTopic, sendTelegramMessage } from '@/lib/telegram';
+import { editForumTopic, ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
 import { buildTopicName, TOPIC_STATUS_COLOR, topicStatusFromQualification } from '@/lib/conversation/topic-status';
 
 export async function OPTIONS() {
@@ -101,6 +101,7 @@ export async function POST(request: Request) {
     .eq('id', sessionId);
 
   let telegramSent = false;
+  const shortId = sessionId.slice(0, 8);
 
   try {
     const { data: sessionRow } = await supabase
@@ -115,12 +116,21 @@ export async function POST(request: Request) {
       contact_company?: string | null;
     } | null;
 
-    if (!snap?.telegram_thread_id) {
+    const threadId = snap?.telegram_thread_id
+      ? snap.telegram_thread_id
+      : await ensureTelegramTopic(
+          supabase,
+          sessionId,
+          snap?.contact_name ?? leadDraft?.contactName ?? null,
+          snap?.contact_company ?? leadDraft?.contactCompany ?? null,
+          shortId
+        );
+
+    if (!threadId) {
       console.warn('[leads-finalize] No Telegram thread id for session', sessionId);
     }
 
-    if (snap?.telegram_thread_id) {
-      const shortId = sessionId.slice(0, 8);
+    if (threadId && snap) {
       const topicStatus = topicStatusFromQualification(qualificationStatus);
       const name = buildTopicName(
         snap.contact_name ?? leadDraft?.contactName ?? null,
@@ -129,14 +139,14 @@ export async function POST(request: Request) {
         topicStatus
       );
 
-      const updated = await editForumTopic(snap.telegram_thread_id, name, {
+      const updated = await editForumTopic(threadId, name, {
         iconColor: TOPIC_STATUS_COLOR[topicStatus]
       });
 
       if (updated) {
         console.log('[leads-finalize] Renamed topic on finalize', {
           sessionId,
-          threadId: snap.telegram_thread_id,
+          threadId,
           name,
           topicStatus
         });
@@ -169,7 +179,7 @@ export async function POST(request: Request) {
       }
 
       try {
-        const result = await sendTelegramMessage(messageParts.join('\n'), { threadId: snap.telegram_thread_id });
+        const result = await sendTelegramMessage(messageParts.join('\n'), { threadId });
         telegramSent = Boolean(result);
       } catch (error) {
         console.warn('[leads-finalize] failed to send approval notification', { sessionId, error });

@@ -99,25 +99,39 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
   }
 
   if (isBot) {
+    const hasText = Boolean(message.text?.trim());
+    const hasAttachment = Boolean(message.attachment);
+    const hasInlineCards = Boolean(message.inlineCards?.length);
+    const hasSharedWork = Boolean(message.sharedWork?.entries?.length);
+    const showBubble = hasText || hasAttachment;
+
     return (
       <div style={{ display: 'flex', gap: '8px', flexDirection: 'column', alignItems: 'flex-start' }}>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-          <BotAvatar />
-          <div
-            style={{
-              maxWidth: '280px',
-              padding: '12px 16px',
-              borderRadius: '16px 16px 16px 4px',
-              background: message.isDisclaimer ? 'rgba(219, 181, 128, 0.08)' : 'rgba(255, 255, 255, 0.06)',
-              border: `1px solid ${message.isDisclaimer ? brandTokens.colors.border : brandTokens.colors.subtleBorder}`,
-              fontSize: '13px',
-              lineHeight: 1.6,
-              color: brandTokens.colors.lightText
-            }}
-          >
-            {renderText(message.text)}
+        {showBubble && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+            <BotAvatar />
+            <div
+              style={{
+                maxWidth: '280px',
+                padding: '12px 16px',
+                borderRadius: '16px 16px 16px 4px',
+                background: message.isDisclaimer ? 'rgba(219, 181, 128, 0.08)' : 'rgba(255, 255, 255, 0.06)',
+                border: `1px solid ${message.isDisclaimer ? brandTokens.colors.border : brandTokens.colors.subtleBorder}`,
+                fontSize: '13px',
+                lineHeight: 1.6,
+                color: brandTokens.colors.lightText
+              }}
+            >
+              {renderText(message.text)}
+            </div>
           </div>
-        </div>
+        )}
+
+        {!showBubble && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+            <BotAvatar />
+          </div>
+        )}
 
         {message.attachment && (
           <div

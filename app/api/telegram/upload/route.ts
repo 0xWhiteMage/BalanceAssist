@@ -1,6 +1,6 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { sendDocument } from '@/lib/telegram';
+import { ensureTelegramTopic, sendDocument } from '@/lib/telegram';
 import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
@@ -61,11 +61,11 @@ export async function POST(request: Request) {
 
   const { data: sessionRow } = await supabase
     .from('sessions')
-    .select('telegram_thread_id, file_request_open')
+    .select('telegram_thread_id, file_request_open, contact_name, contact_company')
     .eq('id', sessionId)
     .maybeSingle();
 
-  const session = sessionRow as { telegram_thread_id?: number | null; file_request_open?: boolean } | null;
+  const session = sessionRow as { telegram_thread_id?: number | null; file_request_open?: boolean; contact_name?: string | null; contact_company?: string | null } | null;
   if (!session) {
     return jsonWithCors({ ok: false, error: 'Session not found' }, { status: 404 });
   }
@@ -74,6 +74,11 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'File upload has not been requested by the team' }, { status: 403 });
   }
 
+  const shortId = sessionId.slice(0, 8);
+  const threadId = session.telegram_thread_id
+    ? session.telegram_thread_id
+    : await ensureTelegramTopic(supabase, sessionId, session.contact_name ?? null, session.contact_company ?? null, shortId);
+
   let lastTelegramFileId: string | null = null;
   let uploadedCount = 0;
   let extractedText = '';
@@ -81,7 +86,7 @@ export async function POST(request: Request) {
   for (const file of files) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const caption = `${file.name} (${kind})`;
-    const result = await sendDocument(session.telegram_thread_id ?? null, buffer, caption, file.name);
+    const result = await sendDocument(threadId, buffer, caption, file.name);
 
     if (!result.ok) {
       return jsonWithCors(
