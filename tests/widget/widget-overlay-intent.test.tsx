@@ -196,3 +196,88 @@ describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
     );
   });
 });
+
+describe('intake short replies stay on the LLM path', () => {
+  test('sending "ok" during the service step calls /api/chat again and skips the scripted summary', async () => {
+    const chatCalls: Array<{ step: string }> = [];
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        chatCalls.push({ step: body.context.step });
+
+        if (chatCalls.length === 1) {
+          return new Response(
+            JSON.stringify({
+              message: 'Got it. What kind of support do you need from Balance Studio?',
+              draftUpdates: {
+                projectScope: '30s animation for social media',
+                scopePolished: '30s animation for social media'
+              },
+              briefReady: false,
+              reviewPrompt: null,
+              missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            message: 'No problem. Tell me the kind of support you are exploring and I will shape it with you.',
+            draftUpdates: {},
+            briefReady: false,
+            reviewPrompt: null,
+            missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(
+          JSON.stringify({ sessionId: 'mock-session', persisted: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/events')) {
+        return new Response('{}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = (await waitFor(() => {
+      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
+      expect(el).toBeInTheDocument();
+      return el;
+    }, { timeout: 4000 })) as HTMLInputElement;
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
+    }, { timeout: 7000 });
+
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(screen.getByText(/What kind of support do you need/i)).toBeInTheDocument();
+    }, { timeout: 4000 });
+
+    fireEvent.change(input, { target: { value: 'ok' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(chatCalls).toHaveLength(2);
+    }, { timeout: 4000 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/No problem\. Tell me the kind of support you are exploring/i)
+      ).toBeInTheDocument();
+    }, { timeout: 4000 });
+
+    expect(screen.queryByText(/So far I have:/i)).toBeNull();
+  }, 10000);
+});

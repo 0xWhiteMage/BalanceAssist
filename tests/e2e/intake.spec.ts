@@ -21,6 +21,74 @@ import { test, expect } from '@playwright/test';
 // appears after the AI confirms project intent.
 
 test.describe('balance assist intake via persistent rail', () => {
+  test('short intake confirmations do not fall back to the scripted summary flow', async ({ page }) => {
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessionId: 'mock-session-id',
+          persisted: true
+        })
+      });
+    });
+
+    let chatCallCount = 0;
+    await page.route('**/api/chat', async (route) => {
+      chatCallCount += 1;
+
+      if (chatCallCount === 1) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            message: 'Got it. What kind of support do you need from Balance Studio?',
+            draftUpdates: {
+              projectScope: '30s animation for social media',
+              scopePolished: '30s animation for social media'
+            },
+            briefReady: false,
+            reviewPrompt: null,
+            missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
+          })
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          message: 'No problem. Tell me the kind of support you are exploring and I will shape it with you.',
+          draftUpdates: {},
+          briefReady: false,
+          reviewPrompt: null,
+          missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
+        })
+      });
+    });
+
+    await page.goto('/preview');
+
+    const input = page.getByPlaceholder(/Type your message|Message the team/i);
+    await expect(input).toBeVisible();
+    await expect(page.getByText(/What can I help you with today\?/i)).toBeVisible();
+
+    await input.fill('30s animation for social media');
+    await input.press('Enter');
+
+    await expect(page.getByText(/What kind of support do you need from Balance Studio/i)).toBeVisible({ timeout: 5000 });
+
+    await input.fill('ok');
+    await input.press('Enter');
+
+    await expect(
+      page.getByText(/No problem\. Tell me the kind of support you are exploring and I will shape it with you\./i)
+    ).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/So far I have/i)).toHaveCount(0);
+    expect(chatCallCount).toBe(2);
+  });
+
   test('rail is gated on hasProjectIntent, then auto-switches to summary and triggers send', async ({ page }) => {
     // Mock /api/sessions so ensureSession() inside the widget can resolve
     // when the user clicks "Approve & send to team".
