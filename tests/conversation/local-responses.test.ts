@@ -14,16 +14,14 @@ test('routes past-work questions through the LLM path', () => {
   expect(reply).toBeNull();
 });
 
-test('help response lists the three supported capabilities without a handoff push', () => {
+test('routes generic help prompts through the LLM path', () => {
   const reply = getLocalResponse('help me', {
     draft: {} as never,
     step: 'free-chat',
     isTeamConnected: false
   });
 
-  expect(reply).toBe(
-    'I can help with three things: understanding Balance Studio, shaping a project brief for our team, or helping you apply to work here. What would you like to do?'
-  );
+  expect(reply).toBeNull();
 });
 
 test('refuses prompt-injection attempts', () => {

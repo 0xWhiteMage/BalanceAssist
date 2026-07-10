@@ -61,28 +61,12 @@ const intents: LocalIntent[] = [
     response: "I've cleared my memory of this project. We can start fresh whenever you're ready."
   },
   {
-    patterns: [/what.*your.*name|who.*are.*you|what.*are.*you.*called|your.*name/i],
-    response: "I'm **Balance Assist** — Balance Studio's intelligent AI agent. I help guide project inquiries, answer questions about our services, and connect you with the right people on our team."
-  },
-  {
     patterns: [/are.*you.*(?:bot|ai|robot|machine)|is.*this.*(?:bot|ai|automated)|are.*you.*real|are.*you.*human|am.*i.*talking.*to.*(?:bot|ai|human|person)/i],
     response: "I'm an AI assistant, not a human — but I'm designed to be genuinely helpful. If you'd ever like to speak with a person, just say \"talk to a human\" and I'll connect you right away."
   },
   {
-    patterns: [/what.*model|which.*model|what.*llm|are.*you.*gpt|are.*you.*chatgpt|are.*you.*claude|what.*ai.*model/i],
-    response: "I'm Balance Assist, the AI assistant supporting Balance Studio's project intake and handoff flow. My job is to help gather the brief clearly and route it to the right human producer."
-  },
-  {
-    patterns: [/what.*can.*you.*do|how.*does.*this.*work|what.*do.*you.*do|how.*can.*you.*help|help.*me(?:\s|$)/i],
-    response: 'I can help with three things: understanding Balance Studio, shaping a project brief for our team, or helping you apply to work here. What would you like to do?'
-  },
-  {
     patterns: [/talk.*to.*human|speak.*to.*human|real.*person|human.*agent|connect.*team|i.*want.*to.*talk.*to.*someone|connect.*me/i],
     response: "Of course! I'll connect you with our team right away."
-  },
-  {
-    patterns: [/where.*based|where.*located|where.*are.*you|what.*country|singapore/i],
-    response: "Balance Studio is based in Singapore. We work with clients across Asia Pacific and beyond."
   },
   {
     patterns: [/contact|email|phone|reach|call.*you/i],

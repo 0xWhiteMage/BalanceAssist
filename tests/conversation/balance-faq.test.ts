@@ -3,7 +3,7 @@ import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
 
 describe('getBalanceFaqResponse', () => {
   test('matches the company overview prompt', () => {
-    const reply = getBalanceFaqResponse('Can you tell me about Balance Studio?');
+    const reply = getBalanceFaqResponse('Tell me about the company.');
 
     expect(reply?.messages).toHaveLength(2);
     expect(reply?.messages[0]).toMatch(/Singapore-based, full-service video and creative production house/i);
