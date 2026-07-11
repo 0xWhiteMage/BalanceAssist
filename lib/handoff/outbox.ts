@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { createServerSupabaseClient, type SupabaseServerClient } from '@/lib/supabase/server';
+import { getMaxRetries, getRetryDelay, shouldEscalate, type HandoffSLA } from '@/lib/handoff/sla';
 
 export type HandoffOutcome = {
   persisted: boolean;
@@ -97,31 +98,42 @@ export async function markDelivered(
 export async function markFailed(
   supabase: SupabaseServerClient,
   handoffId: string,
-  error: string
-): Promise<void> {
+  error: string,
+  sla?: HandoffSLA
+): Promise<{ shouldRetry: boolean; escalated: boolean; retryDelayMs: number }> {
+  const maxRetries = getMaxRetries(sla);
+
+  const { data: row } = await supabase
+    .from('handoff_outbox')
+    .select('attempts, created_at')
+    .eq('id', handoffId)
+    .maybeSingle();
+
+  const currentAttempts = ((row as { attempts: number } | null)?.attempts ?? 0) + 1;
+  const createdAt = (row as { created_at: string } | null)?.created_at ?? new Date().toISOString();
+  const escalated = shouldEscalate(createdAt, sla);
+
   await supabase
     .from('handoff_outbox')
     .update({
       state: 'failed',
       last_error: error,
-      attempts: supabase.rpc ? undefined : undefined, // will use raw increment
+      attempts: currentAttempts,
       updated_at: new Date().toISOString()
     })
     .eq('id', handoffId);
 
-  // Increment attempts
-  const { data: row } = await supabase
-    .from('handoff_outbox')
-    .select('attempts')
-    .eq('id', handoffId)
-    .maybeSingle();
-
-  if (row) {
+  if (escalated) {
     await supabase
       .from('handoff_outbox')
-      .update({ attempts: ((row as { attempts: number }).attempts ?? 0) + 1 })
+      .update({ state: 'escalated' })
       .eq('id', handoffId);
   }
+
+  const shouldRetry = !escalated && currentAttempts < maxRetries;
+  const retryDelayMs = shouldRetry ? getRetryDelay(currentAttempts, sla) : 0;
+
+  return { shouldRetry, escalated, retryDelayMs };
 }
 
 export async function getPendingHandoffs(

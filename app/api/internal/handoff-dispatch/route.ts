@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { getPendingHandoffs, markDelivered, markFailed } from '@/lib/handoff/outbox';
 import { sendTelegramMessage } from '@/lib/telegram';
+import { getMaxRetries, shouldEscalate, type HandoffSLA } from '@/lib/handoff/sla';
 
 export async function POST(request: Request) {
   // Basic auth check — only internal callers should hit this
@@ -26,8 +27,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Supabase client failed' }, { status: 503 });
   }
 
+  const sla: HandoffSLA = {
+    maxRetryAttempts: getMaxRetries(),
+    retryBackoffMs: [1000, 5000, 15000],
+    escalationThresholdMs: 300_000,
+  };
+
   const pending = await getPendingHandoffs(supabase, 5);
-  const results: Array<{ id: string; status: string }> = [];
+  const results: Array<{ id: string; status: string; escalated?: boolean; retryDelayMs?: number }> = [];
 
   for (const handoff of pending) {
     try {
@@ -42,17 +49,48 @@ export async function POST(request: Request) {
           await markDelivered(supabase, handoff.id);
           results.push({ id: handoff.id, status: 'sent' });
         } else {
-          await markFailed(supabase, handoff.id, 'Telegram send failed');
-          results.push({ id: handoff.id, status: 'failed' });
+          const outcome = await markFailed(supabase, handoff.id, 'Telegram send failed', sla);
+          console.warn('[handoff-dispatch] Send failed', {
+            handoffId: handoff.id,
+            escalated: outcome.escalated,
+            shouldRetry: outcome.shouldRetry,
+            retryDelayMs: outcome.retryDelayMs,
+          });
+          results.push({
+            id: handoff.id,
+            status: outcome.escalated ? 'escalated' : 'failed',
+            escalated: outcome.escalated,
+            retryDelayMs: outcome.retryDelayMs,
+          });
         }
       } else {
-        await markFailed(supabase, handoff.id, `Unknown handoff type: ${payload.type}`);
-        results.push({ id: handoff.id, status: 'failed' });
+        const outcome = await markFailed(supabase, handoff.id, `Unknown handoff type: ${payload.type}`, sla);
+        console.warn('[handoff-dispatch] Unknown type', {
+          handoffId: handoff.id,
+          type: payload.type,
+          escalated: outcome.escalated,
+        });
+        results.push({
+          id: handoff.id,
+          status: outcome.escalated ? 'escalated' : 'failed',
+          escalated: outcome.escalated,
+          retryDelayMs: outcome.retryDelayMs,
+        });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      await markFailed(supabase, handoff.id, message);
-      results.push({ id: handoff.id, status: 'failed' });
+      const outcome = await markFailed(supabase, handoff.id, message, sla);
+      console.error('[handoff-dispatch] Error processing handoff', {
+        handoffId: handoff.id,
+        error: message,
+        escalated: outcome.escalated,
+      });
+      results.push({
+        id: handoff.id,
+        status: outcome.escalated ? 'escalated' : 'failed',
+        escalated: outcome.escalated,
+        retryDelayMs: outcome.retryDelayMs,
+      });
     }
   }
 
