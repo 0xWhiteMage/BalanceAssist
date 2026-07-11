@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { MessageBubble } from '@/components/chat/message-bubble';
 import { CalendlyEmbed } from '@/components/chat/calendly-embed';
@@ -196,6 +196,8 @@ export function WidgetOverlay({
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
+  const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
+  const [isMobile, setIsMobile] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -381,6 +383,61 @@ export function WidgetOverlay({
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [attachmentOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(max-width: 639px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  const widgetContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (isMobile) return;
+
+    const container = widgetContainerRef.current;
+    if (!container) return;
+
+    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    const firstFocusable = container.querySelector<HTMLElement>(focusableSelector);
+    if (firstFocusable) {
+      firstFocusable.focus();
+    }
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        handleClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+
+      const focusables = Array.from(container!.querySelectorAll<HTMLElement>(focusableSelector));
+      if (focusables.length === 0) return;
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isMobile]);
 
   useEffect(() => {
     return () => {
@@ -1152,11 +1209,14 @@ const startConversation = useCallback(async () => {
     >
       {isOpen && (
         <div
+          ref={widgetContainerRef}
+          role="dialog"
+          aria-label="Balance Assist"
           style={{
             position: 'absolute',
             bottom: '72px',
             right: '0px',
-            width: getWidgetWidth({ isTeamConnected, hasProjectIntent }),
+            width: isMobile ? 'min(380px, calc(100vw - 24px))' : getWidgetWidth({ isTeamConnected, hasProjectIntent }),
             height: 'min(580px, calc(100vh - 120px))',
             display: 'flex',
             flexDirection: 'column',
@@ -1190,6 +1250,64 @@ const startConversation = useCallback(async () => {
 
           <WidgetOverlayHeader isTeamConnected={isTeamConnected} onClose={handleClose} />
 
+          {isMobile && !isTeamConnected && hasProjectIntent && (
+            <div
+              role="tablist"
+              aria-label="Widget sections"
+              style={{
+                display: 'flex',
+                borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`,
+                background: 'rgba(16, 16, 16, 0.4)',
+                flexShrink: 0
+              }}
+            >
+              <button
+                role="tab"
+                aria-selected={tabMode === 'chat'}
+                aria-controls="widget-chat-panel"
+                id="widget-chat-tab"
+                onClick={() => setTabMode('chat')}
+                style={{
+                  flex: 1,
+                  padding: '10px 0',
+                  background: tabMode === 'chat' ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
+                  border: 'none',
+                  borderBottom: tabMode === 'chat' ? `2px solid ${brandTokens.colors.warmGold}` : '2px solid transparent',
+                  color: tabMode === 'chat' ? brandTokens.colors.warmGold : brandTokens.colors.mutedText,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.10em'
+                }}
+              >
+                Chat
+              </button>
+              <button
+                role="tab"
+                aria-selected={tabMode === 'brief'}
+                aria-controls="widget-brief-panel"
+                id="widget-brief-tab"
+                onClick={() => setTabMode('brief')}
+                style={{
+                  flex: 1,
+                  padding: '10px 0',
+                  background: tabMode === 'brief' ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
+                  border: 'none',
+                  borderBottom: tabMode === 'brief' ? `2px solid ${brandTokens.colors.warmGold}` : '2px solid transparent',
+                  color: tabMode === 'brief' ? brandTokens.colors.warmGold : brandTokens.colors.mutedText,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.10em'
+                }}
+              >
+                Brief
+              </button>
+            </div>
+          )}
+
           <div
             style={{
               flex: 1,
@@ -1199,13 +1317,16 @@ const startConversation = useCallback(async () => {
               position: 'relative'
             }}
           >
-            {!isTeamConnected && hasProjectIntent && (
+            {!isTeamConnected && hasProjectIntent && !(isMobile && tabMode !== 'brief') && (
               <div
                 data-testid="review-rail"
+                id={isMobile ? 'widget-brief-panel' : undefined}
+                role={isMobile ? 'tabpanel' : undefined}
+                aria-labelledby={isMobile ? 'widget-brief-tab' : undefined}
                 style={{
-                  width: 280,
+                  width: isMobile ? '100%' : 280,
                   flexShrink: 0,
-                  borderRight: `1px solid ${brandTokens.colors.subtleBorder}`,
+                  borderRight: isMobile ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
                   overflowY: 'auto',
                   background: 'rgba(16, 16, 16, 0.35)'
                 }}
@@ -1230,7 +1351,11 @@ const startConversation = useCallback(async () => {
               </div>
             )}
 
+            {!(isMobile && tabMode !== 'chat') && (
             <div
+              id={isMobile ? 'widget-chat-panel' : undefined}
+              role={isMobile ? 'tabpanel' : undefined}
+              aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
               style={{
                 flex: 1,
                 overflowY: 'auto',
@@ -1261,6 +1386,7 @@ const startConversation = useCallback(async () => {
 
               <div ref={messagesEndRef} />
             </div>
+            )}
           </div>
 
           {/* Input Bar */}

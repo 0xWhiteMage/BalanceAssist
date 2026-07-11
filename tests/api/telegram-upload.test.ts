@@ -62,10 +62,20 @@ function makeFile(name: string, size: number, type: string): File {
   return new File([new Uint8Array(size)], name, { type });
 }
 
-function buildFakeFormData(fields: Record<string, string>, files: File[]): FormData {
+function buildFakeFormData(
+  fields: Record<string, string>,
+  files: File[],
+  opts?: { includeConsent?: boolean }
+): FormData {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.set(k, v);
   for (const file of files) form.append('files', file);
+  if (opts?.includeConsent !== false) {
+    form.set(
+      'consent',
+      JSON.stringify({ aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() })
+    );
+  }
   return form;
 }
 
@@ -203,7 +213,8 @@ describe('POST /api/telegram/upload', () => {
 
     const form = buildFakeFormData(
       { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'deliverable' },
-      [makeFile('deck.pdf', 12_345, 'application/pdf')]
+      [makeFile('deck.pdf', 12_345, 'application/pdf')],
+      { includeConsent: true }
     );
 
     const res = await callUploadRoute(form);
@@ -298,5 +309,24 @@ describe('POST /api/telegram/upload', () => {
     expect(data.extractedText).toContain('30s animation');
     expect(data.extractedText).toContain('3 weeks');
     expect(data.extractedText).toContain('$5,000 SGD');
+  });
+
+  test('returns 403 when consent is missing', async () => {
+    const { client } = buildMockSupabase();
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pdf', 12_345, 'application/pdf')],
+      { includeConsent: false }
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.ok).toBe(false);
+    expect(data.error).toMatch(/consent/i);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
   });
 });

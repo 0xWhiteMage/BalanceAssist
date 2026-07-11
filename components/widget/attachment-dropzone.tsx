@@ -2,23 +2,43 @@
 import { useState } from 'react';
 import { classifyUrl } from '@/lib/uploads/url-detect';
 import { brandTokens } from '@/lib/brand-tokens';
+import { hasRequiredConsent, type AttachmentConsent } from '@/lib/uploads/consent';
+import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 
 export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
+
+type FileStatus = 'queued' | 'validating' | 'analysing' | 'ready-to-share' | 'sent' | 'failed' | 'retryable';
+
+type QueuedFile = {
+  file: File;
+  status: FileStatus;
+  error?: string;
+  extractedText?: string;
+};
 
 export function AttachmentDropzone({
   onAddLink,
   onAddFile,
   onFileAnalyzed,
-  sessionId
+  sessionId,
+  consent
 }: {
   onAddLink: (link: ReferenceLink) => void;
   onAddFile: (file: ReferenceFile) => void;
   onFileAnalyzed?: (fileName: string, extractedText: string) => void;
   sessionId?: string | null;
+  consent?: AttachmentConsent | null;
 }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
+
+  function updateFileStatus(fileName: string, status: FileStatus, error?: string) {
+    setQueuedFiles((prev) =>
+      prev.map((qf) => (qf.file.name === fileName ? { ...qf, status, error } : qf))
+    );
+  }
 
   async function handleUrlSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -44,28 +64,63 @@ export function AttachmentDropzone({
 
   async function handleFiles(files: FileList | null) {
     if (!files) return;
-    for (const file of Array.from(files)) {
+
+    if (!hasRequiredConsent(consent ?? null)) {
+      setError('Please consent to file analysis and sharing before uploading.');
+      return;
+    }
+
+    const fileArray = Array.from(files);
+    const buffers = await Promise.all(fileArray.map((f) => f.arrayBuffer()));
+    const batchResult = validateFileBatch(fileArray.map((file, i) => ({ file, buffer: buffers[i] })));
+    if (!batchResult.ok) {
+      setError(batchResult.reason ?? 'Files failed validation.');
+      return;
+    }
+
+    const newQueued: QueuedFile[] = fileArray.map((file) => ({ file, status: 'queued' as FileStatus }));
+    setQueuedFiles((prev) => [...prev, ...newQueued]);
+    setError(null);
+
+    for (const file of fileArray) {
+      updateFileStatus(file.name, 'validating');
+
+      const buffer = await file.arrayBuffer();
+      const result = validateFile(file, buffer);
+      if (!result.ok) {
+        updateFileStatus(file.name, 'failed', result.reason);
+        continue;
+      }
+
+      updateFileStatus(file.name, 'analysing');
+
       const fd = new FormData();
       fd.append('files', file, file.name);
       fd.append('kind', 'reference');
       if (sessionId) {
         fd.append('sessionId', sessionId);
       }
+      fd.append('consent', JSON.stringify(consent));
+
       const res = await fetch('/api/telegram/upload', { method: 'POST', body: fd });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.error ?? `Failed to upload ${file.name}. Please try again.`);
+        updateFileStatus(file.name, 'retryable', body?.error ?? `Failed to upload ${file.name}.`);
         continue;
       }
+
       const data = await res.json();
+      updateFileStatus(file.name, 'sent');
+
       onAddFile({
         name: file.name,
         sizeBytes: file.size,
-        mime: file.type,
+        mime: result.mime,
         telegramFileId: data.telegramFileId ?? ''
       });
-      setError(null);
+
       if (typeof data.extractedText === 'string' && data.extractedText.trim()) {
+        updateFileStatus(file.name, 'ready-to-share');
         onFileAnalyzed?.(file.name, data.extractedText);
       }
     }
@@ -156,7 +211,7 @@ export function AttachmentDropzone({
           Drop files here
         </span>
         <span style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
-          (PDF, PPTX, DOCX up to 50 MB)
+          (PDF, images, text, CSV up to 10 MB each)
         </span>
         <input
           id="attachment-drop"
@@ -166,6 +221,27 @@ export function AttachmentDropzone({
           style={{ display: 'none' }}
         />
       </label>
+
+      {queuedFiles.length > 0 && (
+        <div style={{ display: 'grid', gap: 4, fontSize: 11, color: brandTokens.colors.mutedText }}>
+          {queuedFiles.map((qf) => (
+            <div key={qf.file.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: qf.status === 'failed' ? 'tomato' : brandTokens.colors.lightText }}>
+                {qf.file.name}
+              </span>
+              <span style={{ fontSize: 10 }}>
+                {qf.status === 'queued' && 'Queued'}
+                {qf.status === 'validating' && 'Validating...'}
+                {qf.status === 'analysing' && 'Analysing...'}
+                {qf.status === 'ready-to-share' && 'Ready to share'}
+                {qf.status === 'sent' && 'Sent'}
+                {qf.status === 'failed' && `Failed: ${qf.error}`}
+                {qf.status === 'retryable' && `Retry: ${qf.error}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {error && <div role="alert" style={{ color: 'tomato', fontSize: 12 }}>{error}</div>}
     </div>

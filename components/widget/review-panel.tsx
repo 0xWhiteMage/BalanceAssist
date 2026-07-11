@@ -49,11 +49,12 @@ function ProgressStrip({ completed, total }: { completed: number; total: number 
   );
 }
 
-function SecondaryButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+function SecondaryButton({ onClick, children, ariaLabel }: { onClick: () => void; children: React.ReactNode; ariaLabel?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={ariaLabel}
       style={{
         width: '100%',
         padding: '10px 12px',
@@ -147,6 +148,7 @@ export function ReviewPanel({
       style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 14 }}
       data-testid="review-panel"
       data-mode={mode}
+      aria-label="Project brief review"
     >
       <ProgressStrip completed={completed} total={TOTAL_FIELDS} data-completed={String(completed)} />
 
@@ -226,7 +228,7 @@ export function ReviewPanel({
             </div>
           )}
           {mode === 'summary' && ready && !approved && (
-            <SecondaryButton onClick={onContinueRefining}>Continue refining</SecondaryButton>
+            <SecondaryButton onClick={onContinueRefining} ariaLabel="Continue refining brief">Continue refining</SecondaryButton>
           )}
         </div>
       )}
@@ -234,6 +236,7 @@ export function ReviewPanel({
       {approved && (
         <div
           data-testid="approve-confirmation"
+          role="status"
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -299,6 +302,7 @@ export function ReviewPanel({
               type="button"
               data-testid="book-catch-up-cta"
               onClick={onBookCatchUp}
+              aria-label="Book a catch-up call"
               style={{
                 width: '100%',
                 padding: '10px 12px',
@@ -322,6 +326,7 @@ export function ReviewPanel({
               type="button"
               data-testid="talk-to-human-cta"
               onClick={onTalkToHuman}
+              aria-label="Talk to a human team member"
               style={{
                 width: '100%',
                 padding: '10px 12px',

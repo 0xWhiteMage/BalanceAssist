@@ -84,7 +84,7 @@ test('dropzone region shows the uppercase DROP FILES HERE label and the accepted
   // The DROP FILES HERE label must be its own uppercase element, not buried in a sentence.
   // The label is normalised to uppercase via CSS text-transform.
   expect(screen.getByText((_, node) => node?.textContent?.trim().toUpperCase() === 'DROP FILES HERE')).toBeInTheDocument();
-  expect(screen.getByText('(PDF, PPTX, DOCX up to 50 MB)')).toBeInTheDocument();
+  expect(screen.getByText('(PDF, images, text, CSV up to 10 MB each)')).toBeInTheDocument();
 });
 
 test('URL submit button uses the uppercase ADD LINK pill copy', () => {

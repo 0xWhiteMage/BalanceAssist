@@ -83,7 +83,13 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
   }, [url]);
 
   useEffect(() => {
+    const ALLOWED_ORIGINS = ['https://calendly.com', 'https://assets.calendly.com'];
+
     const listener = (event: MessageEvent) => {
+      if (!ALLOWED_ORIGINS.includes(event.origin)) {
+        return;
+      }
+
       if (typeof event.data?.event !== 'string') {
         return;
       }
