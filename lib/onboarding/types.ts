@@ -21,6 +21,7 @@ export type LeadDraft = {
   contactName: string;
   contactEmail: string;
   contactCompany?: string;
+  consentToShare?: boolean;
 };
 
 export type EssentialsProgress = {

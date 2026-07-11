@@ -8,7 +8,9 @@ const { finalizeLeadMock } = vi.hoisted(() => ({
     sessionId: 'mock-session-id',
     qualificationStatus: 'qualified',
     persisted: true,
-    telegramSent: true
+    queued: true,
+    delivered: false,
+    retryable: false
   }))
 }));
 
@@ -46,7 +48,9 @@ afterEach(() => {
     sessionId: 'mock-session-id',
     qualificationStatus: 'qualified',
     persisted: true,
-    telegramSent: true
+    queued: true,
+    delivered: false,
+    retryable: false
   });
 });
 
@@ -66,7 +70,7 @@ function mockWidgetFetch() {
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/api/sessions') && init?.method === 'POST') {
-      return makeJsonResponse({ sessionId: 'mock-session-id', persisted: true });
+      return makeJsonResponse({ sessionId: 'mock-session-id', capability: 'mock-session-id.mock-cap', expiresAt: new Date(Date.now() + 86400000).toISOString(), persisted: true });
     }
     if (url.includes('/api/chat')) {
       return makeJsonResponse({
@@ -79,7 +83,8 @@ function mockWidgetFetch() {
           budgetBand: '20k-50k',
           contactName: 'Jayden',
           contactCompany: 'Acme',
-          contactEmail: 'jayden@example.com'
+          contactEmail: 'jayden@example.com',
+          consentToShare: true
         },
         briefReady: true,
         reviewPrompt: 'Your brief is ready. Tap the tab on the right to review.',
@@ -92,7 +97,9 @@ function mockWidgetFetch() {
         sessionId: 'mock-session-id',
         qualificationStatus: 'qualified',
         persisted: true,
-        telegramSent: true
+        queued: true,
+        delivered: false,
+        retryable: false
       });
     }
     return makeJsonResponse({});
@@ -145,20 +152,22 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     expect(countLine).not.toBeNull();
     expect(countLine?.textContent).toMatch(/\d+ of 8 fields captured/i);
 
-    // Telegram status line shows "Telegram notification sent" since telegramSent was true in finalize response.
+    // Telegram status line shows "Telegram notification queued" since queued was true in finalize response.
     const telegramStatus = document.querySelector('[data-testid="approve-confirmation-telegram"]') as HTMLElement | null;
     expect(telegramStatus).not.toBeNull();
-    expect(telegramStatus?.textContent).toMatch(/Telegram notification sent/i);
+    expect(telegramStatus?.textContent).toMatch(/Telegram notification queued/i);
   });
 
-  test('when finalize responds with telegramSent=false, the rail shows "Telegram connection pending"', async () => {
+  test('when finalize responds with queued=false and delivered=false, the rail shows "Telegram connection pending"', async () => {
     mockWidgetFetch();
     finalizeLeadMock.mockResolvedValueOnce({
       ok: true,
       sessionId: 'mock-session-id',
       qualificationStatus: 'qualified',
       persisted: true,
-      telegramSent: false
+      queued: false,
+      delivered: false,
+      retryable: false
     });
 
     render(<WidgetOverlay autoOpen={true} />);

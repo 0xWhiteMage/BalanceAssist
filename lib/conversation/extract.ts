@@ -190,6 +190,15 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
     }
   }
 
+  if (currentStep === 'consent' && currentDraft.consentToShare === undefined) {
+    const normalized = text.trim().toLowerCase();
+    if (/^(yes|yeah|yep|sure|ok|okay|go ahead|sounds good|absolutely|definitely|please|y)$/i.test(normalized)) {
+      updates.consentToShare = true;
+    } else if (/^(no|nah|nope|not now|skip|pass|later|not yet)$/i.test(normalized)) {
+      updates.consentToShare = false;
+    }
+  }
+
   return updates;
 }
 
@@ -205,6 +214,7 @@ export function getNextConversationStep(draft: LeadDraft): ConversationStepId {
   if (!draft.budgetBand) return 'budget';
   if (!draft.contactName) return 'contact-name';
   if (!draft.contactEmail) return 'contact-email';
+  if (!draft.consentToShare) return 'consent';
   return 'qualification';
 }
 

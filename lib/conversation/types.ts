@@ -51,6 +51,7 @@ export type ConversationStepId =
   | 'budget'
   | 'contact-name'
   | 'contact-email'
+  | 'consent'
   | 'qualification'
   | 'offer-upload'
   | 'upload'

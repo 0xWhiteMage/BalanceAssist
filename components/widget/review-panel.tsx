@@ -93,7 +93,7 @@ export function ReviewPanel({
   onChange?: (key: string, value: string) => void;
   onBookCatchUp?: () => void;
   onTalkToHuman?: () => void;
-  telegramBroadcastStatus?: 'pending' | 'sent' | 'unconfigured';
+  telegramBroadcastStatus?: 'pending' | 'sent' | 'queued' | 'unconfigured';
   telegramPending?: boolean;
 }) {
   const ready = isBriefReadyForApproval(draft);
@@ -279,7 +279,7 @@ export function ReviewPanel({
               color:
                 telegramBroadcastStatus === 'sent'
                   ? '#4ade80'
-                  : telegramBroadcastStatus === 'pending' || telegramPending
+                  : telegramBroadcastStatus === 'queued' || telegramBroadcastStatus === 'pending' || telegramPending
                     ? brandTokens.colors.warmGold
                     : brandTokens.colors.mutedText,
               textTransform: 'uppercase',
@@ -288,9 +288,11 @@ export function ReviewPanel({
           >
             {telegramBroadcastStatus === 'sent'
               ? 'Telegram notification sent'
-              : telegramBroadcastStatus === 'pending' || telegramPending
-                ? 'Telegram broadcast pending…'
-                : 'Telegram connection pending'}
+              : telegramBroadcastStatus === 'queued'
+                ? 'Telegram notification queued'
+                : telegramBroadcastStatus === 'pending' || telegramPending
+                  ? 'Telegram broadcast pending…'
+                  : 'Telegram connection pending'}
           </div>
           {onBookCatchUp && (
             <button

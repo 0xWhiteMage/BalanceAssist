@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     return parsed.response;
   }
 
-  const { sourceUrl, referrer, utm } = parsed.data;
+  const { sourceUrl, referrer, utm, consentVersion, consentedAt } = parsed.data;
 
   if (hasSupabaseServerConfig()) {
     const supabase = createServerSupabaseClient();
@@ -28,6 +28,8 @@ export async function POST(request: Request) {
           source_url: sourceUrl,
           referrer: referrer ?? null,
           utm: utm ?? null,
+          consent_version: consentVersion ?? null,
+          consented_at: consentedAt ?? null,
           status: 'open',
           capability_hash: hashCapability(capability.capability),
           capability_expires_at: capability.expiresAt

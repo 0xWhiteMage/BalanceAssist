@@ -176,7 +176,8 @@ describe('POST /api/chat', () => {
         contactName: 'Tool',
         contactCompany: 'Acme',
         projectType: 'Video',
-        scopePolished: '30s animation'
+        scopePolished: '30s animation',
+        consentToShare: true
       })
     )) as unknown as typeof fetch;
 
@@ -205,7 +206,8 @@ describe('POST /api/chat', () => {
         contactName: 'Tool',
         contactCompany: 'Acme',
         projectType: 'Video',
-        scopePolished: '30s animation'
+        scopePolished: '30s animation',
+        consentToShare: true
       })
     )) as unknown as typeof fetch;
 
@@ -456,7 +458,8 @@ describe('POST /api/chat', () => {
             budgetBand: '20k-50k',
             contactEmail: 'tool@example.com',
             contactName: 'Tool',
-            contactCompany: 'Acme'
+            contactCompany: 'Acme',
+            consentToShare: true
           })
         },
         {

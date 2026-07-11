@@ -19,6 +19,7 @@ function getNextMissingFieldPrompt(draft: LeadDraft): string {
   if (!draft.budgetBand) return 'What budget range are you working with?';
   if (!draft.contactName.trim()) return 'What name should I put on the brief?';
   if (!draft.contactEmail.trim()) return 'What email should the Balance team use to follow up?';
+  if (!draft.consentToShare) return 'Is it okay to share this brief with the Balance team?';
   return 'Would you like to approve the brief for the team or continue refining it?';
 }
 
@@ -132,7 +133,8 @@ export function getReaskText(stepId: ConversationStepId): string | null {
     timeline: 'What timeline are you working with?',
     budget: 'What budget range are you comfortable with?',
     'contact-name': 'How should I address you?',
-    'contact-email': 'What\'s the best email to reach you?'
+    'contact-email': 'What\'s the best email to reach you?',
+    consent: 'Is it okay to share this brief with the Balance team?'
   };
 
   return reasks[stepId] ?? null;

@@ -19,7 +19,8 @@ export const recordBriefUpdatesSchema = z
     contactEmail: z
       .union([z.literal(''), z.string().email()])
       .optional()
-      .describe("Either '' or a valid email address; do NOT omit the key.")
+      .describe("Either '' or a valid email address; do NOT omit the key."),
+    consentToShare: z.boolean().optional()
   })
   .strict();
 

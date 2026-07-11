@@ -3,7 +3,9 @@ import { z } from 'zod';
 export const createSessionPayloadSchema = z.object({
   sourceUrl: z.string().url(),
   referrer: z.string().url().optional(),
-  utm: z.record(z.string()).optional()
+  utm: z.record(z.string()).optional(),
+  consentVersion: z.string().optional(),
+  consentedAt: z.string().datetime().optional()
 });
 
 export const eventPayloadSchema = z.object({

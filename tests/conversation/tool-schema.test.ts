@@ -23,7 +23,8 @@ const positiveFixture = {
   budgetBand: '50k-150k',
   contactName: 'Alex Tan',
   contactCompany: 'Acme Co',
-  contactEmail: 'alex@acme.com'
+  contactEmail: 'alex@acme.com',
+  consentToShare: true
 };
 
 const negativeFixture = {

@@ -35,7 +35,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   timeline: {
     id: 'timeline',
-    botMessages: ['What timeline are you working with? This helps us understand feasibility and planning.'],
+    botMessages: ['What timeline are you working with? This helps us understand feasibility and planning — but if you\'re not sure yet, just say "not sure" and we\'ll move on.'],
     freeText: true,
     field: 'timelineBand',
     next: 'budget'
@@ -43,7 +43,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   budget: {
     id: 'budget',
-    botMessages: ['What budget range are you working with? Knowing your budget range helps us suggest realistic formats and timelines.'],
+    botMessages: ['What budget range are you working with? Knowing your budget range helps us suggest realistic formats and timelines — but it\'s totally optional. You can say "prefer not to say" if you\'d rather skip this.'],
     freeText: true,
     field: 'budgetBand',
     next: 'contact-name'
@@ -62,6 +62,17 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
     botMessages: ['And what\'s the best email to reach you? This ensures a producer can follow up with the right next steps.'],
     freeText: true,
     field: 'contactEmail',
+    next: 'consent'
+  },
+
+  consent: {
+    id: 'consent',
+    botMessages: [
+      'Just to confirm — is it okay to share this brief with the Balance team? They\'ll use it to prepare for a potential conversation with you.',
+      'You can say "yes" to proceed, or "no" if you\'d rather not share it right now.'
+    ],
+    freeText: true,
+    field: 'consentToShare',
     next: 'qualification'
   },
 

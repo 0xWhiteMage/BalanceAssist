@@ -57,7 +57,7 @@ function mockWidgetFetch() {
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/api/sessions') && init?.method === 'POST') {
-      return makeJsonResponse({ sessionId: 'mock-session-id', persisted: true });
+      return makeJsonResponse({ sessionId: 'mock-session-id', capability: 'mock-session-id.mock-cap', expiresAt: new Date(Date.now() + 86400000).toISOString(), persisted: true });
     }
     if (url.includes('/api/chat')) {
       return makeJsonResponse({
@@ -70,7 +70,8 @@ function mockWidgetFetch() {
           budgetBand: '20k-50k',
           contactName: 'Jayden',
           contactCompany: 'Acme',
-          contactEmail: 'jayden@example.com'
+          contactEmail: 'jayden@example.com',
+          consentToShare: true
         },
         briefReady: true,
         reviewPrompt: 'Your brief is ready. Tap the tab on the right to review.',

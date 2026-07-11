@@ -10,7 +10,8 @@ export function createDefaultLeadDraft(): LeadDraft {
     budgetBand: '',
     contactName: '',
     contactEmail: '',
-    contactCompany: ''
+    contactCompany: '',
+    consentToShare: false
   };
 }
 

@@ -195,7 +195,7 @@ export function WidgetOverlay({
   const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
-  const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'unconfigured'>('unconfigured');
+  const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -649,14 +649,16 @@ const startConversation = useCallback(async () => {
         }
         return [getNextMissingFieldPrompt(draftRef.current)];
       })();
-      const draftUpdates: Record<string, string> = data.draftUpdates ?? {};
+      const draftUpdates: Record<string, string | boolean> = data.draftUpdates ?? {};
       const briefReady: boolean = Boolean(data.briefReady);
       const sharedWork = data.sharedWork;
 
       if (Object.keys(draftUpdates).length > 0) {
         const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
         for (const [key, value] of Object.entries(draftUpdates)) {
-          if (value && value.trim().length > 0) {
+          if (typeof value === 'boolean') {
+            (merged as Record<string, unknown>)[key] = value;
+          } else if (value && value.trim().length > 0) {
             (merged as Record<string, unknown>)[key] = value;
           }
         }
@@ -793,9 +795,11 @@ const startConversation = useCallback(async () => {
       }
 
       setBriefApproved(true);
-      if (finalizeResponse.telegramSent === true) {
+      if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
-      } else if (finalizeResponse.telegramSent === false) {
+      } else if (finalizeResponse.queued === true) {
+        setTelegramBroadcastStatus('queued');
+      } else {
         setTelegramBroadcastStatus('unconfigured');
       }
       setCurrentStep('handoff');

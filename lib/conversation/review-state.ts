@@ -4,17 +4,21 @@ export const REVIEW_PROMPT = 'Your brief is ready. Review it in the panel on the
 
 export function missingReviewFields(draft: Partial<LeadDraft>): string[] {
   const missing: string[] = [];
-  if (!draft.projectScope?.trim()) missing.push('projectScope');
-  if (!draft.projectType?.trim()) missing.push('projectType');
-  if (!draft.service?.trim()) missing.push('service');
-  if (!draft.timelineBand?.trim()) missing.push('timelineBand');
-  if (!draft.budgetBand?.trim()) missing.push('budgetBand');
-  if (!draft.contactName?.trim()) missing.push('contactName');
-  if (!draft.contactCompany?.trim()) missing.push('contactCompany');
-  if (!draft.contactEmail?.trim()) missing.push('contactEmail');
+  if (!draft.projectScope?.trim() && !draft.service?.trim()) {
+    missing.push('projectScope');
+    missing.push('service');
+  }
+  if (!draft.contactName?.trim() && !draft.contactEmail?.trim()) {
+    missing.push('contactName');
+    missing.push('contactEmail');
+  }
+  if (!draft.consentToShare) missing.push('consentToShare');
   return missing;
 }
 
 export function isBriefReadyForApproval(draft: Partial<LeadDraft>): boolean {
-  return missingReviewFields(draft).length === 0;
+  const hasProjectNeed = Boolean(draft.projectScope?.trim() || draft.service?.trim());
+  const hasContactMethod = Boolean(draft.contactName?.trim() || draft.contactEmail?.trim());
+  const hasConsent = draft.consentToShare === true;
+  return hasProjectNeed && hasContactMethod && hasConsent;
 }

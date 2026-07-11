@@ -13,7 +13,8 @@ const readyDraft = {
   budgetBand: '20k-50k' as const,
   contactName: 'Jayden',
   contactCompany: 'Samsung',
-  contactEmail: 'jayden@example.com'
+  contactEmail: 'jayden@example.com',
+  consentToShare: true
 };
 
 describe('ReviewPanel', () => {
