@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { timingSafeEqual } from 'crypto';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
+import { requireAdminConfig } from '@/lib/security/config';
 import { hasSupabaseServerConfig } from '@/lib/supabase/server';
 
 const setupPayloadSchema = z.object({
@@ -23,20 +25,32 @@ async function callTelegram<T>(botToken: string, method: string, body?: Record<s
   return (await response.json()) as TelegramApiResponse<T>;
 }
 
+function verifyAdminAuth(request: Request): boolean {
+  let config;
+  try {
+    config = requireAdminConfig();
+  } catch {
+    return false;
+  }
+
+  const auth = request.headers.get('authorization') ?? '';
+  const provided = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : auth;
+
+  const a = Buffer.from(provided);
+  const b = Buffer.from(config.setupToken);
+
+  if (a.length !== b.length) return false;
+
+  return timingSafeEqual(a, b);
+}
+
 export async function OPTIONS() {
   return corsOptionsResponse();
 }
 
 export async function POST(request: Request) {
-  const setupToken = process.env.SETUP_TOKEN;
-
-  if (setupToken) {
-    const auth = request.headers.get('authorization') ?? '';
-    const provided = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : auth;
-
-    if (provided !== setupToken) {
-      return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 });
-    }
+  if (!verifyAdminAuth(request)) {
+    return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
 
   const parsed = await parseRequestBody(request, setupPayloadSchema);
@@ -141,17 +155,18 @@ export async function POST(request: Request) {
     supabase: {
       configured: hasSupabaseServerConfig(),
       url_set: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
-      url_host: process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).host : null,
       secret_key_set: Boolean(process.env.SUPABASE_SECRET_KEY),
-      secret_key_prefix: process.env.SUPABASE_SECRET_KEY ? process.env.SUPABASE_SECRET_KEY.slice(0, 12) + '...' : null,
-      service_role_key_set: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
-      service_role_key_prefix: process.env.SUPABASE_SERVICE_ROLE_KEY ? process.env.SUPABASE_SERVICE_ROLE_KEY.slice(0, 12) + '...' : null
+      service_role_key_set: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)
     },
     ...summary
   });
 }
 
-export async function PUT() {
+export async function PUT(request: Request) {
+  if (!verifyAdminAuth(request)) {
+    return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!botToken) {

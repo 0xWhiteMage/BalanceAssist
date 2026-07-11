@@ -1,22 +1,33 @@
 import { NextResponse } from 'next/server';
 import type { ZodSchema } from 'zod';
+import { isAllowedOrigin, getAllowedOrigins } from '@/lib/security/origin';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type'
-};
+function buildCorsHeaders(origin: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin'
+  };
 
-export function corsOptionsResponse() {
-  return new NextResponse(null, { status: 204, headers: corsHeaders });
+  if (isAllowedOrigin(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin!;
+  } else {
+    headers['Access-Control-Allow-Origin'] = getAllowedOrigins()[0];
+  }
+
+  return headers;
 }
 
-export function jsonWithCors(body: unknown, init?: ResponseInit) {
+export function corsOptionsResponse(origin: string | null = null) {
+  return new NextResponse(null, { status: 204, headers: buildCorsHeaders(origin) });
+}
+
+export function jsonWithCors(body: unknown, init?: ResponseInit, origin: string | null = null) {
   return NextResponse.json(body, {
     ...init,
     headers: {
       ...(init?.headers ?? {}),
-      ...corsHeaders
+      ...buildCorsHeaders(origin)
     }
   });
 }

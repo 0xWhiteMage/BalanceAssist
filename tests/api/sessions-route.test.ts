@@ -44,5 +44,6 @@ test('includes CORS headers in response', async () => {
 
   const response = await POST(request);
 
-  expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  expect(response.headers.get('Access-Control-Allow-Origin')).toBeTruthy();
+  expect(response.headers.get('Vary')).toBe('Origin');
 });

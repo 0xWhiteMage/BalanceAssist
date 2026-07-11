@@ -1,20 +1,33 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
+import { validateWebhookRequest } from '@/lib/telegram/webhook-auth';
 import type { TelegramUpdate } from '@/lib/telegram';
 
 export async function POST(request: Request) {
+  const secretToken = request.headers.get('x-telegram-bot-api-secret-token');
+
+  const authResult = validateWebhookRequest({
+    headerSecret: secretToken,
+    configuredSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? null,
+    incomingChatId: 0,
+    configuredChatId: process.env.TELEGRAM_CHAT_ID ?? null,
+    senderUsername: null,
+    allowedUsernames: null
+  });
+
+  if (!authResult.ok) {
+    if (authResult.reason === 'missing-secret') {
+      return NextResponse.json({ ok: false, error: 'Webhook secret not configured' }, { status: 503 });
+    }
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
   let update: TelegramUpdate;
 
   try {
     update = (await request.json()) as TelegramUpdate;
   } catch {
     return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  const message = update.message;
-
-  if (!message?.text) {
-    return NextResponse.json({ ok: true, ignored: 'no-text' });
   }
 
   if (!hasSupabaseServerConfig()) {
@@ -27,8 +40,58 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Supabase client failed' }, { status: 503 });
   }
 
+  // Replay protection: persist update_id before any side effects
+  if (typeof update.update_id === 'number') {
+    const { error: dupeError } = await supabase
+      .from('processed_telegram_updates')
+      .insert({ update_id: update.update_id });
+
+    if (dupeError) {
+      if (dupeError.code === '23505') {
+        return NextResponse.json({ ok: true, ignored: 'duplicate-update' });
+      }
+      console.error('[telegram-webhook] Failed to persist update_id', {
+        updateId: update.update_id,
+        error: dupeError.message
+      });
+      return NextResponse.json({ ok: false, error: 'Failed to record update' }, { status: 500 });
+    }
+  }
+
+  const message = update.message;
+
+  if (!message?.text) {
+    return NextResponse.json({ ok: true, ignored: 'no-text' });
+  }
+
+  // Validate chat ID if configured
+  if (process.env.TELEGRAM_CHAT_ID && message.chat?.id) {
+    const expectedChatId = process.env.TELEGRAM_CHAT_ID;
+    if (String(message.chat.id) !== expectedChatId) {
+      console.warn('[telegram-webhook] Wrong chat ID', {
+        incoming: message.chat.id,
+        expected: expectedChatId
+      });
+      return NextResponse.json({ ok: true, ignored: 'wrong-chat' });
+    }
+  }
+
+  // Validate sender if allowed usernames are configured
+  const allowedUsernames = process.env.TELEGRAM_ALLOWED_USERNAMES?.split(',').map(u => u.trim().toLowerCase()).filter(Boolean);
+  if (allowedUsernames && allowedUsernames.length > 0) {
+    const senderUsername = message.from?.username?.toLowerCase();
+    if (!senderUsername || !allowedUsernames.includes(senderUsername)) {
+      console.warn('[telegram-webhook] Unauthorized sender', {
+        username: message.from?.username,
+        first_name: message.from?.first_name
+      });
+      return NextResponse.json({ ok: true, ignored: 'unauthorized-sender' });
+    }
+  }
+
   let sessionId: string | null = null;
 
+  // Primary: thread ID lookup (most reliable)
   if (typeof message.message_thread_id === 'number') {
     const { data: byThread } = await supabase
       .from('sessions')
@@ -40,6 +103,7 @@ export async function POST(request: Request) {
     sessionId = byThreadRow?.id ?? null;
   }
 
+  // Secondary: reply-to-message lookup
   if (!sessionId && message.reply_to_message?.message_id) {
     const { data: parent } = await supabase
       .from('human_messages')
@@ -51,18 +115,7 @@ export async function POST(request: Request) {
     sessionId = parentRow?.session_id ?? null;
   }
 
-  if (!sessionId) {
-    const { data: latest } = await supabase
-      .from('human_messages')
-      .select('session_id')
-      .eq('sender', 'user')
-      .order('id', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const latestRow = latest as { session_id?: string } | null;
-    sessionId = latestRow?.session_id ?? null;
-  }
+  // Removed: latest-session fallback (was fail-open, could attach to wrong session)
 
   if (!sessionId) {
     console.warn('[telegram-webhook] No matching session for update', {
