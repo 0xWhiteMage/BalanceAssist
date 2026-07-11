@@ -1,12 +1,13 @@
 // @vitest-environment node
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 
-const { sendTelegramMessageMock, editForumTopicMock, ensureTelegramTopicMock, hasSupabaseServerConfigMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
+const { sendTelegramMessageMock, editForumTopicMock, ensureTelegramTopicMock, hasSupabaseServerConfigMock, createServerSupabaseClientMock, enqueueHandoffMock } = vi.hoisted(() => ({
   sendTelegramMessageMock: vi.fn(async () => ({ messageId: 1 })),
   editForumTopicMock: vi.fn(async () => true),
   ensureTelegramTopicMock: vi.fn(async () => null),
   hasSupabaseServerConfigMock: vi.fn(() => true),
-  createServerSupabaseClientMock: vi.fn()
+  createServerSupabaseClientMock: vi.fn(),
+  enqueueHandoffMock: vi.fn(async () => ({ persisted: true, queued: true, delivered: false, retryable: false, handoffId: 'ho-test-123' }))
 }));
 
 vi.mock('@/lib/telegram', () => ({
@@ -20,31 +21,15 @@ vi.mock('@/lib/supabase/server', () => ({
   createServerSupabaseClient: createServerSupabaseClientMock
 }));
 
-interface CapturedTelegramMessage {
-  text: string;
-  options?: { replyToMessageId?: number; threadId?: number };
-}
-
-interface CapturedTopicEdit {
-  threadId: number;
-  name: string;
-  options?: { iconColor?: number };
-}
-
-const capturedMessages: CapturedTelegramMessage[] = [];
-const capturedEdits: CapturedTopicEdit[] = [];
+vi.mock('@/lib/handoff/outbox', () => ({
+  enqueueHandoff: enqueueHandoffMock
+}));
 
 function buildMockSupabase({
-  telegramThreadId = 42,
-  withAttachmentLinks = false,
-  withAttachmentFiles = false
+  telegramThreadId = 42
 }: {
   telegramThreadId?: number | null;
-  withAttachmentLinks?: boolean;
-  withAttachmentFiles?: boolean;
 } = {}) {
-  const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
-
   const client = {
     from: vi.fn((table: string) => {
       if (table === 'sessions') {
@@ -69,34 +54,14 @@ function buildMockSupabase({
         };
       }
       return {
-        insert: vi.fn((row: Record<string, unknown>) => {
-          inserts.push({ table, row });
-          return Promise.resolve({ error: null });
-        }),
+        insert: vi.fn(async () => ({ error: null })),
         select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: null, error: null })) })) })),
         update: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
       };
     })
   };
 
-  return { client, inserts, withAttachmentLinks, withAttachmentFiles };
-}
-
-function attachSpyWrappers() {
-  sendTelegramMessageMock.mockReset();
-  editForumTopicMock.mockReset();
-  ensureTelegramTopicMock.mockReset();
-  capturedMessages.length = 0;
-  capturedEdits.length = 0;
-  sendTelegramMessageMock.mockImplementation(async (text, options) => {
-    capturedMessages.push({ text, options });
-    return { messageId: 1 };
-  });
-  editForumTopicMock.mockImplementation(async (threadId, name, options) => {
-    capturedEdits.push({ threadId, name, options });
-    return true;
-  });
-  ensureTelegramTopicMock.mockImplementation(async () => null);
+  return { client };
 }
 
 async function callFinalizeRoute(body: Record<string, unknown>) {
@@ -112,13 +77,14 @@ async function callFinalizeRoute(body: Record<string, unknown>) {
 describe('POST /api/leads/finalize Telegram notifications', () => {
   beforeEach(() => {
     hasSupabaseServerConfigMock.mockReturnValue(true);
-    attachSpyWrappers();
+    enqueueHandoffMock.mockReset();
+    enqueueHandoffMock.mockImplementation(async () => ({ persisted: true, queued: true, delivered: false, retryable: false, handoffId: 'ho-test-123' }));
   });
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  test('always sends a Telegram message with project type, scope, timeline, budget and contact on approve', async () => {
+  test('enqueues a handoff with project summary on approve', async () => {
     const { client } = buildMockSupabase({ telegramThreadId: 42 });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -142,28 +108,20 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     const data = await res.json();
     expect(data.ok).toBe(true);
     expect(data.persisted).toBe(true);
+    expect(data.queued).toBe(true);
 
-    expect(editForumTopicMock).toHaveBeenCalledTimes(1);
-    expect(sendTelegramMessageMock).toHaveBeenCalledTimes(1);
-
-    expect(capturedMessages).toHaveLength(1);
-    const msg = capturedMessages[0];
-    expect(msg.options?.threadId).toBe(42);
-    expect(msg.text).toContain('Brief approved');
-    expect(msg.text).toContain('Project type:');
-    expect(msg.text).toContain('Video');
-    expect(msg.text).toContain('Scope:');
-    expect(msg.text).toContain('30s animation for social media');
-    expect(msg.text).toContain('Timeline:');
-    expect(msg.text).toContain('1-2-months');
-    expect(msg.text).toContain('Budget:');
-    expect(msg.text).toContain('20k-50k');
-    expect(msg.text).toContain('Contact:');
-    expect(msg.text).toContain('Jayden');
-    expect(msg.text).toContain('jayden@example.com');
+    expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
+    const handoffPayload = enqueueHandoffMock.mock.calls[0][1];
+    expect(handoffPayload.type).toBe('approval');
+    expect(handoffPayload.sessionId).toBe('11111111-2222-3333-4444-555555555555');
+    expect(handoffPayload.threadId).toBe(42);
+    expect(handoffPayload.summary).toContain('Brief approved');
+    expect(handoffPayload.summary).toContain('Video');
+    expect(handoffPayload.summary).toContain('30s animation for social media');
+    expect(handoffPayload.summary).toContain('Jayden');
   });
 
-  test('still posts a Telegram approval notification when there are no attachments', async () => {
+  test('still enqueues when there are no attachments', async () => {
     const { client } = buildMockSupabase({ telegramThreadId: 99 });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -182,14 +140,14 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(sendTelegramMessageMock).toHaveBeenCalledTimes(1);
-    expect(capturedMessages[0].options?.threadId).toBe(99);
-    expect(capturedMessages[0].text).toContain('event with 3 led screens');
-    expect(capturedMessages[0].text).not.toContain('Reference links:');
-    expect(capturedMessages[0].text).not.toContain('Reference files:');
+    expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
+    const handoffPayload = enqueueHandoffMock.mock.calls[0][1];
+    expect(handoffPayload.summary).toContain('event with 3 led screens');
+    expect(handoffPayload.summary).not.toContain('Reference links:');
+    expect(handoffPayload.summary).not.toContain('Reference files:');
   });
 
-  test('appends Reference links section when reference links are present', async () => {
+  test('includes reference links in handoff summary', async () => {
     const { client } = buildMockSupabase({ telegramThreadId: 7 });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -209,12 +167,13 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(sendTelegramMessageMock).toHaveBeenCalledTimes(1);
-    expect(capturedMessages[0].text).toContain('Reference links:');
-    expect(capturedMessages[0].text).toContain('https://youtu.be/abc');
+    expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
+    const handoffPayload = enqueueHandoffMock.mock.calls[0][1];
+    expect(handoffPayload.summary).toContain('Reference links:');
+    expect(handoffPayload.summary).toContain('https://youtu.be/abc');
   });
 
-  test('does NOT send a Telegram message if there is no telegram thread', async () => {
+  test('does NOT enqueue when there is no telegram thread', async () => {
     const { client } = buildMockSupabase({ telegramThreadId: null });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -233,40 +192,10 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(sendTelegramMessageMock).not.toHaveBeenCalled();
+    expect(enqueueHandoffMock).not.toHaveBeenCalled();
   });
 
-  test('logs a warning when there is no Telegram thread id', async () => {
-    const { client } = buildMockSupabase({ telegramThreadId: null });
-    createServerSupabaseClientMock.mockReturnValue(client);
-
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-    const res = await callFinalizeRoute({
-      sessionId: '55555555-6666-7777-8888-999999999999',
-      qualificationStatus: 'qualified',
-      leadDraft: {
-        service: 'production',
-        projectType: 'Video',
-        projectScope: '30s spot',
-        timelineBand: '1-2-months',
-        budgetBand: '20k-50k',
-        contactName: 'Sam',
-        contactEmail: 'sam@example.com'
-      }
-    });
-
-    expect(res.status).toBe(200);
-    expect(warnSpy).toHaveBeenCalled();
-    const sawWarn = warnSpy.mock.calls.some(
-      (call) => typeof call[0] === 'string' && call[0].includes('No Telegram thread id for session')
-    );
-    expect(sawWarn).toBe(true);
-
-    warnSpy.mockRestore();
-  });
-
-  test('response includes telegramSent=true when the Telegram message is dispatched', async () => {
+  test('response includes queued and delivered status', async () => {
     const { client } = buildMockSupabase({ telegramThreadId: 11 });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -286,15 +215,20 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
 
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.telegramSent).toBe(true);
+    expect(data.queued).toBe(true);
+    expect(data.delivered).toBe(false);
+    expect(data.handoffId).toBe('ho-test-123');
   });
 
-  test('response includes telegramSent=false when there is no Telegram thread', async () => {
-    const { client } = buildMockSupabase({ telegramThreadId: null });
+  test('reports retryable when handoff fails', async () => {
+    const { client } = buildMockSupabase({ telegramThreadId: 11 });
     createServerSupabaseClientMock.mockReturnValue(client);
+    enqueueHandoffMock.mockImplementation(async () => ({
+      persisted: true, queued: false, delivered: false, retryable: true, handoffId: 'ho-failed'
+    }));
 
     const res = await callFinalizeRoute({
-      sessionId: '77777777-8888-9999-aaaa-bbbbbbbbbbbb',
+      sessionId: '88888888-9999-aaaa-bbbb-cccccccccccc',
       qualificationStatus: 'qualified',
       leadDraft: {
         service: 'production',
@@ -309,6 +243,8 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
 
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.telegramSent).toBe(false);
+    expect(data.queued).toBe(false);
+    expect(data.retryable).toBe(true);
+    expect(data.handoffId).toBe('ho-failed');
   });
 });

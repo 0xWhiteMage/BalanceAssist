@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/sessions/route';
 
-test('creates a session response payload', async () => {
+test('creates a session response with capability', async () => {
   const request = new NextRequest('http://localhost:3000/api/sessions', {
     method: 'POST',
     body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv' })
@@ -12,6 +12,9 @@ test('creates a session response payload', async () => {
 
   expect(response.status).toBe(200);
   expect(payload.sessionId).toBeTruthy();
+  expect(payload.capability).toBeTruthy();
+  expect(payload.capability).toContain(payload.sessionId);
+  expect(payload.expiresAt).toBeTruthy();
 });
 
 test('returns 400 for invalid JSON body', async () => {

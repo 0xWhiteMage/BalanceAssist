@@ -1,8 +1,9 @@
 import { finalizeLeadPayloadSchema } from '@/lib/api/contracts';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { editForumTopic, ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
+import { ensureTelegramTopic } from '@/lib/telegram';
 import { buildTopicName, TOPIC_STATUS_COLOR, topicStatusFromQualification } from '@/lib/conversation/topic-status';
+import { enqueueHandoff, type HandoffOutcome } from '@/lib/handoff/outbox';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -100,7 +101,7 @@ export async function POST(request: Request) {
     .update({ status: qualificationStatus === 'qualified' ? 'completed' : 'escalated' })
     .eq('id', sessionId);
 
-  let telegramSent = false;
+  let handoffOutcome: HandoffOutcome = { persisted: true, queued: false, delivered: false, retryable: false };
   const shortId = sessionId.slice(0, 8);
 
   try {
@@ -126,34 +127,7 @@ export async function POST(request: Request) {
           shortId
         );
 
-    if (!threadId) {
-      console.warn('[leads-finalize] No Telegram thread id for session', sessionId);
-    }
-
     if (threadId && snap) {
-      const topicStatus = topicStatusFromQualification(qualificationStatus);
-      const name = buildTopicName(
-        snap.contact_name ?? leadDraft?.contactName ?? null,
-        snap.contact_company ?? leadDraft?.contactCompany ?? null,
-        shortId,
-        topicStatus
-      );
-
-      const updated = await editForumTopic(threadId, name, {
-        iconColor: TOPIC_STATUS_COLOR[topicStatus]
-      });
-
-      if (updated) {
-        console.log('[leads-finalize] Renamed topic on finalize', {
-          sessionId,
-          threadId,
-          name,
-          topicStatus
-        });
-      } else {
-        console.warn('[leads-finalize] editForumTopic failed', { sessionId });
-      }
-
       const referenceLinks = Array.isArray(leadDraft?.referenceLinks) ? leadDraft.referenceLinks : [];
       const referenceFiles = Array.isArray(leadDraft?.referenceFiles) ? leadDraft.referenceFiles : [];
       const linkLines = referenceLinks
@@ -178,12 +152,12 @@ export async function POST(request: Request) {
         messageParts.push('', 'Reference files:', ...fileLines);
       }
 
-      try {
-        const result = await sendTelegramMessage(messageParts.join('\n'), { threadId });
-        telegramSent = Boolean(result);
-      } catch (error) {
-        console.warn('[leads-finalize] failed to send approval notification', { sessionId, error });
-      }
+      handoffOutcome = await enqueueHandoff(supabase, {
+        sessionId,
+        type: 'approval',
+        summary: messageParts.join('\n'),
+        threadId
+      });
     }
   } catch (error) {
     console.error('[leads-finalize] Telegram topic update failed', { sessionId, error });
@@ -194,6 +168,9 @@ export async function POST(request: Request) {
     sessionId,
     qualificationStatus,
     persisted: true,
-    telegramSent
+    queued: handoffOutcome.queued,
+    delivered: handoffOutcome.delivered,
+    retryable: handoffOutcome.retryable,
+    handoffId: handoffOutcome.handoffId
   });
 }
