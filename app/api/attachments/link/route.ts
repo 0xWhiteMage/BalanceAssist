@@ -10,8 +10,7 @@ export async function OPTIONS(request: Request) {
 const linkSchema = z.object({
   sessionId: z.string().min(1).optional(),
   url: z.string().url(),
-  kind: z.enum(['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other']),
-  consent: z.unknown().optional()
+  kind: z.enum(['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other'])
 });
 
 export async function POST(request: Request) {
@@ -35,7 +34,7 @@ export async function POST(request: Request) {
 
   if (!consent.producerTransfer) {
     return jsonWithCors(
-      { ok: false, error: 'Consent to let the Balance team review this link is required before adding it.' },
+      { ok: false, code: 'consent_required' },
       { status: 403 },
       request
     );

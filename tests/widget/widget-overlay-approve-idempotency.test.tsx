@@ -85,6 +85,9 @@ function mockWidgetFetch() {
         persisted: true
       });
     }
+    if (url.includes('/api/projects/mock-session-id/consent')) {
+      return makeJsonResponse({ ok: true, consent: { analysis: false, producerTransfer: true } });
+    }
     return makeJsonResponse({});
   }) as unknown as typeof fetch;
 }

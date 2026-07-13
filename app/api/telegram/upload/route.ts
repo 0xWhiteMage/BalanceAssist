@@ -2,7 +2,6 @@ import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
-import { sendDocument } from '@/lib/telegram';
 import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
@@ -142,54 +141,22 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'File upload has not been requested by the team' }, { status: 403 }, request);
   }
 
-  let lastTelegramFileId: string | null = null;
   let uploadedCount = 0;
   let extractedText = '';
-
-  const isFinalized = session.status === 'completed' || session.status === 'escalated';
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const buffer = Buffer.from(buffers[i]);
 
-    if (canShareWithTeam && isFinalized && session.telegram_thread_id) {
-      const caption = `${file.name} (${kind})`;
-      const result = await sendDocument(session.telegram_thread_id, buffer, caption, file.name);
-
-      if (!result.ok) {
-        return jsonWithCors(
-          {
-            ok: false,
-            error: result.description ?? 'Failed to forward file to Telegram',
-            telegramStatus: result.status
-          },
-          { status: 502 },
-          request
-        );
-      }
-
-      if (result.fileId === null) {
-        return jsonWithCors(
-          { ok: false, error: 'Telegram accepted the upload but did not return a file_id' },
-          { status: 502 },
-          request
-        );
-      }
-
-      lastTelegramFileId = result.fileId;
-    }
-
-    const uploadStatus = lastTelegramFileId ? 'sent' : 'quarantined';
-
     const { error: insertError } = await supabase.from('uploaded_files').insert({
       session_id: sessionId,
-      telegram_file_id: lastTelegramFileId ?? `quarantined-${Date.now()}-${i}`,
+      telegram_file_id: `quarantined-${Date.now()}-${i}`,
       name: file.name,
       original_name: file.name,
       size_bytes: file.size,
       mime: detectedMimes[i] ?? null,
       mime_type: detectedMimes[i] ?? null,
-      status: uploadStatus,
+      status: 'quarantined',
       storage_path: null,
       kind
     });
@@ -198,11 +165,11 @@ export async function POST(request: Request) {
       return jsonWithCors({ ok: false, error: insertError.message }, { status: 500 }, request);
     }
 
-    emitEvent(lastTelegramFileId ? 'attachment_forwarded' : 'attachment_quarantined', {
+    emitEvent('attachment_quarantined', {
       sessionId,
       originalName: file.name,
       mimeType: detectedMimes[i] ?? null,
-      ...(lastTelegramFileId ? {} : { reason: 'not_forwarded' })
+      reason: 'pending_handoff'
     }, requestId);
 
     if (canAnalyze) {
@@ -215,27 +182,13 @@ export async function POST(request: Request) {
     uploadedCount += 1;
   }
 
-  if (canShareWithTeam && session.file_request_open) {
-    const { error: closeError } = await supabase
-      .from('sessions')
-      .update({ file_request_open: false, file_request_note: null })
-      .eq('id', sessionId);
-
-    if (closeError) {
-      logger.warn('Failed to reset file_request_open', {
-        error:
-          closeError instanceof Error
-            ? closeError.message
-            : (closeError as { message?: string }).message ?? 'Unknown error'
-      });
-    }
-  }
-
   return jsonWithCors({
     ok: true,
-    telegramFileId: lastTelegramFileId,
+    telegramFileId: null,
     count: uploadedCount,
-    forwarded: lastTelegramFileId !== null,
+    forwarded: false,
+    quarantined: true,
+    pending: true,
     ...(extractedText ? { extractedText } : {})
   }, undefined, request);
 }

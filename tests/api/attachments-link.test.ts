@@ -81,8 +81,7 @@ describe('POST /api/attachments/link', () => {
         body: JSON.stringify({
           sessionId: 'sess-1',
           url: 'https://youtu.be/abc',
-          kind: 'youtube',
-          consent: { aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() }
+          kind: 'youtube'
         })
       });
 
@@ -113,8 +112,7 @@ describe('POST /api/attachments/link', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: 'https://youtu.be/abc',
-          kind: 'youtube',
-          consent: { aiAnalysis: false, producerShare: true, consentedAt: new Date().toISOString() }
+          kind: 'youtube'
         })
       });
 
@@ -135,8 +133,7 @@ describe('POST /api/attachments/link', () => {
         body: JSON.stringify({
           sessionId: 'sess-1',
           url: 'not a url',
-          kind: 'youtube',
-          consent: { aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() }
+          kind: 'youtube'
         })
       });
 
@@ -158,8 +155,7 @@ describe('POST /api/attachments/link', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url: 'https://youtu.be/abc',
-        kind: 'youtube',
-          consent: { aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() }
+          kind: 'youtube'
       })
     });
 
@@ -167,7 +163,7 @@ describe('POST /api/attachments/link', () => {
     const data = await res.json();
 
     expect(res.status).toBe(403);
-    expect(data.error).toMatch(/producer|team/i);
+    expect(data).toEqual({ ok: false, code: 'consent_required' });
   });
 
   test('rejects links when consent is omitted', async () => {
@@ -192,7 +188,7 @@ describe('POST /api/attachments/link', () => {
     const data = await res.json();
 
     expect(res.status).toBe(403);
-    expect(data.error).toMatch(/consent/i);
+    expect(data).toEqual({ ok: false, code: 'consent_required' });
   });
 
   test('accepts links when producer-transfer consent was already recorded in the ledger', async () => {

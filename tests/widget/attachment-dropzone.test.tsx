@@ -190,9 +190,10 @@ test('allows analysis-only uploads without producer forwarding metadata', async 
   const file = new File(['brief text'], 'brief.txt', { type: 'text/plain' });
   fireEvent.change(fileInput, { target: { files: [file] } });
 
-  await waitFor(() => {
-    expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Project scope: launch film');
-  });
+    await waitFor(() => {
+      expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Project scope: launch film');
+      expect(screen.getByText(/quarantined pending review/i)).toBeInTheDocument();
+    });
 
   expect(onAddFile).not.toHaveBeenCalled();
   expect(uploadedConsents).toHaveLength(0);

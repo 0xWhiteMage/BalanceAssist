@@ -64,6 +64,7 @@ function buildMockSupabase({
   consentTransitions?: Array<{ scope: string; granted: boolean }>;
 } = {}) {
   const client = {
+    leadInserts: [] as Array<Record<string, unknown>>,
     from: vi.fn((table: string) => {
       if (table === 'sessions') {
         return {
@@ -87,7 +88,10 @@ function buildMockSupabase({
       }
       if (table === 'leads') {
         return {
-          insert: vi.fn(async () => ({ error: leadInsertError }))
+          insert: vi.fn(async (row: Record<string, unknown>) => {
+            client.leadInserts.push(row);
+            return { error: leadInsertError };
+          })
         };
       }
       if (table === 'reference_links') {
@@ -266,7 +270,7 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     expect(handoffPayload.summary).not.toContain('attacker.com');
   });
 
-  test('does not include links or files in the handoff packet when producer-share was not recorded server-side', async () => {
+  test('rejects finalization without a producer-transfer ledger grant before creating a lead or handoff', async () => {
     const { client } = buildMockSupabase({
       telegramThreadId: 7,
       draft: {
@@ -303,11 +307,17 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
       }
     });
 
-    expect(res.status).toBe(200);
-    expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
-    const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { summary: string };
-    expect(handoffPayload.summary).not.toContain('private-analysis-only');
-    expect(handoffPayload.summary).not.toContain('analysis-only.pdf');
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      ok: false,
+      code: 'consent_required',
+      sessionId: '39333333-4444-5555-6666-777777777777',
+      qualificationStatus: 'qualified',
+      persisted: false
+    });
+    expect(client.leadInserts).toHaveLength(0);
+    expect(ensureTelegramTopicMock).not.toHaveBeenCalled();
+    expect(enqueueHandoffMock).not.toHaveBeenCalled();
   });
 
   test('does not let a forged draft consent field authorize producer transfer', async () => {
@@ -330,9 +340,8 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
       leadDraft: {}
     });
 
-    expect(response.status).toBe(200);
-    const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { summary: string };
-    expect(handoffPayload.summary).not.toContain('attacker.test');
+    expect(response.status).toBe(403);
+    expect(enqueueHandoffMock).not.toHaveBeenCalled();
   });
 
   test('does NOT enqueue when there is no telegram thread', async () => {
@@ -498,7 +507,7 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
           };
         }
         if (table === 'session_consents') {
-          return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [], error: null })) })) })) };
+          return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'producer_transfer', granted: true }], error: null })) })) })) };
         }
         return {};
       })

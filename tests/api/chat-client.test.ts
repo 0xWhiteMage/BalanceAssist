@@ -112,12 +112,9 @@ describe('chatRequest client', () => {
     ]);
   });
 
-  test('uploadRequestedFiles includes explicit consent for team-requested uploads', async () => {
-    const uploadedConsents: Array<Record<string, unknown>> = [];
+  test('uploadRequestedFiles does not send obsolete consent JSON for team-requested uploads', async () => {
 
     global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const form = init?.body as FormData;
-      uploadedConsents.push(JSON.parse(String(form.get('consent'))));
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
@@ -127,19 +124,29 @@ describe('chatRequest client', () => {
     const { uploadRequestedFiles } = await import('@/lib/api/client');
     const result = await uploadRequestedFiles(
       'session-123',
-      [new File(['deliverable'], 'deliverable.txt', { type: 'text/plain' })],
-      {
-        aiAnalysis: false,
-        producerShare: true,
-        consentedAt: new Date().toISOString()
-      }
+      [new File(['deliverable'], 'deliverable.txt', { type: 'text/plain' })]
     );
 
     expect(result).toEqual({ ok: true });
-    expect(uploadedConsents).toHaveLength(1);
-    expect(uploadedConsents[0]).toMatchObject({
-      aiAnalysis: false,
-      producerShare: true
-    });
+    const form = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('consent')).toBeNull();
+  });
+
+  test('records producer-transfer consent before a producer action', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, consent: { producerTransfer: true } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+
+    const { recordProducerTransferConsent } = await import('@/lib/api/client');
+
+    await expect(recordProducerTransferConsent('session-123')).resolves.toBe(true);
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/projects/session-123/consent',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.0' })
+      })
+    );
   });
 });

@@ -280,7 +280,7 @@ export function HumanFooter({
   onConnect
 }: {
   isTeamConnected: boolean;
-  humanStatus: 'idle' | 'connected' | 'delivered' | 'awaiting' | 'replied';
+  humanStatus: 'idle' | 'connected' | 'delivered' | 'pending' | 'awaiting' | 'replied';
   onConnect: () => void;
 }) {
   return (
@@ -342,7 +342,7 @@ export function HumanFooter({
               color:
                 humanStatus === 'replied'
                   ? '#4ade80'
-                  : humanStatus === 'awaiting'
+                  : humanStatus === 'awaiting' || humanStatus === 'pending'
                     ? brandTokens.colors.warmGold
                     : brandTokens.colors.mutedText
             }}
@@ -358,7 +358,7 @@ export function HumanFooter({
                 }}
               />
             )}
-            {humanStatus === 'awaiting' && (
+            {(humanStatus === 'awaiting' || humanStatus === 'pending') && (
               <span
                 style={{
                   width: '6px',
@@ -373,6 +373,8 @@ export function HumanFooter({
               ? 'Replied by team'
               : humanStatus === 'awaiting'
                 ? 'Awaiting reply'
+                : humanStatus === 'pending'
+                  ? 'File pending review'
                 : humanStatus === 'delivered'
                   ? 'Message delivered'
                   : 'Connected to team'}

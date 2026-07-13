@@ -14,7 +14,7 @@ import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
 
-type FileStatus = 'queued' | 'validating' | 'analysing' | 'ready-to-share' | 'sent' | 'failed' | 'retryable';
+type FileStatus = 'queued' | 'validating' | 'analysing' | 'quarantined' | 'failed' | 'retryable';
 
 type QueuedFile = {
   file: File;
@@ -196,21 +196,9 @@ export function AttachmentDropzone({
       }
 
       const data = await res.json();
-      const forwarded = data.forwarded === true;
-      const canShareWithTeam = hasProducerShareConsent(consentToUse);
       const canAnalyze = hasAnalysisConsent(consentToUse);
 
-      if (forwarded && canShareWithTeam) {
-        updateFileStatus(file.name, 'sent');
-        onAddFile({
-          name: file.name,
-          sizeBytes: file.size,
-          mime: result.mime,
-          telegramFileId: data.telegramFileId ?? ''
-        });
-      } else {
-        updateFileStatus(file.name, 'ready-to-share');
-      }
+      updateFileStatus(file.name, 'quarantined');
 
       if (canAnalyze && typeof data.extractedText === 'string' && data.extractedText.trim()) {
         onFileAnalyzed?.(file.name, data.extractedText);
@@ -355,8 +343,7 @@ export function AttachmentDropzone({
                 {qf.status === 'queued' && 'Queued'}
                 {qf.status === 'validating' && 'Validating...'}
                 {qf.status === 'analysing' && 'Analysing...'}
-                {qf.status === 'ready-to-share' && 'Ready to share'}
-                {qf.status === 'sent' && 'Sent'}
+                {qf.status === 'quarantined' && 'Quarantined pending review'}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}
                 {qf.status === 'retryable' && `Retry: ${qf.error}`}
               </span>

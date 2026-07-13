@@ -117,6 +117,9 @@ function mockWidgetFetch() {
         retryable: false
       });
     }
+    if (url.includes('/api/projects/mock-session-id/consent')) {
+      return makeJsonResponse({ ok: true, consent: { analysis: false, producerTransfer: true } });
+    }
     return makeJsonResponse({});
   }) as unknown as typeof fetch;
 }
@@ -257,6 +260,39 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     await waitFor(() => {
       expect(document.querySelector('[data-testid="approve-confirmation"]')).toBeNull();
       expect(screen.getByText(/brief could not be saved/i)).toBeInTheDocument();
+    });
+  }, 10000);
+
+  test('does not finalize until producer-transfer consent has been recorded', async () => {
+    mockWidgetFetch();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        return makeJsonResponse({ sessionId: 'mock-session-id', capability: 'mock-session-id.mock-cap', expiresAt: new Date(Date.now() + 86400000).toISOString(), persisted: true });
+      }
+      if (url.includes('/api/chat')) {
+        return makeJsonResponse({ message: 'Ready.', draftUpdates: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' }, briefReady: true, missingFields: [] });
+      }
+      if (url.includes('/api/projects/mock-session-id/consent')) {
+        return makeJsonResponse({ ok: false }, 500);
+      }
+      return makeJsonResponse({});
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    const approveButton = await waitFor(() => {
+      const button = document.querySelector('[data-testid="approve-button"]') as HTMLButtonElement | null;
+      if (!button) throw new Error('approve-button not yet rendered');
+      return button;
+    });
+    fireEvent.click(approveButton);
+
+    await waitFor(() => {
+      expect(finalizeLeadMock).not.toHaveBeenCalled();
+      expect(screen.getByText(/could not confirm consent/i)).toBeInTheDocument();
     });
   }, 10000);
 

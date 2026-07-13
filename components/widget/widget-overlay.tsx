@@ -23,12 +23,11 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
-import { createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import type { ConsentRecord } from '@/lib/privacy/notice';
-import { createAttachmentConsent } from '@/lib/uploads/consent';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 
 let messageCounter = 0;
@@ -160,7 +159,7 @@ export function WidgetOverlay({
   const [hasStarted, setHasStarted] = useState(false);
   const [isTeamConnected, setIsTeamConnected] = useState(false);
   const [sessionUnavailable, setSessionUnavailable] = useState(false);
-  const [humanStatus, setHumanStatus] = useState<'idle' | 'connected' | 'delivered' | 'awaiting' | 'replied'>('idle');
+  const [humanStatus, setHumanStatus] = useState<'idle' | 'connected' | 'delivered' | 'pending' | 'awaiting' | 'replied'>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
   const [humanFileRequestOpen, setHumanFileRequestOpen] = useState(false);
@@ -849,6 +848,13 @@ export function WidgetOverlay({
         return;
       }
 
+      if (!await recordProducerTransferConsent(sessionIdRef.current)) {
+        approveInFlightRef.current = false;
+        setTelegramBroadcastStatus('unconfigured');
+        await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
+        return;
+      }
+
       const result = scoreLead(draftRef.current);
       const payload = {
         sessionId: sessionIdRef.current,
@@ -1183,38 +1189,40 @@ export function WidgetOverlay({
       const confirmed =
         typeof window === 'undefined'
           ? true
-          : window.confirm('These files will be shared directly with the Balance team. Continue?');
+          : window.confirm('The Balance team may review these files when secure handoff is available. Continue?');
       if (!confirmed) {
         e.target.value = '';
         return;
       }
 
-      const uploadConsent = createAttachmentConsent(false, true);
+      if (!await recordProducerTransferConsent(id)) {
+        await botSay('Sorry — we could not confirm consent to share files with the Balance team. Please try again.');
+        e.target.value = '';
+        return;
+      }
 
       const nextMessages = [...messagesRef.current];
       for (const file of files) {
         nextMessages.push({
           id: nextId(),
           sender: 'user',
-          text: `Shared: ${file.name}`,
+          text: `Upload quarantined: ${file.name}`,
           timestamp: Date.now(),
           attachment: createAttachment(file)
         });
       }
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
-      setTeamWaitingForReply(true);
-      setHumanStatus('delivered');
+      setTeamWaitingForReply(false);
+      setHumanStatus('pending');
 
-      const uploadResult = await uploadRequestedFiles(id, files, uploadConsent);
+      const uploadResult = await uploadRequestedFiles(id, files);
       if (!uploadResult.ok) {
         setTeamWaitingForReply(false);
         setHumanStatus('connected');
-        await botSay(uploadResult.error ?? 'Sorry, the files could not be delivered to the team. Please try again or ask the team to resend the upload request.');
+        await botSay(uploadResult.error ?? 'Sorry, the files could not be quarantined for review. Please try again.');
       } else {
-        setHumanStatus('awaiting');
-        setHumanFileRequestOpen(false);
-        setHumanFileRequestNote(null);
+        await botSay('Your files are quarantined pending review. They have not been shared with the Balance team yet.');
       }
 
       e.target.value = '';

@@ -1,5 +1,3 @@
-import type { AttachmentConsent } from '@/lib/uploads/consent';
-
 export type SessionResponse = {
   sessionId: string;
   status: string;
@@ -17,6 +15,7 @@ export type EventResponse = {
 
 export type FinalizeLeadResponse = {
   ok: boolean;
+  code?: string;
   sessionId: string;
   qualificationStatus: string;
   persisted?: boolean;
@@ -146,6 +145,22 @@ export async function finalizeLead(payload: {
   return postJson<FinalizeLeadResponse>('/api/leads/finalize', payload);
 }
 
+export async function recordProducerTransferConsent(sessionId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.0' })
+    });
+    if (!response.ok) return false;
+
+    const data = await response.json() as { ok?: boolean; consent?: { producerTransfer?: boolean } };
+    return data.ok === true && data.consent?.producerTransfer === true;
+  } catch {
+    return false;
+  }
+}
+
 export type TeamMessage = {
   id: number;
   sender: 'user' | 'team';
@@ -197,13 +212,11 @@ export async function fetchTeamMessages(
 
 export async function uploadRequestedFiles(
   sessionId: string,
-  files: File[],
-  consent: AttachmentConsent
+  files: File[]
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const form = new FormData();
     form.set('sessionId', sessionId);
-    form.set('consent', JSON.stringify(consent));
     for (const file of files) {
       form.append('files', file, file.name);
     }

@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-const { requireSessionMock, sendTelegramMessageMock, emitEventMock } = vi.hoisted(() => ({
+const { requireSessionMock, sendTelegramMessageMock, ensureTelegramTopicMock, emitEventMock } = vi.hoisted(() => ({
   requireSessionMock: vi.fn(),
   sendTelegramMessageMock: vi.fn(),
+  ensureTelegramTopicMock: vi.fn(async () => null),
   emitEventMock: vi.fn()
 }));
 
@@ -13,7 +14,7 @@ vi.mock('@/lib/api/require-session', () => ({
 
 vi.mock('@/lib/telegram', () => ({
   sendTelegramMessage: sendTelegramMessageMock,
-  ensureTelegramTopic: vi.fn(async () => null),
+  ensureTelegramTopic: ensureTelegramTopicMock,
   editForumTopic: vi.fn(async () => true)
 }));
 
@@ -21,7 +22,7 @@ vi.mock('@/lib/observability/events', () => ({
   emitEvent: emitEventMock
 }));
 
-function createSupabase() {
+function createSupabase(consentTransitions: Array<{ scope: string; granted: boolean }> = [{ scope: 'producer_transfer', granted: true }]) {
   return {
     from: vi.fn((table: string) => {
       if (table === 'sessions') {
@@ -44,6 +45,16 @@ function createSupabase() {
         };
       }
 
+      if (table === 'session_consents') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: consentTransitions, error: null }))
+            }))
+          }))
+        };
+      }
+
       throw new Error(`Unexpected table ${table}`);
     })
   };
@@ -53,6 +64,7 @@ describe('POST /api/telegram/relay delivery events', () => {
   beforeEach(() => {
     requireSessionMock.mockReset();
     sendTelegramMessageMock.mockReset();
+    ensureTelegramTopicMock.mockReset();
     emitEventMock.mockReset();
   });
 
@@ -108,5 +120,25 @@ describe('POST /api/telegram/relay delivery events', () => {
       { handoffId: 'relay:sess-relay', reason: 'telegram_send_failed' },
       'rid-relay'
     );
+  });
+
+  test('does not create a topic or send Telegram when producer-transfer consent is absent', async () => {
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-relay', capability: 'cap' },
+      supabase: createSupabase([])
+    });
+
+    const { POST } = await import('@/app/api/telegram/relay/route');
+    const response = await POST(new Request('http://localhost/api/telegram/relay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'sess-relay', text: 'Hello team' })
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'consent_required' });
+    expect(ensureTelegramTopicMock).not.toHaveBeenCalled();
+    expect(sendTelegramMessageMock).not.toHaveBeenCalled();
   });
 });

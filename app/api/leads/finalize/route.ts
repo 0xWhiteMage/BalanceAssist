@@ -101,6 +101,16 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, sessionId, qualificationStatus, persisted: false, error: 'Consent ledger unavailable' }, { status: 500 }, request);
   }
 
+  if (!attachmentConsent.producerTransfer) {
+    return jsonWithCors({
+      ok: false,
+      code: 'consent_required',
+      sessionId,
+      qualificationStatus,
+      persisted: false
+    }, { status: 403 }, request);
+  }
+
   const canonicalDraft = {
     service: visibleDraft.service || undefined,
     projectType: visibleDraft.projectType || undefined,
@@ -174,19 +184,15 @@ export async function POST(request: Request) {
       sessionId
     );
 
-    const linkRows = attachmentConsent.producerTransfer
-      ? (await supabase
-          .from('reference_links')
-          .select('url, kind')
-          .eq('session_id', sessionId)).data
-      : [];
+    const linkRows = (await supabase
+      .from('reference_links')
+      .select('url, kind')
+      .eq('session_id', sessionId)).data;
 
-    const fileRows = attachmentConsent.producerTransfer
-      ? (await supabase
-          .from('uploaded_files')
-          .select('name, original_name, status, mime, mime_type')
-          .eq('session_id', sessionId)).data
-      : [];
+    const fileRows = (await supabase
+      .from('uploaded_files')
+      .select('name, original_name, status, mime, mime_type')
+      .eq('session_id', sessionId)).data;
 
     const packet = buildHandoffPacket({
       sessionId,
@@ -239,7 +245,6 @@ export async function POST(request: Request) {
         summary: packet.summaryText,
         threadId
       });
-
       if (handoffOutcome.handoffId) {
         emitEvent('handoff_enqueued', {
           sessionId,

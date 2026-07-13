@@ -24,6 +24,7 @@ vi.mock('@/lib/api/require-session', () => ({
 
 function buildMockSupabase(options?: { fileRequestOpen?: boolean; telegramThreadId?: number | null; status?: string; draft?: Record<string, unknown>; draftVersion?: number; consentTransitions?: Array<{ scope: string; granted: boolean }> }) {
   const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
+  const sessionUpdates: Array<Record<string, unknown>> = [];
   const fileRequestOpen = options?.fileRequestOpen ?? true;
   const telegramThreadId = options?.telegramThreadId ?? 42;
   const sessionStatus = options?.status ?? 'open';
@@ -61,7 +62,10 @@ function buildMockSupabase(options?: { fileRequestOpen?: boolean; telegramThread
               }))
             }))
           })),
-          update: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
+          update: vi.fn((row: Record<string, unknown>) => {
+            sessionUpdates.push(row);
+            return { eq: vi.fn(async () => ({ error: null })) };
+          }),
           insert: vi.fn(async () => ({ error: null }))
         };
       }
@@ -85,7 +89,7 @@ function buildMockSupabase(options?: { fileRequestOpen?: boolean; telegramThread
     })
   };
 
-  return { client, inserts };
+  return { client, inserts, sessionUpdates };
 }
 
 function makeFile(name: string, size: number, type: string): File {
@@ -159,7 +163,7 @@ describe('POST /api/telegram/upload', () => {
     vi.restoreAllMocks();
   });
 
-  test('proxies file to sendDocument and persists metadata only', async () => {
+  test('quarantines a file with a producer-transfer grant instead of sending it directly to Telegram', async () => {
     const { client, inserts } = buildMockSupabase({ status: 'completed' });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -179,16 +183,10 @@ describe('POST /api/telegram/upload', () => {
 
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
-    expect(data.telegramFileId).toBe('mock-telegram-file-id');
-
-    expect(sendDocumentMock).toHaveBeenCalledTimes(1);
-    const [threadId, buffer, caption, filename] = sendDocumentMock.mock.calls[0];
-    expect(threadId).toBe(42);
-    expect(Buffer.isBuffer(buffer)).toBe(true);
-    expect((buffer as Buffer).length).toBe(12_345);
-    expect(caption).toContain('deck.pdf');
-    expect(caption).toContain('reference');
-    expect(filename).toBe('deck.pdf');
+    expect(data.telegramFileId).toBeNull();
+    expect(data.forwarded).toBe(false);
+    expect(data.quarantined).toBe(true);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
 
     expect(client.storage.from).not.toHaveBeenCalled();
     expect(client.storage.createBucket).not.toHaveBeenCalled();
@@ -198,13 +196,13 @@ describe('POST /api/telegram/upload', () => {
     const row = fileInserts[0].row;
     expect(row).toMatchObject({
       session_id: '11111111-2222-3333-4444-555555555555',
-      telegram_file_id: 'mock-telegram-file-id',
+      telegram_file_id: expect.stringMatching(/^quarantined-/),
       name: 'deck.pdf',
       original_name: 'deck.pdf',
       size_bytes: 12_345,
       mime: 'application/pdf',
       mime_type: 'application/pdf',
-      status: 'sent',
+      status: 'quarantined',
       storage_path: null,
       kind: 'reference'
     });
@@ -257,15 +255,9 @@ describe('POST /api/telegram/upload', () => {
     expect(sendDocumentMock).not.toHaveBeenCalled();
   });
 
-  test('returns 502 without inserting when sendDocument returns ok:false (no Supabase write)', async () => {
+  test('does not attempt Telegram transfer when a completed session uploads a file', async () => {
     const { client, inserts } = buildMockSupabase({ status: 'completed' });
     createServerSupabaseClientMock.mockReturnValue(client);
-
-    sendDocumentMock.mockResolvedValue({
-      ok: false,
-      status: 502,
-      description: 'Telegram sendDocument HTTP 502'
-    });
 
     const form = buildFakeFormData(
       { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
@@ -275,14 +267,14 @@ describe('POST /api/telegram/upload', () => {
     const res = await callUploadRoute(form);
     const data = await res.json();
 
-    expect(res.status).toBe(502);
-    expect(data.ok).toBe(false);
-    expect(data.telegramStatus).toBe(502);
-
-    expect(sendDocumentMock).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.forwarded).toBe(false);
+    expect(data.quarantined).toBe(true);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
 
     const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
-    expect(fileInserts).toHaveLength(0);
+    expect(fileInserts).toHaveLength(1);
   });
 
   test('returns 403 when a deliverable upload was not requested by the team', async () => {
@@ -374,7 +366,7 @@ describe('POST /api/telegram/upload', () => {
     expect(sendDocumentMock).not.toHaveBeenCalled();
   });
 
-  test('forwards a team-requested deliverable with producer-share consent even when aiAnalysis is false', async () => {
+  test('quarantines a team-requested deliverable even when producer-transfer consent is granted', async () => {
     const { client, inserts } = buildMockSupabase({
       fileRequestOpen: true,
       telegramThreadId: 42,
@@ -403,17 +395,33 @@ describe('POST /api/telegram/upload', () => {
 
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
-    expect(data.forwarded).toBe(true);
+    expect(data.forwarded).toBe(false);
     expect(data.extractedText).toBeUndefined();
-    expect(sendDocumentMock).toHaveBeenCalledTimes(1);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
     expect(inserts).toContainEqual({
       table: 'uploaded_files',
       row: expect.objectContaining({
-        telegram_file_id: 'mock-telegram-file-id',
+        telegram_file_id: expect.stringMatching(/^quarantined-/),
         name: 'deliverable.txt',
         kind: 'deliverable'
       })
     });
+  });
+
+  test('keeps a team file request open while the upload is quarantined', async () => {
+    const { client, sessionUpdates } = buildMockSupabase({
+      fileRequestOpen: true,
+      consentTransitions: [{ scope: 'producer_transfer', granted: true }]
+    });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const response = await callUploadRoute(buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'deliverable' },
+      [makeFile('deliverable.pdf', 12_345, 'application/pdf')]
+    ));
+
+    expect(response.status).toBe(200);
+    expect(sessionUpdates).toHaveLength(0);
   });
 
   test('coerces unexpected kind values to "reference"', async () => {
@@ -434,8 +442,7 @@ describe('POST /api/telegram/upload', () => {
     const res = await callUploadRoute(form);
     expect(res.status).toBe(200);
 
-    const [, , caption] = sendDocumentMock.mock.calls[0];
-    expect(caption).toContain('(reference)');
+    expect(sendDocumentMock).not.toHaveBeenCalled();
 
     const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
     expect(fileInserts).toHaveLength(1);

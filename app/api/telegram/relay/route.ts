@@ -5,6 +5,7 @@ import { editForumTopic, ensureTelegramTopic, sendTelegramMessage } from '@/lib/
 import { buildTopicName, TOPIC_STATUS_COLOR } from '@/lib/conversation/topic-status';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
+import { getSessionConsent } from '@/lib/privacy/session-consent';
 
 const relayPayloadSchema = z.object({
   sessionId: z.string().min(1),
@@ -73,12 +74,26 @@ export async function POST(request: Request) {
     return authResult.response;
   }
 
+  const { supabase } = authResult;
+  let consent;
+  try {
+    consent = await getSessionConsent(supabase as never, sessionId);
+  } catch {
+    return jsonWithCors({ ok: false, error: 'Consent ledger unavailable' }, { status: 500 }, request);
+  }
+
+  if (!consent.producerTransfer) {
+    return jsonWithCors(
+      { ok: false, code: 'consent_required' },
+      { status: 403 },
+      request
+    );
+  }
+
   const shortId = sessionId.slice(0, 8);
 
   const detectedName = detectName(text);
   const detectedCompany = detectCompany(text);
-
-  const { supabase } = authResult;
 
   const { data: existingRow, error: fetchError } = await supabase
     .from('sessions')
