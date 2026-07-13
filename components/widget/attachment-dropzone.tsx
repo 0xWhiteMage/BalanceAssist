@@ -221,7 +221,7 @@ export function AttachmentDropzone({
           Share files to help us understand your project
         </div>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
-          Upload a PDF or deck, or share a Google Drive link.
+          File sharing is temporarily unavailable. Add a reference link instead.
         </div>
       </div>
 
@@ -299,7 +299,7 @@ export function AttachmentDropzone({
           borderRadius: 10,
           border: `1px dashed ${brandTokens.colors.border}`,
           textAlign: 'center',
-          cursor: 'pointer',
+          cursor: 'not-allowed',
           color: brandTokens.colors.mutedText,
           display: 'grid',
           justifyItems: 'center',
@@ -318,16 +318,16 @@ export function AttachmentDropzone({
             letterSpacing: '0.16em'
           }}
         >
-          Drop files here
+          File sharing unavailable
         </span>
         <span style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
-          (PDF, images, text, CSV up to 10 MB each)
+          Add a reference link above instead.
         </span>
         <input
           id="attachment-drop"
           type="file"
           multiple
-          onChange={(e) => handleFiles(e.target.files)}
+          disabled
           style={{ display: 'none' }}
         />
       </label>

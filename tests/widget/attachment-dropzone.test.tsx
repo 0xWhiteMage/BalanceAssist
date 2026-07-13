@@ -86,16 +86,15 @@ test('renders the uppercase section header and short subhead describing the uplo
     screen.getByText(/share files to help us understand your project/i)
   ).toBeInTheDocument();
   expect(
-    screen.getByText(/upload a pdf or deck, or share a google drive link/i)
+    screen.getByText(/file sharing is temporarily unavailable.*reference link/i)
   ).toBeInTheDocument();
 });
 
-test('dropzone region shows the uppercase DROP FILES HERE label and the accepted-format hint as a separate line', () => {
+test('dropzone states that file sharing is unavailable and disables selection', () => {
   render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
-  // The DROP FILES HERE label must be its own uppercase element, not buried in a sentence.
-  // The label is normalised to uppercase via CSS text-transform.
-  expect(screen.getByText((_, node) => node?.textContent?.trim().toUpperCase() === 'DROP FILES HERE')).toBeInTheDocument();
-  expect(screen.getByText('(PDF, images, text, CSV up to 10 MB each)')).toBeInTheDocument();
+  expect(screen.getByText(/file sharing unavailable/i)).toBeInTheDocument();
+  expect(screen.getByText(/add a reference link above instead/i)).toBeInTheDocument();
+  expect(document.querySelector('input[type="file"]')).toBeDisabled();
 });
 
 test('URL submit button uses the uppercase ADD LINK pill copy', () => {
@@ -160,7 +159,7 @@ test('persists producer-transfer consent before linking', async () => {
   });
 });
 
-test('allows analysis-only uploads without producer forwarding metadata', async () => {
+test('does not attempt analysis-only uploads while file sharing is unavailable', async () => {
   const onAddFile = vi.fn();
   const onFileAnalyzed = vi.fn();
   const uploadedConsents: string[] = [];
@@ -187,14 +186,9 @@ test('allows analysis-only uploads without producer forwarding metadata', async 
     throw new Error('File input missing');
   }
 
-  const file = new File(['brief text'], 'brief.txt', { type: 'text/plain' });
-  fireEvent.change(fileInput, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Project scope: launch film');
-      expect(screen.getByText(/quarantined pending review/i)).toBeInTheDocument();
-    });
+  expect(fileInput).toBeDisabled();
 
   expect(onAddFile).not.toHaveBeenCalled();
+  expect(onFileAnalyzed).not.toHaveBeenCalled();
   expect(uploadedConsents).toHaveLength(0);
 });

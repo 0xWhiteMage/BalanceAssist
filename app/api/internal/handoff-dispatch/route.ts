@@ -6,6 +6,7 @@ import { emitEvent } from '@/lib/observability/events';
 import { sendTelegramMessage } from '@/lib/telegram';
 import { getMaxRetries, type HandoffSLA } from '@/lib/handoff/sla';
 import { validateAdminRequestAny } from '@/lib/security/config';
+import { getSessionConsent } from '@/lib/privacy/session-consent';
 
 export async function POST(request: Request) {
   const requestId = extractRequestId(request);
@@ -44,6 +45,24 @@ export async function POST(request: Request) {
         logger.info('Suppressed unavailable session handoff', { handoffId: handoff.id });
         results.push({ id: handoff.id, status: 'suppressed' });
         continue;
+      }
+
+      if (payload.type === 'approval') {
+        const consent = await getSessionConsent(supabase as never, handoff.session_id);
+        if (!consent.producerTransfer) {
+          const outcome = await markFailed(supabase, handoff.id, handoff.claim_token ?? '', 'producer_transfer_revoked', {
+            maxRetryAttempts: 0,
+            retryBackoffMs: [],
+            escalationThresholdMs: 0
+          });
+          if (outcome.applied) {
+            emitEvent('handoff_suppressed', { handoffId: handoff.id, reason: 'producer_transfer_revoked' }, requestId);
+            results.push({ id: handoff.id, status: 'suppressed' });
+          } else {
+            results.push({ id: handoff.id, status: 'stale' });
+          }
+          continue;
+        }
       }
 
       if (!handoff.claim_token || !await reserveHandoffSend(supabase, handoff.id, handoff.claim_token)) {

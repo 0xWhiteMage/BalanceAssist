@@ -159,7 +159,8 @@ export function WidgetOverlay({
   const [hasStarted, setHasStarted] = useState(false);
   const [isTeamConnected, setIsTeamConnected] = useState(false);
   const [sessionUnavailable, setSessionUnavailable] = useState(false);
-  const [humanStatus, setHumanStatus] = useState<'idle' | 'connected' | 'delivered' | 'pending' | 'awaiting' | 'replied'>('idle');
+  const [humanStatus, setHumanStatus] = useState<'idle' | 'requested' | 'sending' | 'delivered' | 'pending' | 'awaiting' | 'replied'>('idle');
+  const [humanRequested, setHumanRequested] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
   const [humanFileRequestOpen, setHumanFileRequestOpen] = useState(false);
@@ -270,6 +271,7 @@ export function WidgetOverlay({
       }
       lastTeamMessageIdRef.current = Math.max(lastTeamMessageIdRef.current, ...messages.map((m) => m.id));
       setTeamWaitingForReply(false);
+      setIsTeamConnected(true);
       setHumanStatus('replied');
 
       const next = [...messagesRef.current];
@@ -298,7 +300,7 @@ export function WidgetOverlay({
   }, [teamWaitingForReply]);
 
   useEffect(() => {
-    if (!isTeamConnected || !sessionId) {
+    if ((!isTeamConnected && !humanRequested) || !sessionId) {
       return undefined;
     }
 
@@ -327,7 +329,7 @@ export function WidgetOverlay({
       }
       pollIntervalRef.current = null;
     };
-  }, [isTeamConnected, sessionId, pollTeamMessages]);
+  }, [humanRequested, isTeamConnected, sessionId, pollTeamMessages]);
 
   useEffect(() => {
     if (!isTeamConnected) {
@@ -738,12 +740,16 @@ export function WidgetOverlay({
   }
 
   async function handleTeamConnect() {
-    if (isTeamConnected || !noticeConsent) return;
+    if (humanRequested || !noticeConsent) return;
     const activeSessionId = await loadOrCreateSession();
     if (!activeSessionId) return;
 
-    setIsTeamConnected(true);
-    setHumanStatus('connected');
+    if (!await recordProducerTransferConsent(activeSessionId)) {
+      await botSay('Sorry — we could not confirm consent to share messages with the Balance team. Please try again.');
+      return;
+    }
+    setHumanRequested(true);
+    setHumanStatus('requested');
     setCurrentStep('free-chat');
 
     void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
@@ -751,7 +757,7 @@ export function WidgetOverlay({
     const connectMsg: ChatMessage = {
       id: nextId(),
       sender: 'bot',
-      text: 'Connected to Balance Studio team. Type your message below and it will be sent directly to our producers.',
+      text: 'Your request to contact the Balance team is ready. Send a message and we will confirm when the team replies.',
       timestamp: Date.now(),
       isSystem: true
     };
@@ -1048,28 +1054,28 @@ export function WidgetOverlay({
         return;
       }
 
-      if (isTeamConnected) {
+      if (humanRequested) {
         await ensureSession();
         const id = sessionIdRef.current;
         appendUserMessage(trimmed);
         setTeamWaitingForReply(true);
-        setHumanStatus('delivered');
+        setHumanStatus('sending');
 
         if (!id) {
           setTeamWaitingForReply(false);
-          setHumanStatus('connected');
+          setHumanStatus('requested');
           return;
         }
 
         const ok = await relayUserMessage(id, trimmed);
         if (!ok) {
           setTeamWaitingForReply(false);
-          setHumanStatus('connected');
+          setHumanStatus('requested');
           await botSay('Sorry, I could not reach the team right now. Please email hello@balancestudio.tv.');
           return;
         }
 
-        setHumanStatus('awaiting');
+        setHumanStatus('pending');
         if (pollImmediateTimerRef.current) {
           clearTimeout(pollImmediateTimerRef.current);
         }
@@ -1219,7 +1225,7 @@ export function WidgetOverlay({
       const uploadResult = await uploadRequestedFiles(id, files);
       if (!uploadResult.ok) {
         setTeamWaitingForReply(false);
-        setHumanStatus('connected');
+        setHumanStatus('requested');
         await botSay(uploadResult.error ?? 'Sorry, the files could not be quarantined for review. Please try again.');
       } else {
         await botSay('Your files are quarantined pending review. They have not been shared with the Balance team yet.');
@@ -1299,7 +1305,7 @@ export function WidgetOverlay({
               url={calendlyUrl}
               onBack={() => setView('chat')}
               onScheduled={async () => {
-                setHumanStatus('connected');
+              setHumanStatus('requested');
                 setView('chat');
                 await botSay(
                   "Your booking looks complete. We're still verifying that the Balance team received it."
@@ -1676,7 +1682,7 @@ export function WidgetOverlay({
                 </button>
               </div>
 
-              <HumanFooter isTeamConnected={isTeamConnected} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+              <HumanFooter isTeamConnected={humanRequested} humanStatus={humanStatus} onConnect={handleTeamConnect} />
             </>
           )}
         </div>

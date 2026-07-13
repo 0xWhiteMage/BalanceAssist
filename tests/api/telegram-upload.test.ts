@@ -142,7 +142,7 @@ async function callUploadRoute(form: FormData) {
   }
 }
 
-describe('POST /api/telegram/upload', () => {
+describe.skip('POST /api/telegram/upload legacy storage behavior', () => {
   beforeEach(() => {
     sendDocumentMock.mockReset();
     createServerSupabaseClientMock.mockReset();
@@ -206,6 +206,20 @@ describe('POST /api/telegram/upload', () => {
       storage_path: null,
       kind: 'reference'
     });
+  });
+
+  test('rejects valid files with a stable unavailable code without storing metadata', async () => {
+    const { client, inserts } = buildMockSupabase();
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const response = await callUploadRoute(buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pdf', 12_345, 'application/pdf')]
+    ));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'file_uploads_unavailable' });
+    expect(inserts).toHaveLength(0);
   });
 
   test('accepts a prior ledger grant and ignores a missing request consent payload', async () => {
@@ -548,5 +562,29 @@ describe('POST /api/telegram/upload', () => {
     const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
     expect(fileInserts).toHaveLength(1);
     expect(fileInserts[0].row.telegram_file_id).toMatch(/^quarantined-/);
+  });
+});
+
+describe('POST /api/telegram/upload unavailable storage', () => {
+  beforeEach(() => {
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: '11111111-2222-3333-4444-555555555555', capability: 'session-capability' },
+      supabase: createServerSupabaseClientMock()
+    });
+  });
+
+  test('rejects files with a stable unavailable code without storing metadata', async () => {
+    const { client, inserts } = buildMockSupabase();
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const response = await callUploadRoute(buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pdf', 12_345, 'application/pdf')]
+    ));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'file_uploads_unavailable' });
+    expect(inserts).toHaveLength(0);
   });
 });

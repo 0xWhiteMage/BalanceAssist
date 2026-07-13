@@ -9,6 +9,7 @@ const {
   markDeliveredMock,
   markFailedMock,
   sendTelegramMessageMock,
+  getSessionConsentMock,
   validateAdminRequestAnyMock,
   emitEventMock
 } = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const {
   markDeliveredMock: vi.fn(),
   markFailedMock: vi.fn(),
   sendTelegramMessageMock: vi.fn(),
+  getSessionConsentMock: vi.fn(),
   validateAdminRequestAnyMock: vi.fn(() => ({ ok: true })),
   emitEventMock: vi.fn()
 }));
@@ -39,6 +41,10 @@ vi.mock('@/lib/telegram', () => ({
   sendTelegramMessage: sendTelegramMessageMock
 }));
 
+vi.mock('@/lib/privacy/session-consent', () => ({
+  getSessionConsent: getSessionConsentMock
+}));
+
 vi.mock('@/lib/security/config', () => ({
   validateAdminRequestAny: validateAdminRequestAnyMock
 }));
@@ -54,10 +60,13 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     markDeliveredMock.mockReset();
     markFailedMock.mockReset();
     sendTelegramMessageMock.mockReset();
+    getSessionConsentMock.mockReset();
     emitEventMock.mockReset();
     validateAdminRequestAnyMock.mockReturnValue({ ok: true });
     reserveHandoffSendMock.mockResolvedValue(true);
     markDeliveredMock.mockResolvedValue(true);
+    markFailedMock.mockResolvedValue({ shouldRetry: false, escalated: false, retryDelayMs: 0, applied: true });
+    getSessionConsentMock.mockResolvedValue({ analysis: false, producerTransfer: true });
   });
 
   test('emits handoff_delivered when a claimed handoff is sent', async () => {
@@ -171,6 +180,30 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
 
     await expect(response.json()).resolves.toMatchObject({ results: [{ id: 'ho-stale', status: 'stale' }] });
     expect(reserveHandoffSendMock).toHaveBeenCalledWith(expect.anything(), 'ho-stale', '22222222-2222-4222-8222-222222222222');
+    expect(sendTelegramMessageMock).not.toHaveBeenCalled();
+  });
+
+  test('suppresses an approval handoff revoked after claim and before reservation', async () => {
+    claimNextHandoffMock
+      .mockResolvedValueOnce({
+        id: 'ho-revoked',
+        session_id: 'sess-revoked',
+        created_at: '2026-07-11T11:59:00.000Z',
+        claim_token: '44444444-4444-4444-8444-444444444444',
+        payload: { sessionId: 'sess-revoked', type: 'approval', summary: 'Do not send' },
+        resolution: 'claimed'
+      })
+      .mockResolvedValueOnce(null);
+    getSessionConsentMock.mockResolvedValue({ analysis: false, producerTransfer: false });
+
+    const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
+    const response = await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
+      method: 'POST',
+      headers: { authorization: 'Bearer cron-secret', 'x-request-id': 'rid-revoked' }
+    }));
+
+    await expect(response.json()).resolves.toMatchObject({ results: [{ id: 'ho-revoked', status: 'suppressed' }] });
+    expect(reserveHandoffSendMock).not.toHaveBeenCalled();
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
   });
 });

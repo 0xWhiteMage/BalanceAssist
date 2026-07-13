@@ -42,6 +42,13 @@ describe('DataUseNotice', () => {
     expect(screen.getByTestId('data-use-notice')).toBeInTheDocument();
   });
 
+  test('discloses the 24-hour temporary draft period without promising follow-up storage', () => {
+    render(<DataUseNotice onConsent={vi.fn()} />);
+
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/temporary draft.*24 hours/i);
+    expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/follow up/i);
+  });
+
   test('links to the privacy page for more detail', () => {
     render(<DataUseNotice onConsent={() => {}} />);
     expect(screen.getByRole('link', { name: /privacy/i })).toHaveAttribute('href', DATA_USE_NOTICE_COPY.privacyLink);
