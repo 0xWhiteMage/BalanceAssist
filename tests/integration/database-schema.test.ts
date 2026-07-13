@@ -9,12 +9,23 @@ type MigrationResult = {
 };
 
 type MigrationRunner = {
-  applyMigrations(options: { connectionString: string; migrationsDir: string }): Promise<MigrationResult>;
+  applyMigrations(options: {
+    connectionString: string;
+    migrationsDir: string;
+    throughVersion?: string;
+  }): Promise<MigrationResult>;
 };
 
 const connectionString = process.env.TEST_DATABASE_URL;
 const migrationsDir = resolve(process.cwd(), 'supabase/migrations');
 let client: import('pg').Client | undefined;
+let serviceClient: import('pg').Client | undefined;
+let adminClient: import('pg').Client | undefined;
+let rolelessConnectionString: string | undefined;
+let grantConnectionString: string | undefined;
+let rolelessMigration: MigrationResult | undefined;
+let hardeningMigration: MigrationResult | undefined;
+let publicRoleGrantsBeforeHardening: Array<Record<string, unknown>> | undefined;
 const applicationTables = [
   'sessions',
   'events',
@@ -33,37 +44,124 @@ async function loadRunner(): Promise<MigrationRunner> {
   ) as Promise<MigrationRunner>;
 }
 
+function withDatabase(connection: string, database: string) {
+  const url = new URL(connection);
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
+function serviceConnection(connection: string) {
+  const url = new URL(connection);
+  url.username = 'service_role';
+  url.password = 'test-service-role-password';
+  return url.toString();
+}
+
 describe.skipIf(!connectionString)('database schema migrations', () => {
   beforeAll(async () => {
     const { Client } = await import('pg');
-    const setupClient = new Client({ connectionString });
-    await setupClient.connect();
+    const runner = await loadRunner();
+    adminClient = new Client({ connectionString });
+    await adminClient.connect();
+
+    const roleCheck = await adminClient.query(
+      "select rolname from pg_roles where rolname = any(array['anon', 'authenticated', 'service_role'])"
+    );
+    expect(roleCheck.rows).toEqual([]);
+
+    const suffix = `${process.pid}_${Date.now()}`;
+    const rolelessDatabase = `balance_assist_roleless_${suffix}`;
+    const grantDatabase = `balance_assist_grants_${suffix}`;
+    rolelessConnectionString = withDatabase(connectionString!, rolelessDatabase);
+    grantConnectionString = withDatabase(connectionString!, grantDatabase);
+
+    await adminClient.query(`create database ${rolelessDatabase}`);
+    rolelessMigration = await runner.applyMigrations({
+      connectionString: rolelessConnectionString,
+      migrationsDir
+    });
+
+    // Plain PostgreSQL CI lacks Supabase roles. Create restricted API roles only after
+    // the roleless migration proves 018's conditional grants are portable.
+    await adminClient.query(`
+      CREATE ROLE anon NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+      CREATE ROLE authenticated NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+      CREATE ROLE service_role LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD 'test-service-role-password';
+      CREATE DATABASE ${grantDatabase};
+    `);
+
+    await runner.applyMigrations({
+      connectionString: grantConnectionString,
+      migrationsDir,
+      throughVersion: '017'
+    });
+    await adminClient.query(`
+      GRANT CONNECT ON DATABASE ${grantDatabase} TO service_role;
+    `);
+
+    const grantClient = new Client({ connectionString: grantConnectionString });
+    await grantClient.connect();
     try {
-      // Plain PostgreSQL CI lacks Supabase's API roles; these remain no-login.
-      await setupClient.query(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-            CREATE ROLE anon NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-          END IF;
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-            CREATE ROLE authenticated NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-          END IF;
-        END
-        $$;
+      await grantClient.query(`
+        GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+        GRANT ALL PRIVILEGES ON TABLE
+          public.sessions,
+          public.events,
+          public.leads,
+          public.human_messages,
+          public.uploaded_files,
+          public.reference_links,
+          public.processed_telegram_updates,
+          public.handoff_outbox
+        TO anon, authenticated, service_role;
       `);
+      publicRoleGrantsBeforeHardening = (
+        await grantClient.query(`
+          select rolname as role_name,
+                 has_schema_privilege(rolname, 'public', 'USAGE') as schema_usage,
+                 has_table_privilege(rolname, 'public.sessions', 'SELECT') as table_select
+          from pg_roles
+          where rolname = any(array['anon', 'authenticated'])
+          order by rolname
+        `)
+      ).rows;
     } finally {
-      await setupClient.end();
+      await grantClient.end();
     }
 
-    const runner = await loadRunner();
-    await runner.applyMigrations({ connectionString: connectionString!, migrationsDir });
-    client = new Client({ connectionString });
+    hardeningMigration = await runner.applyMigrations({
+      connectionString: grantConnectionString,
+      migrationsDir
+    });
+    client = new Client({ connectionString: grantConnectionString });
     await client.connect();
+    serviceClient = new Client({ connectionString: serviceConnection(grantConnectionString) });
+    await serviceClient.connect();
   });
 
   afterAll(async () => {
     await client?.end();
+    await serviceClient?.end();
+    if (adminClient && rolelessConnectionString && grantConnectionString) {
+      const rolelessDatabase = new URL(rolelessConnectionString).pathname.slice(1);
+      const grantDatabase = new URL(grantConnectionString).pathname.slice(1);
+      await adminClient.query(`drop database if exists ${rolelessDatabase}`);
+      await adminClient.query(`drop database if exists ${grantDatabase}`);
+      await adminClient.query('drop role if exists service_role, anon, authenticated');
+    }
+    await adminClient?.end();
+  });
+
+  it('applies the full chain, including 018, before public roles exist', () => {
+    expect(rolelessMigration?.applied).toContain('018_public_schema_rls.sql');
+  });
+
+  it('applies only 018 after public roles receive representative grants', () => {
+    expect(publicRoleGrantsBeforeHardening).toEqual([
+      { role_name: 'anon', schema_usage: true, table_select: true },
+      { role_name: 'authenticated', schema_usage: true, table_select: true }
+    ]);
+    expect(hardeningMigration?.applied).toEqual(['018_public_schema_rls.sql']);
   });
 
   it('creates the required current tables', async () => {
@@ -115,7 +213,19 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(privileges.rows).toEqual([]);
   });
 
-  it('denies anonymous and authenticated roles while the migration role retains access', async () => {
+  it('creates no policies on application tables', async () => {
+    const policies = await client!.query(
+      `select tablename, policyname
+       from pg_policies
+       where schemaname = 'public' and tablename = any($1::text[])
+       order by tablename, policyname`,
+      [applicationTables]
+    );
+
+    expect(policies.rows).toEqual([]);
+  });
+
+  it('denies anonymous and authenticated roles', async () => {
     for (const role of publicRoles) {
       await client!.query(`set role ${role}`);
       await expect(client!.query('select 1 from public.sessions limit 1')).rejects.toThrow();
@@ -124,11 +234,13 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       ).rejects.toThrow();
       await client!.query('reset role');
     }
+  });
 
-    const inserted = await client!.query(
+  it('allows the distinct service role to access application tables', async () => {
+    const inserted = await serviceClient!.query(
       "insert into public.sessions (source_url) values ('https://example.test') returning id"
     );
-    await client!.query('delete from public.sessions where id = $1', [inserted.rows[0].id]);
+    await serviceClient!.query('delete from public.sessions where id = $1', [inserted.rows[0].id]);
   });
 
   it('creates the required current columns', async () => {

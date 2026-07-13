@@ -65,7 +65,6 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run db:migrate:test
       - run: npm run test:db
 
   build:

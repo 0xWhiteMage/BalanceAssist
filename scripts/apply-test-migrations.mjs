@@ -41,13 +41,16 @@ export function getIncrementalMigrations(migrationsDir) {
 
 export async function applyMigrations({
   connectionString = process.env.TEST_DATABASE_URL,
-  migrationsDir = resolve(process.cwd(), 'supabase/migrations')
+  migrationsDir = resolve(process.cwd(), 'supabase/migrations'),
+  throughVersion
 } = {}) {
   if (!connectionString) {
     throw new Error('TEST_DATABASE_URL is required. Set it to a disposable PostgreSQL database before running database migrations or tests.');
   }
 
-  const migrations = getIncrementalMigrations(migrationsDir);
+  const migrations = getIncrementalMigrations(migrationsDir).filter(
+    (migration) => !throughVersion || BigInt(migration.version) <= BigInt(throughVersion)
+  );
   const client = new Client({ connectionString });
   const applied = [];
 
