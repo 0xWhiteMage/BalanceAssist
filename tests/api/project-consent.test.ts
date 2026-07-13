@@ -5,27 +5,11 @@ const { requireSessionMock } = vi.hoisted(() => ({ requireSessionMock: vi.fn() }
 
 vi.mock('@/lib/api/require-session', () => ({ requireSession: requireSessionMock }));
 
-function buildSupabase(transitions: Array<{ scope: string; granted: boolean }> = []) {
-  const inserts: Array<Record<string, unknown>> = [];
+function buildSupabase() {
+  const rpc = vi.fn(async () => ({ data: [{ analysis: true, producer_transfer: false }], error: null }));
   return {
-    inserts,
     client: {
-      from: vi.fn((table: string) => {
-        if (table === 'session_consents') {
-          return {
-            insert: vi.fn(async (row: Record<string, unknown>) => {
-              inserts.push(row);
-              return { error: null };
-            }),
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(async () => ({ data: transitions, error: null }))
-              }))
-            }))
-          };
-        }
-        return {};
-      })
+      rpc
     }
   };
 }
@@ -38,8 +22,8 @@ describe('POST /api/projects/[sessionId]/consent', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  test('persists an explicit authenticated transition before returning ledger state', async () => {
-    const { client, inserts } = buildSupabase([{ scope: 'analysis', granted: true }]);
+  test('records an explicit authenticated transition through the session-locked RPC', async () => {
+    const { client } = buildSupabase();
     requireSessionMock.mockResolvedValue({
       ok: true,
       auth: { sessionId: 'session-1', capability: 'session-1.capability' },
@@ -54,13 +38,12 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     }), { params: Promise.resolve({ sessionId: 'session-1' }) });
 
     expect(response.status).toBe(200);
-    expect(inserts).toEqual([{
-      session_id: 'session-1',
-      scope: 'analysis',
-      granted: true,
-      notice_version: '1.0',
-      provenance: 'session_capability'
-    }]);
+    expect(client.rpc).toHaveBeenCalledWith('record_session_consent', {
+      p_session_id: 'session-1',
+      p_scope: 'analysis',
+      p_granted: true,
+      p_notice_version: '1.0'
+    });
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       consent: { analysis: true, producerTransfer: false }
@@ -82,7 +65,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
   });
 
   test('returns authentication failures without writing a transition', async () => {
-    const { client, inserts } = buildSupabase();
+    const { client } = buildSupabase();
     requireSessionMock.mockResolvedValue({
       ok: false,
       response: new Response(JSON.stringify({ ok: false, code: 'SESSION_CAPABILITY_REQUIRED' }), { status: 401 })
@@ -95,6 +78,6 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     }), { params: Promise.resolve({ sessionId: 'session-1' }) });
 
     expect(response.status).toBe(401);
-    expect(inserts).toEqual([]);
+    expect(client.rpc).not.toHaveBeenCalled();
   });
 });

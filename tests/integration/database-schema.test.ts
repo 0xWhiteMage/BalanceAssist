@@ -161,6 +161,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(rolelessMigration?.applied).toContain('019_api_rate_limits.sql');
     expect(rolelessMigration?.applied).toContain('020_api_rate_limit_retention.sql');
     expect(rolelessMigration?.applied).toContain('021_session_consents.sql');
+    expect(rolelessMigration?.applied).toContain('022_session_consents_append_only.sql');
   });
 
   it('applies security migrations after public roles receive representative grants', () => {
@@ -172,7 +173,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '018_public_schema_rls.sql',
       '019_api_rate_limits.sql',
       '020_api_rate_limit_retention.sql',
-      '021_session_consents.sql'
+      '021_session_consents.sql',
+      '022_session_consents_append_only.sql'
     ]);
   });
 
@@ -309,7 +311,38 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '017:017_handoff_claim_leases.sql',
       '018:018_public_schema_rls.sql',
       '019:019_api_rate_limits.sql',
-      '020:020_api_rate_limit_retention.sql'
+      '020:020_api_rate_limit_retention.sql',
+      '021:021_session_consents.sql',
+      '022:022_session_consents_append_only.sql'
     ]);
+  });
+
+  it('records consent through a locked session and rejects ledger rewrites', async () => {
+    const session = await client!.query(
+      "insert into public.sessions (source_url) values ('https://example.test') returning id"
+    );
+    const sessionId = session.rows[0].id;
+
+    try {
+      const granted = await client!.query(
+        "select * from public.record_session_consent($1, 'analysis', true, '1.0')",
+        [sessionId]
+      );
+      const revoked = await client!.query(
+        "select * from public.record_session_consent($1, 'analysis', false, '1.0')",
+        [sessionId]
+      );
+      const ledger = await client!.query(
+        'select id from public.session_consents where session_id = $1 order by created_at desc, id desc limit 1',
+        [sessionId]
+      );
+
+      expect(granted.rows).toEqual([{ analysis: true, producer_transfer: false }]);
+      expect(revoked.rows).toEqual([{ analysis: false, producer_transfer: false }]);
+      await expect(client!.query('update public.session_consents set granted = true where id = $1', [ledger.rows[0].id])).rejects.toThrow('append-only');
+      await expect(client!.query('delete from public.session_consents where id = $1', [ledger.rows[0].id])).rejects.toThrow('append-only');
+    } finally {
+      await client!.query('delete from public.sessions where id = $1', [sessionId]);
+    }
   });
 });

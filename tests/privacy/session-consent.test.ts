@@ -26,6 +26,29 @@ describe('getSessionConsent', () => {
     });
   });
 
+  test('breaks equal transition timestamps by ledger id deterministically', async () => {
+    const client = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            order: vi.fn(async () => ({
+              data: [
+                { scope: 'analysis', granted: false, created_at: '2026-07-13T10:00:00.000Z', id: '00000000-0000-0000-0000-000000000002' },
+                { scope: 'analysis', granted: true, created_at: '2026-07-13T10:00:00.000Z', id: '00000000-0000-0000-0000-000000000001' }
+              ],
+              error: null
+            }))
+          }))
+        }))
+      }))
+    };
+
+    await expect(getSessionConsent(client as never, 'session-1')).resolves.toEqual({
+      analysis: false,
+      producerTransfer: false
+    });
+  });
+
   test('fails closed when the ledger cannot be read', async () => {
     const client = {
       from: vi.fn(() => ({

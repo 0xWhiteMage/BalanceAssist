@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { CONSENT_VERSION } from '@/lib/privacy/notice';
-import { getSessionConsent } from '@/lib/privacy/session-consent';
 
 const transitionSchema = z.object({
   scope: z.enum(['analysis', 'producer_transfer']),
@@ -36,21 +35,19 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     return jsonWithCors({ ok: false, code: 'SESSION_AUTHORIZATION_FAILED' }, { status: authResult.response.status }, request);
   }
 
-  const { error } = await authResult.supabase.from('session_consents').insert({
-    session_id: authResult.auth.sessionId,
-    scope: parsed.data.scope,
-    granted: parsed.data.granted,
-    notice_version: parsed.data.noticeVersion,
-    provenance: 'session_capability'
+  const { data, error } = await authResult.supabase.rpc('record_session_consent', {
+    p_session_id: authResult.auth.sessionId,
+    p_scope: parsed.data.scope,
+    p_granted: parsed.data.granted,
+    p_notice_version: parsed.data.noticeVersion
   });
   if (error) {
     return jsonWithCors({ ok: false, code: 'CONSENT_PERSISTENCE_FAILED' }, { status: 500 }, request);
   }
 
-  try {
-    const consent = await getSessionConsent(authResult.supabase as never, authResult.auth.sessionId);
-    return jsonWithCors({ ok: true, consent }, undefined, request);
-  } catch {
-    return jsonWithCors({ ok: false, code: 'CONSENT_PERSISTENCE_FAILED' }, { status: 500 }, request);
-  }
+  const state = (Array.isArray(data) ? data[0] : data) as { analysis?: boolean; producer_transfer?: boolean } | null;
+  return jsonWithCors({ ok: true, consent: {
+    analysis: state?.analysis === true,
+    producerTransfer: state?.producer_transfer === true
+  } }, undefined, request);
 }
