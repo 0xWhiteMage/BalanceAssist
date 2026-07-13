@@ -22,7 +22,7 @@ describe('rate limit key material', () => {
       headers: { 'x-forwarded-for': '203.0.113.10', 'x-real-ip': '203.0.113.11' }
     });
 
-    expect(getClientIpMaterial(spoofed)).toBe('untrusted-client-ip');
+    expect(getClientIpMaterial(spoofed)).toBeNull();
   });
 
   test('uses Vercel-sanitized client address only when explicitly configured', () => {

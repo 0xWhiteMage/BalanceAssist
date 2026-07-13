@@ -139,7 +139,7 @@ curl -X POST http://127.0.0.1:3000/api/telegram/simulate \
 
 The authoritative schema is the incremental chain from `001_initial_schema.sql` through `020_api_rate_limit_retention.sql` (including the intentionally absent `005` version). `000_full_schema.sql` is a legacy snapshot and must not be combined with the incremental chain.
 
-Chat requires an authenticated session capability and an allowed request origin. Chat calls are limited durably to 20 per session capability per hour; session creation is limited to 10 per client IP per hour. Session creation ignores `X-Forwarded-For` and `X-Real-IP` unless `TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for` is explicitly set on a Vercel deployment, where that sanitized header is the identity source. Other deployments use the shared `untrusted-client-ip` bucket instead of accepting spoofable client headers.
+Chat requires an authenticated session capability and an allowed request origin. Chat calls are limited durably to 20 per session capability per hour; session creation is limited to 10 per client IP per hour. Production Vercel deployments must set `TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for`; session creation fails with `session_rate_limit_identity_unavailable` when that trusted identity is unavailable. `X-Forwarded-For` and `X-Real-IP` are never accepted directly.
 
 Rate-limit retention is not part of the request path. When `pg_cron` is installed, migration `020` schedules a daily bounded prune. Otherwise schedule `select public.prune_api_rate_limits(500)` daily with the deployment's database maintenance facility.
 

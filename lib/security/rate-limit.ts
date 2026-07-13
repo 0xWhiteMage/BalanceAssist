@@ -10,14 +10,14 @@ export function hashRateLimitKey(material: string): string {
   return createHash('sha256').update(material).digest('hex');
 }
 
-export function getClientIpMaterial(request: Request): string {
+export function getClientIpMaterial(request: Request): string | null {
   const trustedHeader = process.env.TRUSTED_CLIENT_IP_HEADER?.toLowerCase();
   if (trustedHeader === 'x-vercel-forwarded-for') {
-    return request.headers.get(trustedHeader)?.trim() || 'untrusted-client-ip';
+    return request.headers.get(trustedHeader)?.trim() || null;
   }
 
   // Never accept client-controlled forwarding headers without an explicit deployment guarantee.
-  return 'untrusted-client-ip';
+  return null;
 }
 
 export async function consumeRateLimit(

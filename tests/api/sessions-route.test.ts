@@ -2,10 +2,11 @@ import { NextRequest } from 'next/server';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { extractSessionIdFromCapability } from '@/lib/security/session-capability';
 
-const { hasSupabaseServerConfigMock, createServerSupabaseClientMock, consumeRateLimitMock } = vi.hoisted(() => ({
+const { hasSupabaseServerConfigMock, createServerSupabaseClientMock, consumeRateLimitMock, getClientIpMaterialMock } = vi.hoisted(() => ({
   hasSupabaseServerConfigMock: vi.fn(),
   createServerSupabaseClientMock: vi.fn(),
-  consumeRateLimitMock: vi.fn()
+  consumeRateLimitMock: vi.fn(),
+  getClientIpMaterialMock: vi.fn()
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -15,7 +16,7 @@ vi.mock('@/lib/supabase/server', () => ({
 
 vi.mock('@/lib/security/rate-limit', () => ({
   consumeRateLimit: consumeRateLimitMock,
-  getClientIpMaterial: () => '203.0.113.7'
+  getClientIpMaterial: getClientIpMaterialMock
 }));
 
 import { POST } from '@/app/api/sessions/route';
@@ -31,6 +32,8 @@ beforeEach(() => {
   createServerSupabaseClientMock.mockReset();
   consumeRateLimitMock.mockReset();
   consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
+  getClientIpMaterialMock.mockReset();
+  getClientIpMaterialMock.mockReturnValue('203.0.113.7');
   hasSupabaseServerConfigMock.mockReturnValue(true);
   createServerSupabaseClientMock.mockImplementation(() => ({
     from: () => ({
@@ -49,6 +52,33 @@ beforeEach(() => {
       })
     })
   }));
+});
+
+test('returns a stable 503 without consuming a global bucket when trusted client identity is unavailable', async () => {
+  getClientIpMaterialMock.mockReturnValue(null);
+  const request = new NextRequest('https://www.balancestudio.tv/api/sessions', {
+    method: 'POST',
+    headers: { 'x-forwarded-for': '203.0.113.7', 'x-real-ip': '203.0.113.8' },
+    body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
+  });
+
+  const response = await POST(request);
+
+  expect(response.status).toBe(503);
+  await expect(response.json()).resolves.toEqual({ ok: false, code: 'session_rate_limit_identity_unavailable' });
+  expect(consumeRateLimitMock).not.toHaveBeenCalled();
+});
+
+test('uses the configured trusted client identity for a valid session creation request', async () => {
+  getClientIpMaterialMock.mockReturnValue('203.0.113.7');
+  const request = new NextRequest('https://www.balancestudio.tv/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
+  });
+
+  await POST(request);
+
+  expect(consumeRateLimitMock).toHaveBeenCalledWith('session-create:203.0.113.7', 10, 3600);
 });
 
 test('returns 429 and does not persist a session when the durable creation limiter rejects the client', async () => {
@@ -180,6 +210,7 @@ test('returns 400 for invalid JSON body', async () => {
   const response = await POST(request);
 
   expect(response.status).toBe(400);
+  expect(consumeRateLimitMock).not.toHaveBeenCalled();
 });
 
 test('returns 400 for schema-invalid payload', async () => {
@@ -191,6 +222,7 @@ test('returns 400 for schema-invalid payload', async () => {
   const response = await POST(request);
 
   expect(response.status).toBe(400);
+  expect(consumeRateLimitMock).not.toHaveBeenCalled();
 });
 
 test('includes CORS headers in response', async () => {

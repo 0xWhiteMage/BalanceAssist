@@ -37,18 +37,24 @@ export async function POST(request: Request) {
   const requestId = extractRequestId(request);
   const logger = createLogger('sessions', requestId);
 
+  if (!parsed.ok) {
+    return parsed.response;
+  }
+
+  const clientIpMaterial = getClientIpMaterial(request);
+  if (!clientIpMaterial) {
+    logger.error('Session creation rate limit identity is unavailable');
+    return jsonWithCors({ ok: false, code: 'session_rate_limit_identity_unavailable' }, { status: 503 }, request);
+  }
+
   try {
-    const limit = await consumeRateLimit(`session-create:${getClientIpMaterial(request)}`, SESSION_CREATION_LIMIT, SESSION_CREATION_WINDOW_SECONDS);
+    const limit = await consumeRateLimit(`session-create:${clientIpMaterial}`, SESSION_CREATION_LIMIT, SESSION_CREATION_WINDOW_SECONDS);
     if (!limit.permitted) {
       return jsonWithCors({ ok: false, code: 'rate_limited' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }, request);
     }
   } catch {
     logger.error('Session creation rate limit is unavailable');
     return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
-  }
-
-  if (!parsed.ok) {
-    return parsed.response;
   }
 
   const { sourceUrl, referrer, utm, consentVersion, consentedAt } = parsed.data;
