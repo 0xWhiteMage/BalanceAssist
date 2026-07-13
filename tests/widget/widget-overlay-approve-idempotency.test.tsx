@@ -17,7 +17,7 @@ vi.mock('@/lib/api/client', async () => {
     finalizeLead: finalizeLeadMock,
     fetchTeamMessages: vi.fn(async () => ({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })),
     logEvent: vi.fn(async () => ({ ok: true, eventName: 'mock-event' })),
-    createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '' })),
+    createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '', persisted: true })),
     getCurrentSession: vi.fn(async () => null)
   };
 });

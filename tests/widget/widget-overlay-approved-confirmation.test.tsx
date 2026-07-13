@@ -31,7 +31,7 @@ vi.mock('@/lib/api/client', async () => {
     })),
     notifyScheduleCompleted: notifyScheduleCompletedMock,
     logEvent: vi.fn(async () => ({ ok: true, eventName: 'mock-event' })),
-    createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '' })),
+    createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '', persisted: true })),
     getCurrentSession: vi.fn(async () => null)
   };
 });
