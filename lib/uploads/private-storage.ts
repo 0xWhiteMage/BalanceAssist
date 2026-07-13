@@ -15,7 +15,7 @@ export type PrivateStorageClient = {
     select: (columns: string) => {
       eq: (column: string, value: string) => {
         lte: (column: string, value: string) => {
-          limit: (count: number) => PromiseLike<{ data: Array<{ id?: string; object_key: string; session_id?: string; bucket?: string }> | null; error: { message?: string } | null }>;
+          limit: (count: number) => PromiseLike<{ data: Array<{ id?: string; object_key: string; session_id?: string; bucket?: string; cleanup_required_at?: string | null }> | null; error: { message?: string } | null }>;
         };
         maybeSingle: () => PromiseLike<{ data: { status?: string } | null; error: unknown }>;
       };
@@ -30,7 +30,7 @@ export type PrivateStorageClient = {
 };
 
 export class PrivateStorageError extends Error {
-  constructor(public readonly code: 'private_storage_unavailable' | 'private_storage_upload_failed' | 'private_storage_metadata_failed') {
+  constructor(public readonly code: 'private_storage_unavailable' | 'private_storage_upload_failed' | 'private_storage_metadata_failed' | 'private_storage_recovery_unavailable') {
     super(code);
   }
 }
@@ -61,12 +61,24 @@ export async function storePrivateUpload(input: { client: PrivateStorageClient; 
     throw new PrivateStorageError('private_storage_upload_failed');
   }
 
-  const objectKey = `${input.sessionId}/${randomUUID()}`;
+  const objectKey = randomUUID();
   const checksum = createHash('sha256').update(bytes).digest('hex');
   const retentionExpiresAt = temporaryDraftExpiry().toISOString();
+  // Reserve recovery before creating an object so a failed rollback cannot orphan it.
+  const cleanup = await input.client.from('private_attachment_cleanup').insert({
+    bucket: input.bucket,
+    object_key: objectKey,
+    checksum_sha256: checksum,
+    retention_expires_at: retentionExpiresAt,
+    status: 'pending_cleanup'
+  });
+  if (cleanup.error) {
+    throw new PrivateStorageError('private_storage_recovery_unavailable');
+  }
   const storage = input.client.storage.from(input.bucket);
   const uploaded = await storage.upload(objectKey, bytes, { contentType: validation.mime, upsert: false });
   if (uploaded.error) {
+    await input.client.from('private_attachment_cleanup').delete().eq('object_key', objectKey);
     throw new PrivateStorageError('private_storage_upload_failed');
   }
 
@@ -82,50 +94,55 @@ export async function storePrivateUpload(input: { client: PrivateStorageClient; 
   });
   if (metadata.error) {
     const rollback = await storage.remove([objectKey]);
-    if (rollback.error) {
-      await input.client.from('private_attachment_cleanup').insert({
-        bucket: input.bucket,
-        object_key: objectKey,
-        checksum_sha256: checksum,
-        retention_expires_at: retentionExpiresAt,
-        status: 'pending_cleanup'
-      });
+    if (!rollback.error) {
+      await input.client.from('private_attachment_cleanup').delete().eq('object_key', objectKey);
     }
     throw new PrivateStorageError('private_storage_metadata_failed');
   }
+
+  await input.client.from('private_attachment_cleanup').delete().eq('object_key', objectKey);
 
   return { status: 'stored' as const, objectKey, mimeType: validation.mime, retentionExpiresAt };
 }
 
 export async function cleanupExpiredStoredUploads(client: PrivateStorageClient, bucket: string, limit = 100) {
-  const expired = await client.from('uploaded_files').select('id, object_key, session_id').eq('status', 'stored').lte('retention_expires_at', new Date().toISOString()).limit(limit);
-  if (expired.error) return { deleted: 0, failed: 0, deferredSessionIds: [] as string[] };
+  const expired = await client.from('uploaded_files').select('id, object_key, session_id, cleanup_required_at').eq('status', 'stored').lte('retention_expires_at', new Date().toISOString()).limit(limit);
+  if (expired.error) return { deleted: 0, failed: 1, deferredSessionIds: [] as string[], complete: false };
 
   let deleted = 0;
   let failed = 0;
-  const deferredSessionIds: string[] = [];
+  const deferredSessionIds = new Set<string>();
+  let complete = (expired.data?.length ?? 0) < limit;
   const storage = client.storage.from(bucket);
   for (const file of expired.data ?? []) {
     const removed = await storage.remove([file.object_key]);
     if (removed.error) {
       failed++;
-      if (file.session_id) deferredSessionIds.push(file.session_id);
+      if (file.session_id) deferredSessionIds.add(file.session_id);
+      else complete = false;
       continue;
     }
     if (!file.id) {
       failed++;
+      if (file.session_id) deferredSessionIds.add(file.session_id);
+      else complete = false;
       continue;
     }
-    const marked = await client.from('uploaded_files').update({ status: 'expired' }).eq('id', file.id);
+    const marked = file.cleanup_required_at
+      ? await client.from('uploaded_files').delete().eq('id', file.id)
+      : await client.from('uploaded_files').update({ status: 'expired' }).eq('id', file.id);
     if (marked.error) {
       failed++;
+      if (file.session_id) deferredSessionIds.add(file.session_id);
+      else complete = false;
       continue;
     }
     deleted++;
   }
 
   const orphaned = await client.from('private_attachment_cleanup').select('object_key, bucket').eq('status', 'pending_cleanup').lte('retention_expires_at', new Date().toISOString()).limit(limit);
-  if (orphaned.error) return { deleted, failed: failed + 1, deferredSessionIds };
+  if (orphaned.error) return { deleted, failed: failed + 1, deferredSessionIds: [...deferredSessionIds], complete: false };
+  if ((orphaned.data?.length ?? 0) >= limit) complete = false;
   for (const record of orphaned.data ?? []) {
     if (record.bucket !== bucket) continue;
     const removed = await storage.remove([record.object_key]);
@@ -140,5 +157,5 @@ export async function cleanupExpiredStoredUploads(client: PrivateStorageClient, 
     }
     deleted++;
   }
-  return { deleted, failed, deferredSessionIds };
+  return { deleted, failed, deferredSessionIds: [...deferredSessionIds], complete };
 }

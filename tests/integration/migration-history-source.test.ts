@@ -13,6 +13,7 @@ describe('database migration history expectation', () => {
     expect(source).toContain("'028:028_handoff_reservation_consent_recheck.sql'");
     expect(source).toContain("'029:029_private_attachment_storage.sql'");
     expect(source).toContain("'030:030_private_attachment_retention.sql'");
-    await expect(readFile(resolve(process.cwd(), 'README.md'), 'utf8')).resolves.toContain('030_private_attachment_retention.sql');
+    expect(source).toContain("'031:031_private_attachment_cleanup_hardening.sql'");
+    await expect(readFile(resolve(process.cwd(), 'README.md'), 'utf8')).resolves.toContain('031_private_attachment_cleanup_hardening.sql');
   });
 });

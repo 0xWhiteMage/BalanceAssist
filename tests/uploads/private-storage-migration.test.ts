@@ -36,4 +36,20 @@ describe('private attachment storage migration', () => {
     expect(migration).toMatch(/anon|authenticated/i);
     expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM anon, authenticated/i);
   });
+
+  test('hardens legacy key cleanup and proves policy safety without policy-text heuristics', () => {
+    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/031_private_attachment_cleanup_hardening.sql'), 'utf8');
+
+    expect(migration).toMatch(/cleanup_required_at timestamptz/i);
+    expect(migration).toMatch(/object_key ~ '\^\[0-9a-f\]\{8\}/i);
+    expect(migration).toMatch(/INSERT INTO public\.uploaded_files/i);
+    expect(migration).toMatch(/DELETE FROM public\.private_attachment_cleanup/i);
+    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM PUBLIC/i);
+    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM anon/i);
+    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM authenticated/i);
+    expect(migration).toMatch(/DROP POLICY IF EXISTS/i);
+    expect(migration).toMatch(/roles && ARRAY\['public'::name, 'anon'::name, 'authenticated'::name\]/i);
+    expect(migration).not.toMatch(/ILIKE|~\*.*temporary-attachments/i);
+    expect(migration).toMatch(/CASE WHEN .* THEN 'ready' ELSE 'unavailable' END/is);
+  });
 });

@@ -11,13 +11,14 @@ export async function POST(request: Request) {
   const supabase = createServerSupabaseClient();
   if (!supabase) return NextResponse.json({ ok: false, error: 'Supabase client failed' }, { status: 503 });
   const bucket = privateUploadBucketFromEnv();
-  let cleanup = { deleted: 0, failed: 0, deferredSessionIds: [] as string[] };
+  let cleanup = { deleted: 0, failed: 0, deferredSessionIds: [] as string[], complete: true };
   if (bucket) {
     try {
       cleanup = await cleanupExpiredStoredUploads(supabase as unknown as PrivateStorageClient, bucket);
     } catch {
       return NextResponse.json({ ok: false, error: 'Private attachment cleanup failed' }, { status: 503 });
     }
+    if (!cleanup.complete) return NextResponse.json({ ok: false, error: 'Private attachment cleanup incomplete' }, { status: 503 });
   }
   const { data, error } = bucket
     ? await supabase.rpc('purge_expired_temporary_sessions', { p_deferred_session_ids: cleanup.deferredSessionIds })

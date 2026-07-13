@@ -146,8 +146,10 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           public.handoff_outbox,
           public.schema_migrations
         TO anon, authenticated, server_role_simulation;
+        GRANT SELECT ON storage.objects TO PUBLIC;
         CREATE POLICY temporary_attachments_anon_read ON storage.objects FOR SELECT TO anon USING (bucket_id = 'temporary-attachments');
         CREATE POLICY temporary_attachments_authenticated_read ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'temporary-attachments');
+        CREATE POLICY unrelated_public_read ON storage.objects FOR SELECT TO PUBLIC USING (bucket_id is not null);
       `);
       publicRoleGrantsBeforeHardening = (
         await grantClient.query(`
@@ -216,7 +218,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        '027_handoff_send_reservations.sql',
        '028_handoff_reservation_consent_recheck.sql',
        '029_private_attachment_storage.sql',
-       '030_private_attachment_retention.sql'
+       '030_private_attachment_retention.sql',
+       '031_private_attachment_cleanup_hardening.sql'
     ]);
   });
 
@@ -471,14 +474,14 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     await client!.query('delete from public.sessions where id = $1', [sessionId]);
   });
 
-  it('provisions a private bucket and removes target-bucket public API policies', async () => {
+  it('provisions a private bucket and removes every browser-role object policy and grant', async () => {
     const bucket = await client!.query("select id, public from storage.buckets where id = 'temporary-attachments'");
     const policies = await client!.query(`
       select policyname
       from pg_policies
       where schemaname = 'storage' and tablename = 'objects'
         and (roles && array['anon'::name, 'authenticated'::name] or roles && array['public'::name])
-        and (coalesce(qual, '') ilike '%temporary-attachments%' or coalesce(with_check, '') ilike '%temporary-attachments%')
+        and roles && array['public'::name, 'anon'::name, 'authenticated'::name]
     `);
     const readiness = await client!.query("select status from public.private_attachment_storage_readiness where bucket = 'temporary-attachments'");
     const privileges = await client!.query(`
@@ -647,7 +650,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        '027:027_handoff_send_reservations.sql',
         '028:028_handoff_reservation_consent_recheck.sql',
          '029:029_private_attachment_storage.sql',
-         '030:030_private_attachment_retention.sql'
+         '030:030_private_attachment_retention.sql',
+         '031:031_private_attachment_cleanup_hardening.sql'
     ]);
   });
 

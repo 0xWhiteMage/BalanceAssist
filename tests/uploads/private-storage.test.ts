@@ -10,15 +10,17 @@ function makeFile(name = 'client-brief.pdf') {
   return file;
 }
 
-function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; insertError?: boolean; removeError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
+function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; insertError?: boolean; cleanupInsertError?: boolean; removeError?: boolean; updateError?: boolean; expiredError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string; cleanup_required_at?: string | null }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
   const upload = vi.fn(async () => ({ error: null }));
   const remove = vi.fn(async () => ({ error: options?.removeError ? { message: 'delete failed' } : null }));
   const insert = vi.fn(async () => ({ error: options?.insertError ? { message: 'metadata failed' } : null }));
-  const update = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }));
+  const cleanupInsert = vi.fn(async () => ({ error: options?.cleanupInsertError ? { message: 'recovery unavailable' } : null }));
+  const update = vi.fn(() => ({ eq: vi.fn(async () => ({ error: options?.updateError ? { message: 'metadata update failed' } : null })) }));
+  const metadataDelete = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }));
   const select = vi.fn(() => ({
     eq: vi.fn(() => ({
       lte: vi.fn(() => ({
-        limit: vi.fn(async () => ({ data: options?.expired ?? [], error: null }))
+        limit: vi.fn(async () => ({ data: options?.expired ?? [], error: options?.expiredError ? { message: 'metadata query failed' } : null }))
       }))
     }))
   }));
@@ -29,14 +31,16 @@ function makeClient(options?: { bucket?: { id: string; public: boolean } | null;
       from: vi.fn(() => ({ upload, remove }))
     },
     from: vi.fn((table: string) => table === 'private_attachment_cleanup'
-      ? { insert, select: vi.fn(() => ({ eq: vi.fn(() => ({ lte: vi.fn(() => ({ limit: vi.fn(async () => ({ data: options?.orphaned ?? [], error: null })) })) })) })), delete: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })) }
+      ? { insert: cleanupInsert, select: vi.fn(() => ({ eq: vi.fn(() => ({ lte: vi.fn(() => ({ limit: vi.fn(async () => ({ data: options?.orphaned ?? [], error: null })) })) })) })), delete: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })) }
       : table === 'private_attachment_storage_readiness'
         ? { select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: { status: options?.readiness ?? 'ready' }, error: null })) })) })) }
-        : { insert, update, select }),
+        : { insert, update, select, delete: metadataDelete }),
     upload,
     remove,
     insert,
-    update
+    cleanupInsert,
+    update,
+    metadataDelete
   };
 }
 
@@ -66,7 +70,8 @@ describe('private attachment storage', () => {
     const result = await storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() });
 
     expect(result).toMatchObject({ status: 'stored', mimeType: 'application/pdf' });
-    expect(result.objectKey).toMatch(new RegExp(`^${sessionId}/[0-9a-f-]{36}$`));
+    expect(result.objectKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.objectKey).not.toContain(sessionId);
     expect(result.objectKey).not.toContain('client-brief.pdf');
     expect(client.upload).toHaveBeenCalledWith(result.objectKey, expect.any(Uint8Array), expect.objectContaining({ contentType: 'application/pdf', upsert: false }));
     expect(client.insert).toHaveBeenCalledWith(expect.objectContaining({
@@ -84,24 +89,34 @@ describe('private attachment storage', () => {
 
     await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
       .rejects.toMatchObject({ code: 'private_storage_metadata_failed' });
-    expect(client.remove).toHaveBeenCalledWith([expect.stringMatching(new RegExp(`^${sessionId}/[0-9a-f-]{36}$`))]);
+    expect(client.remove).toHaveBeenCalledWith([expect.stringMatching(/^[0-9a-f-]{36}$/)]);
   });
 
-  test('persists an opaque cleanup record when metadata rollback deletion fails', async () => {
+  test('retains a pre-reserved opaque cleanup record when metadata rollback deletion fails', async () => {
     const client = makeClient({ insertError: true, removeError: true });
 
     await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile('private-budget.pdf') }))
       .rejects.toMatchObject({ code: 'private_storage_metadata_failed' });
 
     expect(client.from).toHaveBeenCalledWith('private_attachment_cleanup');
-    expect(client.insert).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(client.cleanupInsert).toHaveBeenCalledWith(expect.objectContaining({
       bucket: 'temporary-attachments',
-      object_key: expect.stringMatching(new RegExp(`^${sessionId}/[0-9a-f-]{36}$`)),
+      object_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
       checksum_sha256: '071ba51d826053284a6642847585427ad1b571446ddc39524c1104a82d58dba0',
       retention_expires_at: expect.any(String),
       status: 'pending_cleanup'
     }));
     expect(JSON.stringify(client.insert.mock.calls)).not.toContain('private-budget.pdf');
+    expect(JSON.stringify(client.cleanupInsert.mock.calls)).not.toContain(sessionId);
+  });
+
+  test('does not upload an object when durable cleanup recovery cannot be reserved', async () => {
+    const client = makeClient({ cleanupInsertError: true });
+
+    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+      .rejects.toMatchObject({ code: 'private_storage_recovery_unavailable' });
+
+    expect(client.upload).not.toHaveBeenCalled();
   });
 
   test('never logs the original filename', async () => {
@@ -113,18 +128,45 @@ describe('private attachment storage', () => {
   });
 
   test('deletes expired objects before marking them expired', async () => {
-    const client = makeClient({ expired: [{ id: 'file-1', object_key: `${sessionId}/0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c`, session_id: sessionId }] });
+    const client = makeClient({ expired: [{ id: 'file-1', object_key: '0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c', session_id: sessionId }] });
 
-    await expect(cleanupExpiredStoredUploads(client as never, 'temporary-attachments')).resolves.toEqual({ deleted: 1, failed: 0, deferredSessionIds: [] });
-    expect(client.remove).toHaveBeenCalledWith([`${sessionId}/0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c`]);
+    await expect(cleanupExpiredStoredUploads(client as never, 'temporary-attachments')).resolves.toEqual({ deleted: 1, failed: 0, deferredSessionIds: [], complete: true });
+    expect(client.remove).toHaveBeenCalledWith(['0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c']);
     expect(client.update).toHaveBeenCalledWith({ status: 'expired' });
   });
 
+  test('deletes cleanup-required legacy metadata only after its object is removed', async () => {
+    const client = makeClient({ expired: [{ id: 'file-1', object_key: '11111111-2222-3333-4444-555555555555/0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c', session_id: sessionId, cleanup_required_at: '2026-01-01T00:00:00Z' }] });
+
+    await expect(cleanupExpiredStoredUploads(client as never, 'temporary-attachments')).resolves.toMatchObject({ deleted: 1, failed: 0, complete: true });
+    expect(client.remove).toHaveBeenCalledWith(['11111111-2222-3333-4444-555555555555/0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c']);
+    expect(client.metadataDelete).toHaveBeenCalledWith();
+  });
+
+  test('fails closed without purge eligibility when expired metadata cannot be queried', async () => {
+    const client = makeClient({ expiredError: true });
+
+    await expect(cleanupExpiredStoredUploads(client as never, 'temporary-attachments')).resolves.toEqual({ deleted: 0, failed: 1, deferredSessionIds: [], complete: false });
+  });
+
+  test('defers a session when object deletion or metadata expiry marking fails', async () => {
+    const expired = [{ id: 'file-1', object_key: '0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c', session_id: sessionId }];
+
+    await expect(cleanupExpiredStoredUploads(makeClient({ expired, removeError: true }) as never, 'temporary-attachments')).resolves.toEqual({ deleted: 0, failed: 1, deferredSessionIds: [sessionId], complete: true });
+    await expect(cleanupExpiredStoredUploads(makeClient({ expired, updateError: true }) as never, 'temporary-attachments')).resolves.toEqual({ deleted: 0, failed: 1, deferredSessionIds: [sessionId], complete: true });
+  });
+
+  test('fails closed when a bounded page might omit expired objects', async () => {
+    const expired = Array.from({ length: 2 }, (_, index) => ({ id: `file-${index}`, object_key: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, session_id: sessionId }));
+
+    await expect(cleanupExpiredStoredUploads(makeClient({ expired }) as never, 'temporary-attachments', 2)).resolves.toEqual({ deleted: 2, failed: 0, deferredSessionIds: [], complete: false });
+  });
+
   test('retries orphan cleanup records during expiry cleanup', async () => {
-    const objectKey = `${sessionId}/0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c`;
+    const objectKey = '0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c';
     const client = makeClient({ orphaned: [{ object_key: objectKey, bucket: 'temporary-attachments' }] });
 
-    await expect(cleanupExpiredStoredUploads(client as never, 'temporary-attachments')).resolves.toEqual({ deleted: 1, failed: 0, deferredSessionIds: [] });
+    await expect(cleanupExpiredStoredUploads(client as never, 'temporary-attachments')).resolves.toEqual({ deleted: 1, failed: 0, deferredSessionIds: [], complete: true });
 
     expect(client.remove).toHaveBeenCalledWith([objectKey]);
     expect(client.from).toHaveBeenCalledWith('private_attachment_cleanup');
