@@ -69,31 +69,30 @@ export async function sendTelegramMessage(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options?.timeoutMs ?? HANDOFF_SEND_TIMEOUT_MS);
-  let response: Response;
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal
     });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as TelegramResponse;
+
+    if (!data.ok || !data.result) {
+      return null;
+    }
+
+    return { messageId: data.result.message_id };
   } catch {
     return null;
   } finally {
     clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const data = (await response.json()) as TelegramResponse;
-
-  if (!data.ok || !data.result) {
-    return null;
-  }
-
-  return { messageId: data.result.message_id };
 }
 
 export async function sendTelegramDocument(
