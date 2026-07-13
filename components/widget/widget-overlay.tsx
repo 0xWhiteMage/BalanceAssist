@@ -827,13 +827,13 @@ export function WidgetOverlay({
     setReferenceFiles((prev) => [...prev, file]);
   }
 
-  async function handleFileAnalyzed(fileName: string, extractedText: string) {
+  async function handleFileAnalyzed(_fileName: string, extractedText: string) {
     const trimmed = extractedText.trim();
     if (!trimmed) return;
-    appendUserMessage(`Analyzed: ${fileName}`);
-    await botSay(`Reading ${fileName} — pulling out the key details…`, { delay: 150 });
+    appendUserMessage('Analyzed temporary attachment');
+    await botSay('Reading the temporary attachment — pulling out the key details…', { delay: 150 });
     if (cancelRef.current) return;
-    const prompt = `The user uploaded "${fileName}". Extracted text:\n\n${trimmed.slice(0, 3000)}\n\nPlease extract any project brief fields from this text and update the brief. Tell the user what you found.`;
+    const prompt = `Server-verified attachment analysis text:\n\n${trimmed.slice(0, 3000)}\n\nPlease extract any project brief fields from this text and update the brief. Tell the user what you found.`;
     const syntheticHistory: ChatMessage[] = [
       ...messagesRef.current,
       { id: nextId(), sender: 'user', text: prompt, timestamp: Date.now() }

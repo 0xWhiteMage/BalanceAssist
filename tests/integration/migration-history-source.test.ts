@@ -16,6 +16,7 @@ describe('database migration history expectation', () => {
     expect(source).toContain("'031:031_private_attachment_cleanup_hardening.sql'");
     expect(source).toContain("'032:032_legacy_cleanup_record_remediation.sql'");
     expect(source).toContain("'033:033_private_attachment_live_attestation.sql'");
-    await expect(readFile(resolve(process.cwd(), 'README.md'), 'utf8')).resolves.toContain('033_private_attachment_live_attestation.sql');
+    expect(source).toContain("'034:034_private_attachment_effective_attestation.sql'");
+    await expect(readFile(resolve(process.cwd(), 'README.md'), 'utf8')).resolves.toContain('034_private_attachment_effective_attestation.sql');
   });
 });

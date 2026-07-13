@@ -1,6 +1,10 @@
 import zlib from 'node:zlib';
 
 const MAX_EXTRACTED_CHARS = 4000;
+const MAX_PDF_COMPRESSED_STREAM_BYTES = 256 * 1024;
+const MAX_PDF_INFLATED_BYTES = 512 * 1024;
+const MAX_PDF_TOTAL_INFLATED_BYTES = 1024 * 1024;
+const MAX_PDF_STREAMS = 16;
 
 type ZipEntry = {
   name: string;
@@ -177,11 +181,19 @@ function extractFromPdf(buffer: Buffer): string {
   const inflated: string[] = [];
   const streamRe = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let streamMatch: RegExpExecArray | null;
+  let totalInflated = 0;
+  let streams = 0;
   while ((streamMatch = streamRe.exec(latin)) !== null) {
+    if (++streams > MAX_PDF_STREAMS || Buffer.byteLength(streamMatch[1], 'latin1') > MAX_PDF_COMPRESSED_STREAM_BYTES) return '';
     try {
-      inflated.push(zlib.inflateSync(Buffer.from(streamMatch[1], 'latin1')).toString('latin1'));
-    } catch {
-      // not a zlib stream — ignore
+      const output = zlib.inflateSync(Buffer.from(streamMatch[1], 'latin1'), { maxOutputLength: MAX_PDF_INFLATED_BYTES });
+      totalInflated += output.byteLength;
+      if (totalInflated > MAX_PDF_TOTAL_INFLATED_BYTES) return '';
+      inflated.push(output.toString('latin1'));
+    } catch (error) {
+      if (error instanceof RangeError || (error as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE') return '';
+      // A PDF can contain an uncompressed stream; it is still available through
+      // the bounded original buffer fallback below.
     }
   }
   const combined = inflated.length > 0 ? `${inflated.join('\n')}\n${latin}` : latin;

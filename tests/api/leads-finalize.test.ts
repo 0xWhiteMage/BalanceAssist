@@ -104,7 +104,9 @@ function buildMockSupabase({
       if (table === 'uploaded_files') {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(async () => ({ data: referenceFiles, error: null }))
+            eq: vi.fn(() => ({
+              is: vi.fn(async () => ({ data: referenceFiles, error: null }))
+            }))
           }))
         };
       }

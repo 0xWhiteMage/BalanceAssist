@@ -192,7 +192,8 @@ export async function POST(request: Request) {
     const fileRows = (await supabase
       .from('uploaded_files')
       .select('name, original_name, status, mime, mime_type')
-      .eq('session_id', sessionId)).data;
+      .eq('session_id', sessionId)
+      .is('object_key', null)).data;
 
     const packet = buildHandoffPacket({
       sessionId,

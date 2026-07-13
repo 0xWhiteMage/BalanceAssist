@@ -221,7 +221,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        '030_private_attachment_retention.sql',
        '031_private_attachment_cleanup_hardening.sql',
         '032_legacy_cleanup_record_remediation.sql',
-        '033_private_attachment_live_attestation.sql'
+        '033_private_attachment_live_attestation.sql',
+        '034_private_attachment_effective_attestation.sql'
     ]);
   });
 
@@ -699,7 +700,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
          '030:030_private_attachment_retention.sql',
          '031:031_private_attachment_cleanup_hardening.sql',
           '032:032_legacy_cleanup_record_remediation.sql',
-          '033:033_private_attachment_live_attestation.sql'
+          '033:033_private_attachment_live_attestation.sql',
+          '034:034_private_attachment_effective_attestation.sql'
     ]);
   });
 

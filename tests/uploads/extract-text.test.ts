@@ -160,4 +160,11 @@ describe('extractTextFromBuffer', () => {
     const text = extractTextFromBuffer(Buffer.from(longBody), 'big.txt');
     expect(text.length).toBeLessThanOrEqual(4000);
   });
+
+  test('rejects a compressed PDF stream whose inflated output exceeds the extraction budget', () => {
+    const bomb = zlib.deflateSync(Buffer.alloc(2 * 1024 * 1024, 0x41));
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\nstream\n', 'latin1'), bomb, Buffer.from('\nendstream\n%%EOF', 'latin1')]);
+
+    expect(extractTextFromBuffer(pdf, 'bomb.pdf')).toBe('');
+  });
 });

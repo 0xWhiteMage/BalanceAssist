@@ -101,4 +101,26 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(response.status).toBe(503);
     expect(deletePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ bucket: 'temporary-attachments', objectKey: 'opaque-one' }));
   });
+
+  test('returns recovery-unavailable when batch compensation fails', async () => {
+    storePrivateUploadMock.mockResolvedValueOnce({ status: 'stored', objectKey: 'opaque-one', mimeType: 'text/plain', extractedText: 'first', retentionExpiresAt: '2026-07-15T00:00:00.000Z' }).mockRejectedValueOnce(new Error('storage failed'));
+    deletePrivateUploadMock.mockResolvedValueOnce(false);
+    const form = new FormData();
+    form.append('files', new File(['first'], 'first.txt', { type: 'text/plain' }));
+    form.append('files', new File(['second'], 'second.txt', { type: 'text/plain' }));
+
+    const response = await post(form);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'private_storage_recovery_unavailable' });
+  });
+
+  test('returns unavailable when current storage readiness rejects persistence', async () => {
+    storePrivateUploadMock.mockRejectedValueOnce(new Error('private_storage_unavailable'));
+
+    const response = await post(formWith(new File(['brief'], 'brief.txt', { type: 'text/plain' })));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'private_storage_unavailable' });
+  });
 });
