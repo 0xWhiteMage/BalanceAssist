@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { claimNextHandoff, generateIdempotencyKey, getPendingHandoffs, markFailed } from '@/lib/handoff/outbox';
+import { claimNextHandoff, generateIdempotencyKey, getPendingHandoffs, markDelivered, markFailed } from '@/lib/handoff/outbox';
 
 type OutboxRow = {
   id: string;
@@ -16,11 +16,12 @@ type OutboxRow = {
   updated_at: string;
   next_attempt_at: string;
   claim_expires_at?: string | null;
+  claim_token?: string | null;
   last_error?: string | null;
 };
 
 function createOutboxSupabase(rows: OutboxRow[]) {
-  const byId = new Map(rows.map((row) => [row.id, { ...row }]));
+  const byId = new Map(rows.map((row) => [row.id, { ...row, claim_token: row.claim_token ?? 'claim-token' }]));
 
   const supabase = {
     rpc: vi.fn(),
@@ -186,7 +187,7 @@ describe('handoff/outbox', () => {
           id: 'ho-1',
           session_id: 'session-1',
           payload: { sessionId: 'session-1', type: 'approval', summary: 'Hello' },
-          state: 'pending',
+          state: 'claiming',
           attempts: 0,
           created_at: '2026-07-11T11:59:00.000Z',
           updated_at: '2026-07-11T11:59:00.000Z',
@@ -195,10 +196,10 @@ describe('handoff/outbox', () => {
         }
       ]);
 
-      const outcome = await markFailed(harness.supabase as never, 'ho-1', 'Telegram send failed');
+      const outcome = await markFailed(harness.supabase as never, 'ho-1', 'claim-token', 'Telegram send failed');
       const row = harness.byId.get('ho-1');
 
-      expect(outcome).toEqual({ shouldRetry: true, escalated: false, retryDelayMs: 300_000 });
+      expect(outcome).toEqual({ shouldRetry: true, escalated: false, retryDelayMs: 300_000, applied: true });
       expect(row).toMatchObject({
         state: 'pending',
         attempts: 1,
@@ -213,7 +214,7 @@ describe('handoff/outbox', () => {
           id: 'ho-2',
           session_id: 'session-2',
           payload: { sessionId: 'session-2', type: 'approval', summary: 'Hello' },
-          state: 'pending',
+          state: 'claiming',
           attempts: 3,
           created_at: '2026-07-11T11:59:00.000Z',
           updated_at: '2026-07-11T11:59:00.000Z',
@@ -222,10 +223,10 @@ describe('handoff/outbox', () => {
         }
       ]);
 
-      const outcome = await markFailed(harness.supabase as never, 'ho-2', 'still failing');
+      const outcome = await markFailed(harness.supabase as never, 'ho-2', 'claim-token', 'still failing');
       const row = harness.byId.get('ho-2');
 
-      expect(outcome).toEqual({ shouldRetry: false, escalated: false, retryDelayMs: 0 });
+      expect(outcome).toEqual({ shouldRetry: false, escalated: false, retryDelayMs: 0, applied: true });
       expect(row).toMatchObject({
         state: 'failed',
         attempts: 4,
@@ -239,7 +240,7 @@ describe('handoff/outbox', () => {
           id: 'ho-timeline-normal',
           session_id: 'session-timeline-normal',
           payload: { sessionId: 'session-timeline-normal', type: 'approval', summary: 'Hello' },
-          state: 'pending',
+          state: 'claiming',
           attempts: 0,
           created_at: '2026-07-11T12:00:00.000Z',
           updated_at: '2026-07-11T12:00:00.000Z',
@@ -248,25 +249,28 @@ describe('handoff/outbox', () => {
         }
       ]);
 
-      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toMatchObject({
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'claim-token', 'failed')).toMatchObject({
         shouldRetry: true,
         retryDelayMs: 300_000
       });
 
       vi.setSystemTime(new Date('2026-07-11T12:05:00.000Z'));
-      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toMatchObject({
+      harness.byId.get('ho-timeline-normal')!.state = 'claiming';
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'claim-token', 'failed')).toMatchObject({
         shouldRetry: true,
         retryDelayMs: 300_000
       });
 
       vi.setSystemTime(new Date('2026-07-11T12:10:00.000Z'));
-      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toMatchObject({
+      harness.byId.get('ho-timeline-normal')!.state = 'claiming';
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'claim-token', 'failed')).toMatchObject({
         shouldRetry: true,
         retryDelayMs: 300_000
       });
 
       vi.setSystemTime(new Date('2026-07-11T12:15:00.000Z'));
-      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toEqual({
+      harness.byId.get('ho-timeline-normal')!.state = 'claiming';
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'claim-token', 'failed')).toMatchObject({
         shouldRetry: false,
         escalated: true,
         retryDelayMs: 0
@@ -279,7 +283,7 @@ describe('handoff/outbox', () => {
           id: 'ho-timeline-delayed',
           session_id: 'session-timeline-delayed',
           payload: { sessionId: 'session-timeline-delayed', type: 'approval', summary: 'Hello' },
-          state: 'pending',
+          state: 'claiming',
           attempts: 0,
           created_at: '2026-07-11T12:00:00.000Z',
           updated_at: '2026-07-11T12:00:00.000Z',
@@ -290,7 +294,8 @@ describe('handoff/outbox', () => {
 
       for (const time of ['2026-07-11T12:00:20.000Z', '2026-07-11T12:05:20.000Z', '2026-07-11T12:10:20.000Z']) {
         vi.setSystemTime(new Date(time));
-        expect(await markFailed(harness.supabase as never, 'ho-timeline-delayed', 'failed')).toMatchObject({
+        harness.byId.get('ho-timeline-delayed')!.state = 'claiming';
+        expect(await markFailed(harness.supabase as never, 'ho-timeline-delayed', 'claim-token', 'failed')).toMatchObject({
           shouldRetry: true,
           escalated: false,
           retryDelayMs: 300_000
@@ -298,7 +303,8 @@ describe('handoff/outbox', () => {
       }
 
       vi.setSystemTime(new Date('2026-07-11T12:15:20.000Z'));
-      expect(await markFailed(harness.supabase as never, 'ho-timeline-delayed', 'failed')).toEqual({
+      harness.byId.get('ho-timeline-delayed')!.state = 'claiming';
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-delayed', 'claim-token', 'failed')).toMatchObject({
         shouldRetry: false,
         escalated: true,
         retryDelayMs: 0
@@ -311,7 +317,7 @@ describe('handoff/outbox', () => {
           id: 'ho-3',
           session_id: 'session-3',
           payload: { sessionId: 'session-3', type: 'approval', summary: 'Hello' },
-          state: 'pending',
+          state: 'claiming',
           attempts: 0,
           created_at: '2026-07-11T11:40:00.000Z',
           updated_at: '2026-07-11T11:40:00.000Z',
@@ -320,15 +326,37 @@ describe('handoff/outbox', () => {
         }
       ]);
 
-      const outcome = await markFailed(harness.supabase as never, 'ho-3', 'timed out');
+      const outcome = await markFailed(harness.supabase as never, 'ho-3', 'claim-token', 'timed out');
       const row = harness.byId.get('ho-3');
 
-      expect(outcome).toEqual({ shouldRetry: false, escalated: true, retryDelayMs: 0 });
+      expect(outcome).toEqual({ shouldRetry: false, escalated: true, retryDelayMs: 0, applied: true });
       expect(row).toMatchObject({
         state: 'escalated',
         attempts: 1,
         last_error: 'timed out'
       });
+    });
+  });
+
+  describe('markDelivered', () => {
+    it('does not let a stale claim token complete a newer active claim', async () => {
+      const harness = createOutboxSupabase([{
+        id: 'ho-owned',
+        session_id: 'session-owned',
+        payload: { sessionId: 'session-owned', type: 'approval', summary: 'Owned' },
+        state: 'claiming',
+        attempts: 0,
+        created_at: '2026-07-11T11:59:00.000Z',
+        updated_at: '2026-07-11T11:59:00.000Z',
+        next_attempt_at: '2026-07-11T11:59:00.000Z',
+        claim_token: 'new-owner',
+        last_error: null
+      }]);
+
+      expect(await markDelivered(harness.supabase as never, 'ho-owned', 'stale-owner')).toBe(false);
+      expect(harness.byId.get('ho-owned')?.state).toBe('claiming');
+      expect(await markDelivered(harness.supabase as never, 'ho-owned', 'new-owner')).toBe(true);
+      expect(harness.byId.get('ho-owned')?.state).toBe('sent');
     });
   });
 

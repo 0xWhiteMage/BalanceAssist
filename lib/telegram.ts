@@ -27,6 +27,8 @@ export type TelegramUpdate = {
   };
 };
 
+export const HANDOFF_SEND_TIMEOUT_MS = 45_000;
+
 export function getTelegramConfig(): { botToken: string; chatId: string } | null {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -40,7 +42,7 @@ export function getTelegramConfig(): { botToken: string; chatId: string } | null
 
 export async function sendTelegramMessage(
   text: string,
-  options?: { replyToMessageId?: number; threadId?: number }
+  options?: { replyToMessageId?: number; threadId?: number; timeoutMs?: number }
 ): Promise<{ messageId: number } | null> {
   const config = getTelegramConfig();
 
@@ -65,11 +67,21 @@ export async function sendTelegramMessage(
     body.message_thread_id = options.threadId;
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options?.timeoutMs ?? HANDOFF_SEND_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     return null;

@@ -193,7 +193,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(rolelessMigration?.applied).toContain('024_temporary_expiry_hardening.sql');
   });
 
-  it('applies security migrations after public roles receive representative grants', () => {
+  it('upgrades a database already through 024 with the replacement purge function and ownership migration', () => {
     expect(publicRoleGrantsBeforeHardening).toEqual([
       { role_name: 'anon', schema_usage: true, table_select: true },
       { role_name: 'authenticated', schema_usage: true, table_select: true }
@@ -205,7 +205,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '021_session_consents.sql',
       '022_session_consents_append_only.sql',
       '023_temporary_session_retention.sql',
-      '024_temporary_expiry_hardening.sql'
+      '024_temporary_expiry_hardening.sql',
+      '025_in_flight_handoff_retention.sql',
+      '026_handoff_claim_ownership.sql'
     ]);
   });
 
@@ -293,10 +295,11 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
 
   it('creates the required current columns', async () => {
     const result = await client!.query(
-      "select table_name, column_name from information_schema.columns where table_schema = 'public' and (table_name, column_name) in (('sessions', 'capability_hash'), ('sessions', 'capability_expires_at'), ('sessions', 'consent_version'), ('sessions', 'consented_at'), ('sessions', 'draft'), ('sessions', 'draft_version'), ('leads', 'idempotency_key'), ('uploaded_files', 'original_name'), ('uploaded_files', 'mime_type'), ('uploaded_files', 'status'), ('uploaded_files', 'storage_path'), ('processed_telegram_updates', 'update_id'), ('processed_telegram_updates', 'received_at'), ('handoff_outbox', 'idempotency_key'), ('handoff_outbox', 'claim_expires_at'))"
+      "select table_name, column_name from information_schema.columns where table_schema = 'public' and (table_name, column_name) in (('sessions', 'capability_hash'), ('sessions', 'capability_expires_at'), ('sessions', 'consent_version'), ('sessions', 'consented_at'), ('sessions', 'draft'), ('sessions', 'draft_version'), ('leads', 'idempotency_key'), ('uploaded_files', 'original_name'), ('uploaded_files', 'mime_type'), ('uploaded_files', 'status'), ('uploaded_files', 'storage_path'), ('processed_telegram_updates', 'update_id'), ('processed_telegram_updates', 'received_at'), ('handoff_outbox', 'idempotency_key'), ('handoff_outbox', 'claim_expires_at'), ('handoff_outbox', 'claim_token'))"
     );
 
     expect(result.rows.map((row) => `${row.table_name}.${row.column_name}`).sort()).toEqual([
+      'handoff_outbox.claim_token',
       'handoff_outbox.claim_expires_at',
       'handoff_outbox.idempotency_key',
       'leads.idempotency_key',
@@ -456,6 +459,37 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     await client!.query('delete from public.sessions where id = $1', [sessionId]);
   });
 
+  it('rejects stale ownership-token completion after a lease is reclaimed', async () => {
+    const session = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at)
+       values ('https://claim-ownership.example.test', now() + interval '1 hour') returning id`
+    );
+    const sessionId = session.rows[0].id;
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    const handoff = await client!.query(
+      `insert into public.handoff_outbox (session_id, payload, state, idempotency_key)
+       values ($1, '{}'::jsonb, 'pending', 'claim-ownership-' || gen_random_uuid()) returning id`,
+      [sessionId]
+    );
+
+    const first = await client!.query('select * from public.claim_next_handoff()');
+    await client!.query('update public.handoff_outbox set claim_expires_at = now() - interval \'1 second\' where id = $1', [handoff.rows[0].id]);
+    const second = await client!.query('select * from public.claim_next_handoff()');
+    const stale = await client!.query(
+      "update public.handoff_outbox set state = 'sent' where id = $1 and state = 'claiming' and claim_token = $2 returning id",
+      [handoff.rows[0].id, first.rows[0].claim_token]
+    );
+    const current = await client!.query(
+      "update public.handoff_outbox set state = 'sent' where id = $1 and state = 'claiming' and claim_token = $2 returning id",
+      [handoff.rows[0].id, second.rows[0].claim_token]
+    );
+
+    expect(first.rows[0].claim_token).not.toBe(second.rows[0].claim_token);
+    expect(stale.rows).toEqual([]);
+    expect(current.rows).toEqual([{ id: handoff.rows[0].id }]);
+    await client!.query('delete from public.sessions where id = $1', [sessionId]);
+  });
+
   it('grants the expiry RPC only to service_role', async () => {
     const privileges = await client!.query(
       `select
@@ -503,7 +537,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '022:022_session_consents_append_only.sql',
       '023:023_temporary_session_retention.sql',
       '024:024_temporary_expiry_hardening.sql',
-      '025:025_in_flight_handoff_retention.sql'
+      '025:025_in_flight_handoff_retention.sql',
+      '026:026_handoff_claim_ownership.sql'
     ]);
   });
 

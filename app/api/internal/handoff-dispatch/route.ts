@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { claimNextHandoff, markDelivered, markFailed } from '@/lib/handoff/outbox';
+import { claimNextHandoff, markDelivered, markFailed, renewHandoffClaim } from '@/lib/handoff/outbox';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { sendTelegramMessage } from '@/lib/telegram';
@@ -46,20 +46,35 @@ export async function POST(request: Request) {
         continue;
       }
 
+      if (!handoff.claim_token || !await renewHandoffClaim(supabase, handoff.id, handoff.claim_token)) {
+        logger.info('Skipped stale handoff claim', { handoffId: handoff.id });
+        results.push({ id: handoff.id, status: 'stale' });
+        continue;
+      }
+
       if (payload.type === 'approval' || payload.type === 'relay') {
         const result = await sendTelegramMessage(payload.summary, {
           threadId: payload.threadId ?? undefined
         });
 
         if (result) {
-          await markDelivered(supabase, handoff.id);
+          const applied = await markDelivered(supabase, handoff.id, handoff.claim_token);
+          if (!applied) {
+            logger.warn('Skipped stale handoff completion', { handoffId: handoff.id });
+            results.push({ id: handoff.id, status: 'stale' });
+            continue;
+          }
           const durationMs = handoff.created_at
             ? Math.max(0, Date.now() - new Date(handoff.created_at).getTime())
             : 0;
           emitEvent('handoff_delivered', { handoffId: handoff.id, durationMs }, requestId);
           results.push({ id: handoff.id, status: 'sent' });
         } else {
-          const outcome = await markFailed(supabase, handoff.id, 'Telegram send failed', sla);
+          const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, 'Telegram send failed', sla);
+          if (!outcome.applied) {
+            results.push({ id: handoff.id, status: 'stale' });
+            continue;
+          }
           emitEvent(
             outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
             { handoffId: handoff.id, reason: 'Telegram send failed' },
@@ -79,7 +94,11 @@ export async function POST(request: Request) {
           });
         }
       } else {
-        const outcome = await markFailed(supabase, handoff.id, `Unknown handoff type: ${payload.type}`, sla);
+        const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, `Unknown handoff type: ${payload.type}`, sla);
+        if (!outcome.applied) {
+          results.push({ id: handoff.id, status: 'stale' });
+          continue;
+        }
         emitEvent(
           outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
           { handoffId: handoff.id, reason: `Unknown handoff type: ${payload.type}` },
@@ -99,7 +118,11 @@ export async function POST(request: Request) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      const outcome = await markFailed(supabase, handoff.id, message, sla);
+      const outcome = await markFailed(supabase, handoff.id, handoff.claim_token ?? '', message, sla);
+      if (!outcome.applied) {
+        results.push({ id: handoff.id, status: 'stale' });
+        continue;
+      }
       emitEvent(
         outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
         { handoffId: handoff.id, reason: message },

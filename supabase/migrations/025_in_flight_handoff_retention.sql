@@ -1,3 +1,5 @@
+DROP FUNCTION IF EXISTS public.purge_expired_temporary_sessions();
+
 ALTER TABLE public.handoff_outbox
   ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
 
@@ -130,8 +132,12 @@ $$;
 
 DROP FUNCTION IF EXISTS public.authorize_handoff_send(uuid);
 
+REVOKE ALL ON FUNCTION public.purge_expired_temporary_sessions() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.claim_next_handoff() FROM PUBLIC;
 DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN REVOKE ALL ON FUNCTION public.purge_expired_temporary_sessions() FROM anon; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN REVOKE ALL ON FUNCTION public.purge_expired_temporary_sessions() FROM authenticated; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN GRANT EXECUTE ON FUNCTION public.purge_expired_temporary_sessions() TO service_role; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN REVOKE ALL ON FUNCTION public.claim_next_handoff() FROM anon; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN REVOKE ALL ON FUNCTION public.claim_next_handoff() FROM authenticated; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN GRANT EXECUTE ON FUNCTION public.claim_next_handoff() TO service_role; END IF;

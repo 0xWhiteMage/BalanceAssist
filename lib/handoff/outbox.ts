@@ -90,21 +90,28 @@ export async function enqueueHandoff(
 
 export async function markDelivered(
   supabase: SupabaseServerClient,
-  handoffId: string
-): Promise<void> {
+  handoffId: string,
+  claimToken: string
+): Promise<boolean> {
   const deliveredAt = new Date().toISOString();
-  await supabase
+  const { data, error } = await supabase
     .from('handoff_outbox')
     .update({ state: 'sent', updated_at: deliveredAt, next_attempt_at: deliveredAt, claim_expires_at: null })
-    .eq('id', handoffId);
+    .eq('id', handoffId)
+    .eq('state', 'claiming')
+    .eq('claim_token', claimToken)
+    .select('id')
+    .maybeSingle();
+  return !error && Boolean(data);
 }
 
 export async function markFailed(
   supabase: SupabaseServerClient,
   handoffId: string,
+  claimToken: string,
   error: string,
   sla?: HandoffSLA
-): Promise<{ shouldRetry: boolean; escalated: boolean; retryDelayMs: number }> {
+): Promise<{ shouldRetry: boolean; escalated: boolean; retryDelayMs: number; applied: boolean }> {
   const maxRetries = getMaxRetries(sla);
 
   const { data: row } = await supabase
@@ -123,7 +130,7 @@ export async function markFailed(
     ? new Date(now.getTime() + retryDelayMs).toISOString()
     : now.toISOString();
 
-  await supabase
+  const { data, error: updateError } = await supabase
     .from('handoff_outbox')
     .update({
       state: escalated ? 'escalated' : shouldRetry ? 'pending' : 'failed',
@@ -133,9 +140,13 @@ export async function markFailed(
       next_attempt_at: nextAttemptAt,
       claim_expires_at: null
     })
-    .eq('id', handoffId);
+    .eq('id', handoffId)
+    .eq('state', 'claiming')
+    .eq('claim_token', claimToken)
+    .select('id')
+    .maybeSingle();
 
-  return { shouldRetry, escalated, retryDelayMs };
+  return { shouldRetry, escalated, retryDelayMs, applied: !updateError && Boolean(data) };
 }
 
 export async function getPendingHandoffs(
@@ -157,21 +168,31 @@ export async function getPendingHandoffs(
 
 export async function claimNextHandoff(
   supabase: SupabaseServerClient
-): Promise<{ id: string; session_id: string; payload: HandoffPayload; created_at?: string; resolution: 'claimed' | 'suppressed' } | null> {
+): Promise<{ id: string; session_id: string; payload: HandoffPayload; created_at?: string; claim_token: string | null; resolution: 'claimed' | 'suppressed' } | null> {
   const { data, error } = await supabase.rpc('claim_next_handoff');
   if (error || !Array.isArray(data) || data.length === 0) return null;
-  return data[0] as { id: string; session_id: string; payload: HandoffPayload; created_at?: string; resolution: 'claimed' | 'suppressed' };
+  return data[0] as { id: string; session_id: string; payload: HandoffPayload; created_at?: string; claim_token: string | null; resolution: 'claimed' | 'suppressed' };
+}
+
+export async function renewHandoffClaim(supabase: SupabaseServerClient, handoffId: string, claimToken: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('renew_handoff_claim', { p_handoff_id: handoffId, p_claim_token: claimToken });
+  return !error && data === true;
 }
 
 export async function releaseClaim(
   supabase: SupabaseServerClient,
   handoffId: string,
+  claimToken: string,
   finalState: 'pending' | 'sent' | 'failed' | 'escalated'
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date().toISOString();
-  await supabase
+  const { data, error } = await supabase
     .from('handoff_outbox')
     .update({ state: finalState, updated_at: now, claim_expires_at: null })
     .eq('id', handoffId)
-    .eq('state', 'claiming');
+    .eq('state', 'claiming')
+    .eq('claim_token', claimToken)
+    .select('id')
+    .maybeSingle();
+  return !error && Boolean(data);
 }
