@@ -74,6 +74,19 @@ function buildReferenceLinkSupabase() {
           };
         }
 
+        if (table === 'session_consents') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(async () => ({
+                  data: [{ scope: 'producer_transfer', granted: true, created_at: '2026-07-13T10:00:00.000Z', id: 'consent-1' }],
+                  error: null
+                }))
+              }))
+            }))
+          };
+        }
+
         return {
           insert: vi.fn((row: Record<string, unknown>) => {
             inserts.push({ table, row });

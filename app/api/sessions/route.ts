@@ -7,6 +7,7 @@ import { emitEvent } from '@/lib/observability/events';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { generateCapability, hashCapability } from '@/lib/security/session-capability';
 import { consumeRateLimit, getClientIpMaterial } from '@/lib/security/rate-limit';
+import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
 
 const SESSION_CREATION_LIMIT = 10;
 const SESSION_CREATION_WINDOW_SECONDS = 60 * 60;
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
 
   const sessionId = crypto.randomUUID();
   const capability = generateCapability(sessionId);
+  const activityAt = new Date();
   try {
     const { data, error } = await supabase
       .from('sessions')
@@ -92,7 +94,9 @@ export async function POST(request: Request) {
         consented_at: consentedAt ?? null,
         status: 'open',
         capability_hash: hashCapability(capability.capability),
-        capability_expires_at: capability.expiresAt
+        capability_expires_at: capability.expiresAt,
+        last_activity_at: activityAt.toISOString(),
+        draft_expires_at: temporaryDraftExpiry(activityAt).toISOString()
       })
       .select('id, status, source_url, created_at')
       .single();

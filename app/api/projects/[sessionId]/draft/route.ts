@@ -4,6 +4,7 @@ import { clearField, normalizeVersionedDraft, updateField, type VersionedDraft }
 import { requireSession } from '@/lib/api/require-session';
 import { extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
+import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
 
 const updateFieldSchema = z.object({
   field: z.string().min(1).max(100),
@@ -146,7 +147,7 @@ export async function PUT(
   const nextDraftVersion = draftState.draftVersion + 1;
   const { error } = await session.supabase
     .from('sessions')
-    .update({ draft: updatedDraft, draft_version: nextDraftVersion })
+    .update({ draft: updatedDraft, draft_version: nextDraftVersion, last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
     .eq('id', sessionId);
 
   if (error) {

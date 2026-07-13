@@ -1,0 +1,24 @@
+name: Expire temporary session drafts
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: session-expiry
+  cancel-in-progress: false
+jobs:
+  expire:
+    timeout-minutes: 2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Expire temporary session drafts
+        shell: bash
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "${PRODUCTION_URL}/api/internal/session-expiry"
