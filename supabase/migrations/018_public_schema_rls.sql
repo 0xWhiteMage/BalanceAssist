@@ -7,6 +7,7 @@ ALTER TABLE public.uploaded_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reference_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.processed_telegram_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.handoff_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL PRIVILEGES ON TABLE
   public.sessions,
@@ -16,7 +17,8 @@ REVOKE ALL PRIVILEGES ON TABLE
   public.uploaded_files,
   public.reference_links,
   public.processed_telegram_updates,
-  public.handoff_outbox
+  public.handoff_outbox,
+  public.schema_migrations
 FROM PUBLIC;
 
 -- Supabase provides these roles; plain PostgreSQL test services may not.
@@ -31,7 +33,8 @@ BEGIN
       public.uploaded_files,
       public.reference_links,
       public.processed_telegram_updates,
-      public.handoff_outbox
+      public.handoff_outbox,
+      public.schema_migrations
     FROM anon;
   END IF;
 
@@ -44,7 +47,8 @@ BEGIN
       public.uploaded_files,
       public.reference_links,
       public.processed_telegram_updates,
-      public.handoff_outbox
+      public.handoff_outbox,
+      public.schema_migrations
     FROM authenticated;
   END IF;
 END

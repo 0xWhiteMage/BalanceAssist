@@ -32,7 +32,7 @@ This is a forward-only RLS and grant change. Validate it in staging before produ
 
 1. Record a production backup and schema/grant inventory before deployment:
    - export the affected `public` table definitions and ACLs
-   - record RLS state and policies for `sessions`, `events`, `leads`, `human_messages`, `uploaded_files`, `reference_links`, `processed_telegram_updates`, and `handoff_outbox`
+   - record RLS state and policies for `sessions`, `events`, `leads`, `human_messages`, `uploaded_files`, `reference_links`, `processed_telegram_updates`, `handoff_outbox`, and `schema_migrations`
 2. Run the migration against a production-shaped disposable database or staging clone. Confirm it applies once and leaves all server migrations recorded.
 3. In staging, exercise service-role-backed routes for session creation, event capture, lead finalization, uploads, Telegram relay/replay protection, and handoff dispatch. Confirm the server still reads and writes each affected table.
 4. Run PostgREST/public access smoke checks with the project URL and anon key. `select` and `insert` against every affected table must be denied for both anonymous and authenticated JWT contexts.

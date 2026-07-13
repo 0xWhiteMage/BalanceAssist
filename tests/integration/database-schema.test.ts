@@ -26,7 +26,7 @@ let grantConnectionString: string | undefined;
 let rolelessMigration: MigrationResult | undefined;
 let hardeningMigration: MigrationResult | undefined;
 let publicRoleGrantsBeforeHardening: Array<Record<string, unknown>> | undefined;
-const applicationTables = [
+const protectedTables = [
   'sessions',
   'events',
   'leads',
@@ -34,7 +34,8 @@ const applicationTables = [
   'uploaded_files',
   'reference_links',
   'processed_telegram_updates',
-  'handoff_outbox'
+  'handoff_outbox',
+  'schema_migrations'
 ] as const;
 const publicRoles = ['anon', 'authenticated'] as const;
 
@@ -112,7 +113,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           public.uploaded_files,
           public.reference_links,
           public.processed_telegram_updates,
-          public.handoff_outbox
+          public.handoff_outbox,
+          public.schema_migrations
         TO anon, authenticated, server_role_simulation;
       `);
       publicRoleGrantsBeforeHardening = (
@@ -182,13 +184,13 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     ]);
   });
 
-  it('enables RLS and denies direct table privileges to public API roles', async () => {
+  it('enables RLS and denies direct table privileges to public API roles and control tables', async () => {
     const rls = await client!.query(
       `select relname, relrowsecurity
        from pg_class
        where oid = any($1::regclass[])
        order by relname`,
-      [applicationTables.map((table) => `public.${table}`)]
+       [protectedTables.map((table) => `public.${table}`)]
     );
     const privileges = await client!.query(
       `select role_name, table_name, privilege_type
@@ -199,13 +201,13 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        order by role_name, table_name, privilege_type`,
       [
         publicRoles,
-        applicationTables,
+        protectedTables,
         ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
       ]
     );
 
     expect(rls.rows).toEqual(
-      applicationTables
+      protectedTables
         .slice()
         .sort()
         .map((relname) => ({ relname, relrowsecurity: true }))
@@ -213,13 +215,13 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(privileges.rows).toEqual([]);
   });
 
-  it('creates no policies on application tables', async () => {
+  it('creates no policies on protected tables', async () => {
     const policies = await client!.query(
       `select tablename, policyname
        from pg_policies
        where schemaname = 'public' and tablename = any($1::text[])
        order by tablename, policyname`,
-      [applicationTables]
+      [protectedTables]
     );
 
     expect(policies.rows).toEqual([]);
