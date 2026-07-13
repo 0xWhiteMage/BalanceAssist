@@ -20,3 +20,34 @@ BEGIN
   RETURN deleted_count;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION public.authorize_handoff_send(p_handoff_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  handoff public.handoff_outbox%ROWTYPE;
+  session_row public.sessions%ROWTYPE;
+BEGIN
+  SELECT * INTO handoff
+  FROM public.handoff_outbox
+  WHERE id = p_handoff_id AND state = 'claiming'
+  FOR UPDATE;
+
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  SELECT * INTO session_row
+  FROM public.sessions
+  WHERE id = handoff.session_id
+  FOR KEY SHARE;
+
+  RETURN FOUND
+    AND handoff.session_id = session_row.id
+    AND session_row.draft_expires_at > now();
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.authorize_handoff_send(uuid) FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN REVOKE ALL ON FUNCTION public.authorize_handoff_send(uuid) FROM anon; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN REVOKE ALL ON FUNCTION public.authorize_handoff_send(uuid) FROM authenticated; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN GRANT EXECUTE ON FUNCTION public.authorize_handoff_send(uuid) TO service_role; END IF;
+END $$;

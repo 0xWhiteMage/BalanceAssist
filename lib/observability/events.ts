@@ -7,6 +7,7 @@ type EventName =
   | 'handoff_delivered'
   | 'handoff_failed'
   | 'handoff_escalated'
+  | 'handoff_suppressed'
   | 'capability_issued'
   | 'capability_rejected'
   | 'lead_persisted'
@@ -30,6 +31,7 @@ const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: re
   handoff_delivered: { version: 1, fields: ['handoffId', 'durationMs'] },
   handoff_failed: { version: 1, fields: ['handoffId', 'reason'] },
   handoff_escalated: { version: 1, fields: ['handoffId', 'reason'] },
+  handoff_suppressed: { version: 1, fields: ['handoffId', 'reason'] },
   capability_issued: { version: 1, fields: ['sessionId'] },
   capability_rejected: { version: 1, fields: ['sessionId'] },
   lead_persisted: { version: 1, fields: ['sessionId', 'qualificationStatus', 'score'] },

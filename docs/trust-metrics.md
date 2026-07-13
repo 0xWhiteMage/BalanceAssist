@@ -14,6 +14,7 @@ These metrics track whether Balance Assist is behaving as a consent-led, truthfu
 - `handoff_delivered`: dispatcher delivered a handoff to Telegram
 - `handoff_failed`: dispatcher could not deliver a handoff and scheduled or exhausted a retry
 - `handoff_escalated`: dispatcher found a handoff beyond the 15-minute escalation threshold
+- `handoff_suppressed`: dispatcher withheld a claimed handoff because its session was unavailable or expired before Telegram delivery
 - `attachment_forwarded`: upload persisted and forwarded to Telegram
 - `attachment_quarantined`: upload persisted without forwarding
 - `draft_updated`: canonical draft edit persisted through the authenticated route
@@ -31,6 +32,7 @@ These metrics track whether Balance Assist is behaving as a consent-led, truthfu
 - Monitor spikes in `attachment_quarantined` for upload abuse or MIME regressions.
 - Compare `lead_persisted` to `handoff_enqueued` to catch producer-transfer failures.
 - Monitor `handoff_failed` and `handoff_escalated` alongside GitHub Actions `Handoff dispatch` workflow failures and pending outbox age.
+- Monitor `handoff_suppressed` to identify handoffs that expired before delivery without logging their content.
 - Monitor `project_reset` and `deletion_requested` to verify user data-control paths remain functional.
 - Monitor absence of `consent_granted` against traffic expectations to detect intake breakage.
 

@@ -9,5 +9,8 @@ describe('temporary expiry hardening migration', () => {
     expect(migration).toMatch(/last_activity_at SET DEFAULT/i);
     expect(migration).toMatch(/set_config\('app\.session_purge', 'on'/i);
     expect(migration).toMatch(/current_setting\('app\.session_purge', true\) = 'on'/i);
+    expect(migration).toMatch(/FUNCTION public\.authorize_handoff_send/i);
+    expect(migration).toMatch(/handoff\.session_id = session_row\.id/i);
+    expect(migration).toMatch(/session_row\.draft_expires_at > now\(\)/i);
   });
 });

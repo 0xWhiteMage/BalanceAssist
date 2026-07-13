@@ -416,7 +416,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '019:019_api_rate_limits.sql',
       '020:020_api_rate_limit_retention.sql',
       '021:021_session_consents.sql',
-      '022:022_session_consents_append_only.sql'
+      '022:022_session_consents_append_only.sql',
+      '023:023_temporary_session_retention.sql',
+      '024:024_temporary_expiry_hardening.sql'
     ]);
   });
 

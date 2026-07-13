@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { claimNextHandoff, markDelivered, markFailed } from '@/lib/handoff/outbox';
+import { authorizeHandoffSend, claimNextHandoff, markDelivered, markFailed, suppressHandoff } from '@/lib/handoff/outbox';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { sendTelegramMessage } from '@/lib/telegram';
@@ -40,6 +40,14 @@ export async function POST(request: Request) {
       const { payload } = handoff;
 
       if (payload.type === 'approval' || payload.type === 'relay') {
+        if (!await authorizeHandoffSend(supabase, handoff.id)) {
+          await suppressHandoff(supabase, handoff.id);
+          emitEvent('handoff_suppressed', { handoffId: handoff.id, reason: 'session_unavailable' }, requestId);
+          logger.info('Suppressed unavailable session handoff', { handoffId: handoff.id });
+          results.push({ id: handoff.id, status: 'suppressed' });
+          continue;
+        }
+
         const result = await sendTelegramMessage(payload.summary, {
           threadId: payload.threadId ?? undefined
         });

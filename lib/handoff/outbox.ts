@@ -223,6 +223,26 @@ export async function claimNextHandoff(
   );
 }
 
+export async function authorizeHandoffSend(
+  supabase: SupabaseServerClient,
+  handoffId: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('authorize_handoff_send', { p_handoff_id: handoffId });
+  return !error && data === true;
+}
+
+export async function suppressHandoff(
+  supabase: SupabaseServerClient,
+  handoffId: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  await supabase
+    .from('handoff_outbox')
+    .update({ state: 'failed', last_error: 'session_unavailable', updated_at: now, claim_expires_at: null })
+    .eq('id', handoffId)
+    .eq('state', 'claiming');
+}
+
 export async function releaseClaim(
   supabase: SupabaseServerClient,
   handoffId: string,

@@ -26,6 +26,20 @@ describe('emitEvent', () => {
     spy.mockRestore();
   });
 
+  test('emits a non-PII suppression status for an unavailable handoff session', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    emitEvent('handoff_suppressed', {
+      handoffId: 'h-1',
+      reason: 'session_unavailable',
+      summary: 'must not be emitted'
+    });
+
+    const parsed = JSON.parse(spy.mock.calls[0][1] as string);
+    expect(parsed).toMatchObject({ event: 'handoff_suppressed', handoffId: 'h-1', reason: 'session_unavailable' });
+    expect(parsed.summary).toBeUndefined();
+    spy.mockRestore();
+  });
+
   test('redacts sensitive fields in allowed data', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     emitEvent('attachment_quarantined', {
