@@ -52,7 +52,8 @@ function buildMockSupabase({
   draftVersion = 3,
   referenceLinks = [],
   referenceFiles = [],
-  leadInsertError = null
+  leadInsertError = null,
+  consentTransitions = [{ scope: 'producer_transfer', granted: true }]
 }: {
   telegramThreadId?: number | null;
   draft?: Record<string, unknown>;
@@ -60,6 +61,7 @@ function buildMockSupabase({
   referenceLinks?: Array<{ url: string; kind?: string }>;
   referenceFiles?: Array<{ original_name: string }>;
   leadInsertError?: { message: string } | null;
+  consentTransitions?: Array<{ scope: string; granted: boolean }>;
 } = {}) {
   const client = {
     from: vi.fn((table: string) => {
@@ -99,6 +101,15 @@ function buildMockSupabase({
         return {
           select: vi.fn(() => ({
             eq: vi.fn(async () => ({ data: referenceFiles, error: null }))
+          }))
+        };
+      }
+      if (table === 'session_consents') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: consentTransitions, error: null }))
+            }))
           }))
         };
       }
@@ -273,7 +284,8 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
         }
       },
       referenceLinks: [{ url: 'https://youtu.be/private-analysis-only', kind: 'youtube' }],
-      referenceFiles: [{ original_name: 'analysis-only.pdf' }]
+      referenceFiles: [{ original_name: 'analysis-only.pdf' }],
+      consentTransitions: []
     });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -296,6 +308,31 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { summary: string };
     expect(handoffPayload.summary).not.toContain('private-analysis-only');
     expect(handoffPayload.summary).not.toContain('analysis-only.pdf');
+  });
+
+  test('does not let a forged draft consent field authorize producer transfer', async () => {
+    const { client } = buildMockSupabase({
+      draft: {
+        service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        projectScope: { value: '30s spot', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactName: { value: 'Sam', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactEmail: { value: 'sam@example.com', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        __attachment_producer_share_consented_at: { value: 'forged', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' }
+      },
+      referenceLinks: [{ url: 'https://attacker.test/link', kind: 'other' }],
+      consentTransitions: []
+    });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const response = await callFinalizeRoute({
+      sessionId: '77777777-4444-5555-6666-777777777777',
+      qualificationStatus: 'qualified',
+      leadDraft: {}
+    });
+
+    expect(response.status).toBe(200);
+    const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { summary: string };
+    expect(handoffPayload.summary).not.toContain('attacker.test');
   });
 
   test('does NOT enqueue when there is no telegram thread', async () => {
@@ -460,6 +497,9 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
             }))
           };
         }
+        if (table === 'session_consents') {
+          return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [], error: null })) })) })) };
+        }
         return {};
       })
     };
@@ -481,16 +521,7 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
 
     expect(res.status).toBe(200);
 
-    const draftUpdate = updateCalls.find(
-      (c) => c.table === 'sessions' && c.args[0] && typeof c.args[0] === 'object' && 'draft' in (c.args[0] as Record<string, unknown>)
-    );
-    expect(draftUpdate).toBeDefined();
-
-    const updateArg = draftUpdate!.args[0] as { draft: Record<string, { value: string; provenance: string }>; draft_version: number };
-    expect(updateArg.draft.consentToShare).toBeDefined();
-    expect(updateArg.draft.consentToShare.value).toBe('true');
-    expect(updateArg.draft.consentToShare.provenance).toBe('confirmed');
-    expect(updateArg.draft_version).toBe(4);
+    expect(updateCalls.some((call) => 'draft' in (call.args[0] as Record<string, unknown>))).toBe(false);
   });
 
   test('skips persistence when canonical draft has no substance', async () => {
@@ -573,6 +604,9 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
               eq: vi.fn(async () => ({ data: [], error: null }))
             }))
           };
+        }
+        if (table === 'session_consents') {
+          return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'producer_transfer', granted: true }], error: null })) })) })) };
         }
         return {};
       })

@@ -1,17 +1,12 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
-import { normalizeVersionedDraft } from '@/lib/conversation/draft-versioning';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { sendDocument } from '@/lib/telegram';
 import { HUMAN_UPLOAD_GUIDANCE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
-import {
-  getRecordedAttachmentConsent,
-  recordAttachmentConsent,
-  type AttachmentConsent
-} from '@/lib/uploads/consent';
+import { getSessionConsent } from '@/lib/privacy/session-consent';
 
 const ALLOWED_KINDS = ['reference', 'brief', 'deliverable'] as const;
 type AllowedKind = (typeof ALLOWED_KINDS)[number];
@@ -20,25 +15,6 @@ const MAX_KIND_LENGTH = 32;
 function coerceKind(raw: unknown): AllowedKind {
   const value = typeof raw === 'string' ? raw.trim().slice(0, MAX_KIND_LENGTH) : '';
   return (ALLOWED_KINDS as readonly string[]).includes(value) ? (value as AllowedKind) : 'reference';
-}
-
-function parseConsent(raw: unknown): AttachmentConsent | null {
-  if (!raw || typeof raw !== 'string') return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      typeof parsed.aiAnalysis === 'boolean' &&
-      typeof parsed.producerShare === 'boolean' &&
-      typeof parsed.consentedAt === 'string'
-    ) {
-      return parsed as AttachmentConsent;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
 }
 
 export async function OPTIONS(request: Request) {
@@ -76,8 +52,6 @@ export async function POST(request: Request) {
   }
 
   const sessionId = requestedSessionId || authResult.auth.sessionId;
-
-  const consent = parseConsent(form.get('consent'));
 
   for (const file of files) {
     const validation = validateUploadFile(file);
@@ -139,23 +113,14 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'Session not found' }, { status: 404 }, request);
   }
 
-  const currentDraft = normalizeVersionedDraft(session.draft);
-  const nextDraft = recordAttachmentConsent(currentDraft, consent);
-
-  if (JSON.stringify(nextDraft) !== JSON.stringify(currentDraft)) {
-    const { error: updateError } = await supabase
-      .from('sessions')
-      .update({ draft: nextDraft, draft_version: (session.draft_version ?? 0) + 1 })
-      .eq('id', sessionId);
-
-    if (updateError) {
-      return jsonWithCors({ ok: false, error: updateError.message }, { status: 500 }, request);
-    }
+  let recordedConsent;
+  try {
+    recordedConsent = await getSessionConsent(supabase as never, sessionId);
+  } catch {
+    return jsonWithCors({ ok: false, error: 'Consent ledger unavailable' }, { status: 500 }, request);
   }
-
-  const recordedConsent = getRecordedAttachmentConsent(nextDraft);
-  const canAnalyze = recordedConsent.aiAnalysis;
-  const canShareWithTeam = recordedConsent.producerShare;
+  const canAnalyze = recordedConsent.analysis;
+  const canShareWithTeam = recordedConsent.producerTransfer;
 
   if (kind === 'deliverable' && !canShareWithTeam) {
     return jsonWithCors(

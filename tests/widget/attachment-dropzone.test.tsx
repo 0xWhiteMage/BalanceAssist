@@ -122,12 +122,12 @@ test('blocks links until the user explicitly allows producer review', async () =
   expect(global.fetch).not.toHaveBeenCalled();
 });
 
-test('sends the explicit consent payload with links and only adds producer-share links to the review list', async () => {
+test('persists producer-transfer consent before linking', async () => {
   const onAddLink = vi.fn();
   const requestBodies: Array<Record<string, unknown>> = [];
 
   global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    requestBodies.push(JSON.parse(String(init?.body)));
+    requestBodies.push({ url: String(_input), ...JSON.parse(String(init?.body)) });
     return new Response(JSON.stringify({ ok: true, persisted: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
@@ -146,15 +146,17 @@ test('sends the explicit consent payload with links and only adds producer-share
     expect(onAddLink).toHaveBeenCalledWith(expect.objectContaining({ kind: 'youtube', url: 'https://youtu.be/abc' }));
   });
 
-  expect(requestBodies).toHaveLength(1);
+  expect(requestBodies).toHaveLength(2);
   expect(requestBodies[0]).toMatchObject({
+    url: '/api/projects/sess-1/consent',
+    scope: 'producer_transfer',
+    granted: true,
+    noticeVersion: '1.0'
+  });
+  expect(requestBodies[1]).toMatchObject({
     sessionId: 'sess-1',
     url: 'https://youtu.be/abc',
-    kind: 'youtube',
-    consent: {
-      aiAnalysis: true,
-      producerShare: true
-    }
+    kind: 'youtube'
   });
 });
 
@@ -164,8 +166,10 @@ test('allows analysis-only uploads without producer forwarding metadata', async 
   const uploadedConsents: string[] = [];
 
   global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(_input).includes('/consent')) {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
     const form = init?.body as FormData;
-    uploadedConsents.push(String(form.get('consent')));
     return new Response(JSON.stringify({ ok: true, extractedText: 'Project scope: launch film', forwarded: false }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
@@ -191,9 +195,5 @@ test('allows analysis-only uploads without producer forwarding metadata', async 
   });
 
   expect(onAddFile).not.toHaveBeenCalled();
-  expect(uploadedConsents).toHaveLength(1);
-  expect(JSON.parse(uploadedConsents[0]!)).toMatchObject({
-    aiAnalysis: true,
-    producerShare: false
-  });
+  expect(uploadedConsents).toHaveLength(0);
 });

@@ -36,7 +36,8 @@ const protectedTables = [
   'processed_telegram_updates',
   'handoff_outbox',
   'schema_migrations',
-  'api_rate_limits'
+  'api_rate_limits',
+  'session_consents'
 ] as const;
 const publicRoles = ['anon', 'authenticated'] as const;
 
@@ -155,10 +156,11 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     await adminClient?.end();
   });
 
-  it('applies the full chain, including 020, before public roles exist', () => {
+  it('applies the full chain, including 021, before public roles exist', () => {
     expect(rolelessMigration?.applied).toContain('018_public_schema_rls.sql');
     expect(rolelessMigration?.applied).toContain('019_api_rate_limits.sql');
     expect(rolelessMigration?.applied).toContain('020_api_rate_limit_retention.sql');
+    expect(rolelessMigration?.applied).toContain('021_session_consents.sql');
   });
 
   it('applies security migrations after public roles receive representative grants', () => {
@@ -169,14 +171,15 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(hardeningMigration?.applied).toEqual([
       '018_public_schema_rls.sql',
       '019_api_rate_limits.sql',
-      '020_api_rate_limit_retention.sql'
+      '020_api_rate_limit_retention.sql',
+      '021_session_consents.sql'
     ]);
   });
 
   it('creates the required current tables', async () => {
     const result = await client!.query(
       "select table_name from information_schema.tables where table_schema = 'public' and table_name = any($1::text[])",
-       [['sessions', 'events', 'leads', 'human_messages', 'uploaded_files', 'reference_links', 'processed_telegram_updates', 'handoff_outbox', 'schema_migrations', 'api_rate_limits']]
+       [['sessions', 'events', 'leads', 'human_messages', 'uploaded_files', 'reference_links', 'processed_telegram_updates', 'handoff_outbox', 'schema_migrations', 'api_rate_limits', 'session_consents']]
     );
 
     expect(result.rows.map((row) => row.table_name).sort()).toEqual([
@@ -188,7 +191,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       'processed_telegram_updates',
       'reference_links',
       'schema_migrations',
-      'sessions',
+       'session_consents',
+       'sessions',
       'uploaded_files'
     ]);
   });

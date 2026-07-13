@@ -1,14 +1,14 @@
 import { finalizeLeadPayloadSchema } from '@/lib/api/contracts';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
-import { getVisibleDraftValues, normalizeVersionedDraft, updateField } from '@/lib/conversation/draft-versioning';
+import { getVisibleDraftValues, normalizeVersionedDraft } from '@/lib/conversation/draft-versioning';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { ensureTelegramTopic } from '@/lib/telegram';
 import { enqueueHandoff, type HandoffOutcome } from '@/lib/handoff/outbox';
 import { routeLead } from '@/lib/handoff/routing';
 import { buildHandoffPacket } from '@/lib/handoff/packet';
-import { getRecordedAttachmentConsent } from '@/lib/uploads/consent';
+import { getSessionConsent } from '@/lib/privacy/session-consent';
 
 export async function OPTIONS(request: Request) {
   return corsOptionsResponse(request);
@@ -94,23 +94,11 @@ export async function POST(request: Request) {
     }, undefined, request);
   }
 
-  const draftWithConsent = updateField(versionedDraft, 'consentToShare', 'true', 'confirmed');
-  const nextVersion = (row.draft_version ?? 0) + 1;
-  const attachmentConsent = getRecordedAttachmentConsent(draftWithConsent);
-
-  const { error: draftUpdateError } = await supabase
-    .from('sessions')
-    .update({ draft: draftWithConsent, draft_version: nextVersion })
-    .eq('id', sessionId);
-
-  if (draftUpdateError) {
-    return jsonWithCors({
-      ok: false,
-      sessionId,
-      qualificationStatus,
-      persisted: false,
-      error: draftUpdateError.message
-    }, { status: 500 }, request);
+  let attachmentConsent;
+  try {
+    attachmentConsent = await getSessionConsent(supabase as never, sessionId);
+  } catch {
+    return jsonWithCors({ ok: false, sessionId, qualificationStatus, persisted: false, error: 'Consent ledger unavailable' }, { status: 500 }, request);
   }
 
   const canonicalDraft = {
@@ -186,14 +174,14 @@ export async function POST(request: Request) {
       sessionId
     );
 
-    const linkRows = attachmentConsent.producerShare
+    const linkRows = attachmentConsent.producerTransfer
       ? (await supabase
           .from('reference_links')
           .select('url, kind')
           .eq('session_id', sessionId)).data
       : [];
 
-    const fileRows = attachmentConsent.producerShare
+    const fileRows = attachmentConsent.producerTransfer
       ? (await supabase
           .from('uploaded_files')
           .select('name, original_name, status, mime, mime_type')
@@ -228,8 +216,8 @@ export async function POST(request: Request) {
         (l) => ({ url: l.url ?? '', kind: l.kind })
       ),
       consentScope: {
-        aiAnalysis: attachmentConsent.aiAnalysis,
-        producerShare: draftWithConsent.consentToShare?.value === 'true'
+        aiAnalysis: attachmentConsent.analysis,
+        producerShare: attachmentConsent.producerTransfer
       },
     });
 

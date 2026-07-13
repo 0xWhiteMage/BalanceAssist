@@ -84,6 +84,23 @@ export function AttachmentDropzone({
     );
   }
 
+  async function persistConsent(scope: 'analysis' | 'producer_transfer'): Promise<boolean> {
+    if (!sessionId) {
+      return true;
+    }
+    const res = await fetch(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, granted: true, noticeVersion: '1.0' })
+    });
+    if (!res.ok) {
+      setError('Unable to save your consent. Please try again before continuing.');
+      return false;
+    }
+    return true;
+  }
+
   async function handleUrlSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const kind = classifyUrl(url);
@@ -97,6 +114,8 @@ export function AttachmentDropzone({
       return;
     }
 
+    if (!await persistConsent('producer_transfer')) return;
+
     const res = await fetch('/api/attachments/link', {
       method: 'POST',
       credentials: 'include',
@@ -104,8 +123,7 @@ export function AttachmentDropzone({
       body: JSON.stringify({
         url,
         kind,
-        sessionId: sessionId ?? undefined,
-        consent: effectiveConsent
+        sessionId: sessionId ?? undefined
       })
     });
     if (!res.ok) {
@@ -132,6 +150,9 @@ export function AttachmentDropzone({
       setError('Consent details are missing. Please re-confirm your upload permissions.');
       return;
     }
+
+    if (consentToUse.aiAnalysis && !await persistConsent('analysis')) return;
+    if (consentToUse.producerShare && !await persistConsent('producer_transfer')) return;
 
     const fileArray = Array.from(files);
     const buffers = await Promise.all(fileArray.map((f) => readFileBuffer(f)));
@@ -163,8 +184,6 @@ export function AttachmentDropzone({
       if (sessionId) {
         fd.append('sessionId', sessionId);
       }
-      fd.append('consent', JSON.stringify(consentToUse));
-
       const res = await fetch('/api/telegram/upload', {
         method: 'POST',
         credentials: 'include',

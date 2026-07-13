@@ -22,13 +22,17 @@ vi.mock('@/lib/api/require-session', () => ({
   requireSession: requireSessionMock
 }));
 
-function buildMockSupabase(options?: { fileRequestOpen?: boolean; telegramThreadId?: number | null; status?: string; draft?: Record<string, unknown>; draftVersion?: number }) {
+function buildMockSupabase(options?: { fileRequestOpen?: boolean; telegramThreadId?: number | null; status?: string; draft?: Record<string, unknown>; draftVersion?: number; consentTransitions?: Array<{ scope: string; granted: boolean }> }) {
   const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
   const fileRequestOpen = options?.fileRequestOpen ?? true;
   const telegramThreadId = options?.telegramThreadId ?? 42;
   const sessionStatus = options?.status ?? 'open';
   const draft = options?.draft ?? {};
   const draftVersion = options?.draftVersion ?? 0;
+  const consentTransitions = options?.consentTransitions ?? [
+    { scope: 'analysis', granted: true },
+    { scope: 'producer_transfer', granted: true }
+  ];
 
   const client = {
     storage: {
@@ -59,6 +63,15 @@ function buildMockSupabase(options?: { fileRequestOpen?: boolean; telegramThread
           })),
           update: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
           insert: vi.fn(async () => ({ error: null }))
+        };
+      }
+      if (table === 'session_consents') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: consentTransitions, error: null }))
+            }))
+          }))
         };
       }
       return {
@@ -197,6 +210,23 @@ describe('POST /api/telegram/upload', () => {
     });
   });
 
+  test('accepts a prior ledger grant and ignores a missing request consent payload', async () => {
+    const { client } = buildMockSupabase({
+      status: 'completed',
+      consentTransitions: [{ scope: 'producer_transfer', granted: true }]
+    });
+    createServerSupabaseClientMock.mockReturnValue(client);
+    sendDocumentMock.mockResolvedValue({ ok: true, fileId: 'file-id', raw: {} });
+
+    const response = await callUploadRoute(buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pdf', 100, 'application/pdf')],
+      { includeConsent: false }
+    ));
+
+    expect(response.status).toBe(200);
+  });
+
   test('returns 400 when file exceeds 50 MB cap', async () => {
     const { client } = buildMockSupabase();
     createServerSupabaseClientMock.mockReturnValue(client);
@@ -327,7 +357,7 @@ describe('POST /api/telegram/upload', () => {
   });
 
   test('returns 403 for a team-requested deliverable upload when producer-share consent is false', async () => {
-    const { client } = buildMockSupabase({ fileRequestOpen: true, telegramThreadId: 42 });
+    const { client } = buildMockSupabase({ fileRequestOpen: true, telegramThreadId: 42, consentTransitions: [] });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     const form = buildFakeFormData(
@@ -345,7 +375,12 @@ describe('POST /api/telegram/upload', () => {
   });
 
   test('forwards a team-requested deliverable with producer-share consent even when aiAnalysis is false', async () => {
-    const { client, inserts } = buildMockSupabase({ fileRequestOpen: true, telegramThreadId: 42, status: 'completed' });
+    const { client, inserts } = buildMockSupabase({
+      fileRequestOpen: true,
+      telegramThreadId: 42,
+      status: 'completed',
+      consentTransitions: [{ scope: 'producer_transfer', granted: true }]
+    });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     sendDocumentMock.mockResolvedValue({
@@ -436,7 +471,7 @@ describe('POST /api/telegram/upload', () => {
   });
 
   test('returns 403 when consent is missing', async () => {
-    const { client } = buildMockSupabase();
+    const { client } = buildMockSupabase({ consentTransitions: [] });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     const form = buildFakeFormData(
@@ -458,14 +493,7 @@ describe('POST /api/telegram/upload', () => {
     const { client, inserts } = buildMockSupabase({
       status: 'open',
       telegramThreadId: null,
-      draft: {
-        __attachment_ai_analysis_consented_at: {
-          value: '2026-07-11T10:00:00.000Z',
-          provenance: 'confirmed',
-          updatedAt: '2026-07-11T10:00:00.000Z'
-        }
-      },
-      draftVersion: 1
+      consentTransitions: [{ scope: 'analysis', granted: true }]
     });
     createServerSupabaseClientMock.mockReturnValue(client);
 

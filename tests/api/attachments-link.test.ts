@@ -9,11 +9,12 @@ vi.mock('@/lib/api/require-session', () => ({
   requireSession: requireSessionMock
 }));
 
-function buildSupabase(options?: { draft?: Record<string, unknown>; draftVersion?: number }) {
+function buildSupabase(options?: { draft?: Record<string, unknown>; draftVersion?: number; consentTransitions?: Array<{ scope: string; granted: boolean }> }) {
   const inserts: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
   const draft = options?.draft ?? {};
   const draftVersion = options?.draftVersion ?? 0;
+  const consentTransitions = options?.consentTransitions ?? [];
 
   return {
     inserts,
@@ -31,6 +32,16 @@ function buildSupabase(options?: { draft?: Record<string, unknown>; draftVersion
               updates.push(row);
               return { eq: vi.fn(async () => ({ error: null })) };
             })
+          };
+        }
+
+        if (table === 'session_consents') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(async () => ({ data: consentTransitions, error: null }))
+              }))
+            }))
           };
         }
 
@@ -55,8 +66,8 @@ describe('POST /api/attachments/link', () => {
     vi.restoreAllMocks();
   });
 
-  test('persists a reference link for a session', async () => {
-    const { client, inserts } = buildSupabase();
+  test('persists a reference link for a session with a prior producer-transfer grant', async () => {
+    const { client, inserts } = buildSupabase({ consentTransitions: [{ scope: 'producer_transfer', granted: true }] });
     requireSessionMock.mockResolvedValue({
       ok: true,
       auth: { sessionId: 'sess-1', capability: 'sess-1.secret' },
@@ -89,7 +100,7 @@ describe('POST /api/attachments/link', () => {
   });
 
   test('uses the authenticated session when sessionId is omitted', async () => {
-    const { client, inserts } = buildSupabase();
+    const { client, inserts } = buildSupabase({ consentTransitions: [{ scope: 'producer_transfer', granted: true }] });
     requireSessionMock.mockResolvedValue({
       ok: true,
       auth: { sessionId: 'sess-auth', capability: 'sess-auth.secret' },
@@ -133,7 +144,7 @@ describe('POST /api/attachments/link', () => {
       expect(res.status).toBe(400);
   });
 
-  test('rejects links when producer-share consent is missing', async () => {
+  test('rejects forged producer-share consent when the ledger has no grant', async () => {
     const { client } = buildSupabase();
     requireSessionMock.mockResolvedValue({
       ok: true,
@@ -148,7 +159,7 @@ describe('POST /api/attachments/link', () => {
       body: JSON.stringify({
         url: 'https://youtu.be/abc',
         kind: 'youtube',
-        consent: { aiAnalysis: true, producerShare: false, consentedAt: new Date().toISOString() }
+          consent: { aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() }
       })
     });
 
@@ -184,16 +195,9 @@ describe('POST /api/attachments/link', () => {
     expect(data.error).toMatch(/consent/i);
   });
 
-  test('accepts links when producer-share consent was already recorded server-side', async () => {
+  test('accepts links when producer-transfer consent was already recorded in the ledger', async () => {
     const { client, inserts } = buildSupabase({
-      draft: {
-        __attachment_producer_share_consented_at: {
-          value: '2026-07-11T10:00:00.000Z',
-          provenance: 'confirmed',
-          updatedAt: '2026-07-11T10:00:00.000Z'
-        }
-      },
-      draftVersion: 1
+      consentTransitions: [{ scope: 'producer_transfer', granted: true }]
     });
     requireSessionMock.mockResolvedValue({
       ok: true,
