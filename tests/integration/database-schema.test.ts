@@ -169,7 +169,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
   it('creates the required current tables', async () => {
     const result = await client!.query(
       "select table_name from information_schema.tables where table_schema = 'public' and table_name = any($1::text[])",
-      [['sessions', 'events', 'leads', 'human_messages', 'uploaded_files', 'reference_links', 'processed_telegram_updates', 'handoff_outbox']]
+      [['sessions', 'events', 'leads', 'human_messages', 'uploaded_files', 'reference_links', 'processed_telegram_updates', 'handoff_outbox', 'schema_migrations']]
     );
 
     expect(result.rows.map((row) => row.table_name).sort()).toEqual([
@@ -179,6 +179,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       'leads',
       'processed_telegram_updates',
       'reference_links',
+      'schema_migrations',
       'sessions',
       'uploaded_files'
     ]);
