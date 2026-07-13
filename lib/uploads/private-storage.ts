@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'crypto';
 import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
 import { validateFile } from '@/lib/uploads/quarantine';
+import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
 export type PrivateStorageClient = {
+  rpc: (fn: 'private_attachment_storage_is_ready', args: { p_bucket: string }) => Promise<{ data: boolean | null; error: unknown }>;
   storage: {
     getBucket: (bucket: string) => Promise<{ data: { id: string; public: boolean } | null; error: unknown }>;
     from: (bucket: string) => {
@@ -43,8 +45,8 @@ export function privateUploadBucketFromEnv(): string | null {
 export async function privateStorageAvailable(client: PrivateStorageClient, bucket: string): Promise<boolean> {
   const { data, error } = await client.storage.getBucket(bucket);
   if (error || data?.id !== bucket || data.public !== false) return false;
-  const readiness = await client.from('private_attachment_storage_readiness').select('status').eq('bucket', bucket).maybeSingle();
-  return !readiness.error && readiness.data?.status === 'ready';
+  const attestation = await client.rpc('private_attachment_storage_is_ready', { p_bucket: bucket });
+  return !attestation.error && attestation.data === true;
 }
 
 export async function storePrivateUpload(input: { client: PrivateStorageClient; bucket: string; sessionId: string; file: File }) {
@@ -102,7 +104,14 @@ export async function storePrivateUpload(input: { client: PrivateStorageClient; 
 
   await input.client.from('private_attachment_cleanup').delete().eq('object_key', objectKey);
 
-  return { status: 'stored' as const, objectKey, mimeType: validation.mime, retentionExpiresAt };
+  return { status: 'stored' as const, objectKey, mimeType: validation.mime, extractedText: extractTextFromBuffer(Buffer.from(bytes), input.file.name), retentionExpiresAt };
+}
+
+export async function deletePrivateUpload(input: { client: PrivateStorageClient; bucket: string; objectKey: string }): Promise<boolean> {
+  const removed = await input.client.storage.from(input.bucket).remove([input.objectKey]);
+  if (removed.error) return false;
+  const deleted = await input.client.from('uploaded_files').delete().eq('object_key', input.objectKey);
+  return !deleted.error;
 }
 
 export async function cleanupExpiredStoredUploads(client: PrivateStorageClient, bucket: string, limit = 100) {

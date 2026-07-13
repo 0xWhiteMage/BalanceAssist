@@ -33,6 +33,7 @@ async function readFileBuffer(file: File): Promise<ArrayBuffer> {
 export function AttachmentDropzone({
   onAddLink,
   onAddFile,
+  onFileAnalyzed,
   sessionId,
   consent
 }: {
@@ -173,37 +174,23 @@ export function AttachmentDropzone({
     setQueuedFiles((prev) => [...prev, ...newQueued]);
     setError(null);
 
+    const fd = new FormData();
     for (const file of fileArray) {
       updateFileStatus(file.name, 'validating');
-
-      const buffer = await readFileBuffer(file);
-      const result = validateFile(file, buffer);
-      if (!result.ok) {
-        updateFileStatus(file.name, 'failed', result.reason);
-        continue;
-      }
-
-      const fd = new FormData();
       fd.append('files', file, file.name);
-      fd.append('kind', 'reference');
-      if (sessionId) {
-        fd.append('sessionId', sessionId);
-      }
-      const res = await fetch('/api/telegram/upload', {
-        method: 'POST',
-        credentials: 'include',
-        body: fd
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        updateFileStatus(file.name, 'retryable', body?.error ?? `Failed to upload ${file.name}.`);
-        continue;
-      }
-
-      await res.json();
-
+    }
+    if (sessionId) fd.append('sessionId', sessionId);
+    const res = await fetch('/api/telegram/upload', { method: 'POST', credentials: 'include', body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      for (const file of fileArray) updateFileStatus(file.name, 'retryable', body?.error ?? `Failed to upload ${file.name}.`);
+      return;
+    }
+    const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
+    for (const [index, file] of fileArray.entries()) {
+      const extractedText = body.analyses?.[index]?.extractedText;
+      if (typeof extractedText === 'string') onFileAnalyzed?.(file.name, extractedText);
       updateFileStatus(file.name, 'stored');
-
     }
   }
 
@@ -223,7 +210,7 @@ export function AttachmentDropzone({
         </div>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
           {privateStorageAvailable
-            ? 'Analysis-consented files are stored privately for up to 24 hours. They are not shared with the Balance team in this step.'
+            ? 'Files are retained privately only to analyse this draft, for up to 24 hours, and are never sent to the Balance team.'
             : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
       </div>
@@ -246,15 +233,6 @@ export function AttachmentDropzone({
             disabled={consent !== undefined}
           />
           <span>Balance Assist may analyse these files to help draft my project brief.</span>
-        </label>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: brandTokens.colors.lightText }}>
-          <input
-            type="checkbox"
-            checked={effectiveConsent?.producerShare === true}
-            onChange={(event) => setProducerShare(event.target.checked)}
-            disabled={consent !== undefined}
-          />
-          <span>The Balance team may review anything I share here.</span>
         </label>
       </div>
 
@@ -294,6 +272,15 @@ export function AttachmentDropzone({
           Add link
         </button>
       </form>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: brandTokens.colors.lightText }}>
+        <input
+          type="checkbox"
+          checked={effectiveConsent?.producerShare === true}
+          onChange={(event) => setProducerShare(event.target.checked)}
+          disabled={consent !== undefined}
+        />
+        <span>The Balance team may review links I add here.</span>
+      </label>
 
       <label
         htmlFor="attachment-drop"
@@ -324,7 +311,7 @@ export function AttachmentDropzone({
           {privateStorageAvailable ? 'Store file privately' : 'File sharing unavailable'}
         </span>
         <span style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
-          {privateStorageAvailable ? 'Private temporary storage for analysis-consented files only.' : 'Add a reference link above instead.'}
+          {privateStorageAvailable ? 'Temporarily retained only to analyse this draft. Never sent to the team.' : 'Add a reference link above instead.'}
         </span>
         <input
           id="attachment-drop"

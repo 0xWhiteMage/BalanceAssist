@@ -13,7 +13,7 @@ function enableAnalysisConsent() {
 }
 
 function enableProducerShareConsent() {
-  fireEvent.click(screen.getByLabelText(/balance team may review/i));
+  fireEvent.click(screen.getByLabelText(/balance team may review links/i));
 }
 
 test('classifies a pasted YouTube URL and adds a chip', async () => {
@@ -97,8 +97,15 @@ test('dropzone states that file sharing is unavailable and disables selection', 
   expect(document.querySelector('input[type="file"]')).toBeDisabled();
 });
 
+test('shows analysis consent for files but no producer-review checkbox', () => {
+  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+
+  expect(screen.getByLabelText(/balance assist may analyse/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/balance team may review anything/i)).not.toBeInTheDocument();
+});
+
 test('enables file selection only after the server verifies private storage', async () => {
-  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes('/api/telegram/upload')) {
       return new Response(JSON.stringify({ available: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
@@ -107,7 +114,7 @@ test('enables file selection only after the server verifies private storage', as
   const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
 
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
-  expect(screen.getByText(/private temporary storage/i)).toBeInTheDocument();
+  expect(screen.getByText(/never sent to the team/i)).toBeInTheDocument();
 });
 
 test('URL submit button uses the uppercase ADD LINK pill copy', () => {
@@ -204,4 +211,25 @@ test('does not attempt analysis-only uploads while file sharing is unavailable',
   expect(onAddFile).not.toHaveBeenCalled();
   expect(onFileAnalyzed).not.toHaveBeenCalled();
   expect(uploadedConsents).toHaveLength(0);
+});
+
+test('forwards only the server-derived analysis payload to the draft callback', async () => {
+  const onFileAnalyzed = vi.fn();
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/consent')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    if (String(input).includes('/api/telegram/upload')) {
+      if (!init?.method) {
+        return new Response(JSON.stringify({ available: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ ok: true, status: 'stored', analyses: [{ mimeType: 'text/plain', extractedText: 'Server-verified brief text' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response('{}', { status: 404 });
+  }) as unknown as typeof fetch;
+  const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} onFileAnalyzed={onFileAnalyzed} sessionId="sess-2" />);
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  enableAnalysisConsent();
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['client text'], 'brief.txt', { type: 'text/plain' })] } });
+
+  await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Server-verified brief text'));
 });

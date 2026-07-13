@@ -10,7 +10,7 @@ function makeFile(name = 'client-brief.pdf') {
   return file;
 }
 
-function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; insertError?: boolean; cleanupInsertError?: boolean; removeError?: boolean; cleanupDeleteError?: boolean; updateError?: boolean; expiredError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string; cleanup_required_at?: string | null }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
+function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; attested?: boolean; insertError?: boolean; cleanupInsertError?: boolean; removeError?: boolean; cleanupDeleteError?: boolean; updateError?: boolean; expiredError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string; cleanup_required_at?: string | null }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
   const upload = vi.fn(async () => ({ error: null }));
   const remove = vi.fn(async () => ({ error: options?.removeError ? { message: 'delete failed' } : null }));
   const insert = vi.fn(async () => ({ error: options?.insertError ? { message: 'metadata failed' } : null }));
@@ -26,6 +26,7 @@ function makeClient(options?: { bucket?: { id: string; public: boolean } | null;
   }));
 
   return {
+    rpc: vi.fn(async () => ({ data: options?.attested ?? true, error: null })),
     storage: {
       getBucket: vi.fn(async () => ({ data: options?.bucket === undefined ? { id: 'temporary-attachments', public: false } : options.bucket, error: null })),
       from: vi.fn(() => ({ upload, remove }))
@@ -57,11 +58,19 @@ describe('private attachment storage', () => {
   });
 
   test('fails closed when migration readiness says Storage policy management is unavailable', async () => {
-    const client = makeClient({ readiness: 'unavailable' });
+    const client = makeClient({ readiness: 'unavailable', attested: false });
 
     await expect(privateStorageAvailable(client as never, 'temporary-attachments')).resolves.toBe(false);
     await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
       .rejects.toMatchObject({ code: 'private_storage_unavailable' });
+    expect(client.upload).not.toHaveBeenCalled();
+  });
+
+  test('uses a current policy and grant attestation instead of the migration-time readiness snapshot', async () => {
+    const client = makeClient({ readiness: 'ready', attested: false });
+
+    await expect(privateStorageAvailable(client as never, 'temporary-attachments')).resolves.toBe(false);
+    expect(client.rpc).toHaveBeenCalledWith('private_attachment_storage_is_ready', { p_bucket: 'temporary-attachments' });
     expect(client.upload).not.toHaveBeenCalled();
   });
 
@@ -82,6 +91,16 @@ describe('private attachment storage', () => {
       status: 'stored',
       idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/)
     }));
+  });
+
+  test('returns bounded text extracted from validated server-side bytes', async () => {
+    const client = makeClient();
+    const bytes = new Uint8Array(Buffer.from('Project scope: launch film'));
+    const file = new File([bytes], 'brief.txt', { type: 'text/plain' });
+    Object.assign(file, { arrayBuffer: async () => bytes.buffer });
+
+    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file }))
+      .resolves.toMatchObject({ extractedText: 'Project scope: launch film' });
   });
 
   test('removes the uploaded object when metadata persistence fails', async () => {

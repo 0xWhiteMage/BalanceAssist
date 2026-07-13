@@ -1,7 +1,7 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
+import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
 
 export async function OPTIONS(request: Request) {
   return corsOptionsResponse(request);
@@ -61,14 +61,22 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, code: 'analysis_consent_required' }, { status: 403 }, request);
   }
 
+  const stored: Array<{ objectKey: string; mimeType: string; extractedText: string }> = [];
   try {
     for (const file of files) {
-      await storePrivateUpload({ client: authResult.supabase as unknown as PrivateStorageClient, bucket, sessionId, file });
+      stored.push(await storePrivateUpload({ client: authResult.supabase as unknown as PrivateStorageClient, bucket, sessionId, file }));
     }
+    return jsonWithCors({ ok: true, status: 'stored', analyses: stored.map(({ mimeType, extractedText }) => ({ mimeType, extractedText })) }, undefined, request);
   } catch (error) {
+    const compensated = await Promise.all(stored.map(({ objectKey }) => deletePrivateUpload({
+      client: authResult.supabase as unknown as PrivateStorageClient,
+      bucket,
+      objectKey
+    })));
+    if (compensated.some((deleted) => !deleted)) {
+      return jsonWithCors({ ok: false, code: 'private_storage_recovery_unavailable' }, { status: 503 }, request);
+    }
     const code = error instanceof PrivateStorageError ? error.code : 'private_storage_unavailable';
     return jsonWithCors({ ok: false, code }, { status: 503 }, request);
   }
-
-  return jsonWithCors({ ok: true, status: 'stored' }, undefined, request);
 }

@@ -1,14 +1,16 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-const { requireSessionMock, storePrivateUploadMock } = vi.hoisted(() => ({
+const { requireSessionMock, storePrivateUploadMock, deletePrivateUploadMock } = vi.hoisted(() => ({
   requireSessionMock: vi.fn(),
-  storePrivateUploadMock: vi.fn()
+  storePrivateUploadMock: vi.fn(),
+  deletePrivateUploadMock: vi.fn()
 }));
 
 vi.mock('@/lib/api/require-session', () => ({ requireSession: requireSessionMock }));
 vi.mock('@/lib/uploads/private-storage', () => ({
   storePrivateUpload: storePrivateUploadMock,
+  deletePrivateUpload: deletePrivateUploadMock,
   privateUploadBucketFromEnv: () => process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET ?? null,
   PrivateStorageError: class PrivateStorageError extends Error {}
 }));
@@ -41,7 +43,8 @@ describe('POST /api/telegram/upload private storage', () => {
         }))
       }
     });
-    storePrivateUploadMock.mockResolvedValue({ status: 'stored', objectKey: 'opaque', mimeType: 'application/pdf', retentionExpiresAt: '2026-07-15T00:00:00.000Z' });
+    storePrivateUploadMock.mockResolvedValue({ status: 'stored', objectKey: 'opaque', mimeType: 'application/pdf', extractedText: 'Launch film scope', retentionExpiresAt: '2026-07-15T00:00:00.000Z' });
+    deletePrivateUploadMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -55,7 +58,7 @@ describe('POST /api/telegram/upload private storage', () => {
     const response = await post(formWith(file));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, status: 'stored' });
+    await expect(response.json()).resolves.toEqual({ ok: true, status: 'stored', analyses: [{ mimeType: 'application/pdf', extractedText: 'Launch film scope' }] });
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ bucket: 'temporary-attachments', file }));
   });
 
@@ -74,5 +77,28 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ code: 'analysis_consent_required' });
     expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects invalid files before private persistence', async () => {
+    storePrivateUploadMock.mockRejectedValueOnce(new Error('validation failed'));
+    const file = new File([new Uint8Array([0x4d, 0x5a])], 'payload.pdf', { type: 'application/pdf' });
+    const response = await post(formWith(file));
+
+    expect(response.status).toBe(503);
+    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ file }));
+  });
+
+  test('compensates earlier stored files when a later file fails', async () => {
+    storePrivateUploadMock
+      .mockResolvedValueOnce({ status: 'stored', objectKey: 'opaque-one', mimeType: 'text/plain', extractedText: 'first', retentionExpiresAt: '2026-07-15T00:00:00.000Z' })
+      .mockRejectedValueOnce(new Error('storage failed'));
+    const form = new FormData();
+    form.append('files', new File(['first'], 'first.txt', { type: 'text/plain' }));
+    form.append('files', new File(['second'], 'second.txt', { type: 'text/plain' }));
+
+    const response = await post(form);
+
+    expect(response.status).toBe(503);
+    expect(deletePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ bucket: 'temporary-attachments', objectKey: 'opaque-one' }));
   });
 });
