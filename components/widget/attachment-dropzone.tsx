@@ -14,7 +14,7 @@ import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
 
-type FileStatus = 'queued' | 'validating' | 'analysing' | 'quarantined' | 'failed' | 'retryable';
+type FileStatus = 'queued' | 'validating' | 'analysing' | 'stored' | 'failed' | 'retryable';
 
 type QueuedFile = {
   file: File;
@@ -48,10 +48,20 @@ export function AttachmentDropzone({
   const [error, setError] = useState<string | null>(null);
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [localConsent, setLocalConsent] = useState<AttachmentConsent | null>(consent ?? null);
+  const [privateStorageAvailable, setPrivateStorageAvailable] = useState(false);
 
   useEffect(() => {
     setLocalConsent(consent ?? null);
   }, [consent]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/telegram/upload', { credentials: 'include' })
+      .then(async (response) => response.ok && (await response.json()).available === true)
+      .then((available) => { if (active) setPrivateStorageAvailable(available); })
+      .catch(() => { if (active) setPrivateStorageAvailable(false); });
+    return () => { active = false; };
+  }, []);
 
   const effectiveConsent = consent ?? localConsent;
 
@@ -198,7 +208,7 @@ export function AttachmentDropzone({
       const data = await res.json();
       const canAnalyze = hasAnalysisConsent(consentToUse);
 
-      updateFileStatus(file.name, 'quarantined');
+      updateFileStatus(file.name, 'stored');
 
       if (canAnalyze && typeof data.extractedText === 'string' && data.extractedText.trim()) {
         onFileAnalyzed?.(file.name, data.extractedText);
@@ -221,7 +231,9 @@ export function AttachmentDropzone({
           Share files to help us understand your project
         </div>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
-          File sharing is temporarily unavailable. Add a reference link instead.
+          {privateStorageAvailable
+            ? 'Analysis-consented files are stored privately for up to 24 hours. They are not shared with the Balance team in this step.'
+            : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
       </div>
 
@@ -299,7 +311,7 @@ export function AttachmentDropzone({
           borderRadius: 10,
           border: `1px dashed ${brandTokens.colors.border}`,
           textAlign: 'center',
-          cursor: 'not-allowed',
+          cursor: privateStorageAvailable ? 'pointer' : 'not-allowed',
           color: brandTokens.colors.mutedText,
           display: 'grid',
           justifyItems: 'center',
@@ -318,16 +330,17 @@ export function AttachmentDropzone({
             letterSpacing: '0.16em'
           }}
         >
-          File sharing unavailable
+          {privateStorageAvailable ? 'Store file privately' : 'File sharing unavailable'}
         </span>
         <span style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
-          Add a reference link above instead.
+          {privateStorageAvailable ? 'Private temporary storage for analysis-consented files only.' : 'Add a reference link above instead.'}
         </span>
         <input
           id="attachment-drop"
           type="file"
           multiple
-          disabled
+          disabled={!privateStorageAvailable}
+          onChange={(event) => { void handleFiles(event.target.files); }}
           style={{ display: 'none' }}
         />
       </label>
@@ -343,7 +356,7 @@ export function AttachmentDropzone({
                 {qf.status === 'queued' && 'Queued'}
                 {qf.status === 'validating' && 'Validating...'}
                 {qf.status === 'analysing' && 'Analysing...'}
-                {qf.status === 'quarantined' && 'Quarantined pending review'}
+                {qf.status === 'stored' && 'Stored privately'}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}
                 {qf.status === 'retryable' && `Retry: ${qf.error}`}
               </span>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { validateAdminRequestAny } from '@/lib/security/config';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { emitEvent } from '@/lib/observability/events';
+import { cleanupExpiredStoredUploads, privateUploadBucketFromEnv, type PrivateStorageClient } from '@/lib/uploads/private-storage';
 
 export async function POST(request: Request) {
   const auth = validateAdminRequestAny(request, ['CRON_SECRET', 'INTERNAL_DISPATCH_SECRET']);
@@ -16,5 +17,27 @@ export async function POST(request: Request) {
   const deferredSessions = typeof counts.deferred_sessions === 'number' ? counts.deferred_sessions : 0;
   const releasedClaims = typeof counts.released_claims === 'number' ? counts.released_claims : 0;
   emitEvent('temporary_sessions_expired', { deletedSessions, deferredSessions, releasedClaims });
-  return NextResponse.json({ ok: true, deletedSessions, deferredSessions, releasedClaims });
+  const bucket = privateUploadBucketFromEnv();
+  if (!bucket) return NextResponse.json({ ok: true, deletedSessions, deferredSessions, releasedClaims });
+
+  try {
+    const cleanup = await cleanupExpiredStoredUploads(supabase as unknown as PrivateStorageClient, bucket);
+    return NextResponse.json({
+      ok: true,
+      deletedSessions,
+      deferredSessions,
+      releasedClaims,
+      deletedStoredObjects: cleanup.deleted,
+      failedStoredObjectDeletes: cleanup.failed
+    });
+  } catch {
+    return NextResponse.json({
+      ok: true,
+      deletedSessions,
+      deferredSessions,
+      releasedClaims,
+      deletedStoredObjects: 0,
+      failedStoredObjectDeletes: 1
+    });
+  }
 }

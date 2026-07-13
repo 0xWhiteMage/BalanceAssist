@@ -11,5 +11,6 @@ describe('database migration history expectation', () => {
     expect(source).toContain("'023:023_temporary_session_retention.sql'");
     expect(source).toContain("'024:024_temporary_expiry_hardening.sql'");
     expect(source).toContain("'028:028_handoff_reservation_consent_recheck.sql'");
+    expect(source).toContain("'029:029_private_attachment_storage.sql'");
   });
 });

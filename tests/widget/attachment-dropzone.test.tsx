@@ -97,6 +97,19 @@ test('dropzone states that file sharing is unavailable and disables selection', 
   expect(document.querySelector('input[type="file"]')).toBeDisabled();
 });
 
+test('enables file selection only after the server verifies private storage', async () => {
+  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).includes('/api/telegram/upload')) {
+      return new Response(JSON.stringify({ available: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response('{}', { status: 404 });
+  }) as unknown as typeof fetch;
+  const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  expect(screen.getByText(/private temporary storage/i)).toBeInTheDocument();
+});
+
 test('URL submit button uses the uppercase ADD LINK pill copy', () => {
   render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
   // The button uses the widget's uppercase pill pattern; the visible text is
@@ -118,7 +131,7 @@ test('blocks links until the user explicitly allows producer review', async () =
   await waitFor(() => {
     expect(screen.getByRole('alert')).toHaveTextContent(/balance team may review this link/i);
   });
-  expect(global.fetch).not.toHaveBeenCalled();
+  expect(global.fetch).not.toHaveBeenCalledWith('/api/attachments/link', expect.anything());
 });
 
 test('persists producer-transfer consent before linking', async () => {
