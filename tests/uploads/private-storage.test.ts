@@ -10,7 +10,7 @@ function makeFile(name = 'client-brief.pdf') {
   return file;
 }
 
-function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; insertError?: boolean; cleanupInsertError?: boolean; removeError?: boolean; updateError?: boolean; expiredError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string; cleanup_required_at?: string | null }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
+function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; insertError?: boolean; cleanupInsertError?: boolean; removeError?: boolean; cleanupDeleteError?: boolean; updateError?: boolean; expiredError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string; cleanup_required_at?: string | null }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
   const upload = vi.fn(async () => ({ error: null }));
   const remove = vi.fn(async () => ({ error: options?.removeError ? { message: 'delete failed' } : null }));
   const insert = vi.fn(async () => ({ error: options?.insertError ? { message: 'metadata failed' } : null }));
@@ -31,7 +31,7 @@ function makeClient(options?: { bucket?: { id: string; public: boolean } | null;
       from: vi.fn(() => ({ upload, remove }))
     },
     from: vi.fn((table: string) => table === 'private_attachment_cleanup'
-      ? { insert: cleanupInsert, select: vi.fn(() => ({ eq: vi.fn(() => ({ lte: vi.fn(() => ({ limit: vi.fn(async () => ({ data: options?.orphaned ?? [], error: null })) })) })) })), delete: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })) }
+      ? { insert: cleanupInsert, select: vi.fn(() => ({ eq: vi.fn(() => ({ lte: vi.fn(() => ({ limit: vi.fn(async () => ({ data: options?.orphaned ?? [], error: null })) })) })) })), delete: vi.fn(() => ({ eq: vi.fn(async () => ({ error: options?.cleanupDeleteError ? { message: 'cleanup record delete failed' } : null })) })) }
       : table === 'private_attachment_storage_readiness'
         ? { select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: { status: options?.readiness ?? 'ready' }, error: null })) })) })) }
         : { insert, update, select, delete: metadataDelete }),
@@ -170,5 +170,12 @@ describe('private attachment storage', () => {
 
     expect(client.remove).toHaveBeenCalledWith([objectKey]);
     expect(client.from).toHaveBeenCalledWith('private_attachment_cleanup');
+  });
+
+  test('fails closed when an orphan object or its cleanup record cannot be deleted', async () => {
+    const orphaned = [{ object_key: '0d8db2ac-03b2-414b-bf9b-8cf2f6fcd80c', bucket: 'temporary-attachments' }];
+
+    await expect(cleanupExpiredStoredUploads(makeClient({ orphaned, removeError: true }) as never, 'temporary-attachments')).resolves.toEqual({ deleted: 0, failed: 1, deferredSessionIds: [], complete: false });
+    await expect(cleanupExpiredStoredUploads(makeClient({ orphaned, cleanupDeleteError: true }) as never, 'temporary-attachments')).resolves.toEqual({ deleted: 0, failed: 1, deferredSessionIds: [], complete: false });
   });
 });

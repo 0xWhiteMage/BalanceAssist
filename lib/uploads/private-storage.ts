@@ -148,11 +148,13 @@ export async function cleanupExpiredStoredUploads(client: PrivateStorageClient, 
     const removed = await storage.remove([record.object_key]);
     if (removed.error) {
       failed++;
+      complete = false;
       continue;
     }
     const cleared = await client.from('private_attachment_cleanup').delete().eq('object_key', record.object_key);
     if (cleared.error) {
       failed++;
+      complete = false;
       continue;
     }
     deleted++;

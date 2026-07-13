@@ -52,4 +52,12 @@ describe('private attachment storage migration', () => {
     expect(migration).not.toMatch(/ILIKE|~\*.*temporary-attachments/i);
     expect(migration).toMatch(/CASE WHEN .* THEN 'ready' ELSE 'unavailable' END/is);
   });
+
+  test('remediates deleted-session legacy cleanup records without retaining their object keys', () => {
+    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/032_legacy_cleanup_record_remediation.sql'), 'utf8');
+
+    expect(migration).toMatch(/DELETE FROM storage\.objects/i);
+    expect(migration).toMatch(/DELETE FROM public\.private_attachment_cleanup/i);
+    expect(migration).toMatch(/to_regclass\('storage\.objects'\)/i);
+  });
 });

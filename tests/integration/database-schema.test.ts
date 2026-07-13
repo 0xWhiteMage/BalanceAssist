@@ -219,8 +219,53 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        '028_handoff_reservation_consent_recheck.sql',
        '029_private_attachment_storage.sql',
        '030_private_attachment_retention.sql',
-       '031_private_attachment_cleanup_hardening.sql'
+       '031_private_attachment_cleanup_hardening.sql',
+       '032_legacy_cleanup_record_remediation.sql'
     ]);
+  });
+
+  it('removes a prefixed cleanup record and its storage object after its session was deleted', async () => {
+    const { Client } = await import('pg');
+    const runner = await loadRunner();
+    const database = `balance_assist_legacy_cleanup_${process.pid}_${Date.now()}`;
+    const connection = withDatabase(connectionString!, database);
+    await adminClient!.query(`create database ${database}`);
+    try {
+      await runner.applyMigrations({ connectionString: connection, migrationsDir, throughVersion: '017' });
+      const cleanupClient = new Client({ connectionString: connection });
+      await cleanupClient.connect();
+      try {
+        await cleanupClient.query(`
+          create schema storage;
+          create table storage.buckets (id text primary key, name text not null, public boolean not null default false);
+          create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text not null, name text not null);
+        `);
+        await runner.applyMigrations({ connectionString: connection, migrationsDir, throughVersion: '031' });
+        const session = await cleanupClient.query("insert into public.sessions (source_url) values ('https://deleted-cleanup.example.test') returning id");
+        const objectKey = `${session.rows[0].id}/legacy-object`;
+        await cleanupClient.query("insert into storage.objects (bucket_id, name) values ('temporary-attachments', $1)", [objectKey]);
+        await cleanupClient.query(
+          `insert into public.private_attachment_cleanup (object_key, bucket, checksum_sha256, retention_expires_at, status)
+           values ($1, 'temporary-attachments', repeat('0', 64), now(), 'pending_cleanup')`,
+          [objectKey]
+        );
+        await cleanupClient.query('delete from public.sessions where id = $1', [session.rows[0].id]);
+
+        await runner.applyMigrations({ connectionString: connection, migrationsDir });
+        const remaining = await cleanupClient.query(
+          `select
+             exists(select 1 from public.private_attachment_cleanup where object_key = $1) as cleanup,
+             exists(select 1 from storage.objects where bucket_id = 'temporary-attachments' and name = $1) as object`,
+          [objectKey]
+        );
+
+        expect(remaining.rows).toEqual([{ cleanup: false, object: false }]);
+      } finally {
+        await cleanupClient.end();
+      }
+    } finally {
+      await adminClient!.query(`drop database if exists ${database}`);
+    }
   });
 
   it('upgrades a tokenless 026-era claim to pending before a new owner can claim it', async () => {
@@ -651,7 +696,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         '028:028_handoff_reservation_consent_recheck.sql',
          '029:029_private_attachment_storage.sql',
          '030:030_private_attachment_retention.sql',
-         '031:031_private_attachment_cleanup_hardening.sql'
+         '031:031_private_attachment_cleanup_hardening.sql',
+         '032:032_legacy_cleanup_record_remediation.sql'
     ]);
   });
 
