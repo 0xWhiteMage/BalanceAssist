@@ -68,6 +68,25 @@ jobs:
       - run: npm run test:db:prepare
       - run: npm run test:db
 
+  supabase-service-role:
+    if: ${{ secrets.TEST_SUPABASE_URL != '' && secrets.TEST_SUPABASE_SERVICE_ROLE_KEY != '' && secrets.TEST_SUPABASE_ANON_KEY != '' && secrets.TEST_SUPABASE_PROJECT_MARKER != '' }}
+    runs-on: ubuntu-latest
+    env:
+      TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+      TEST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
+      TEST_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+      TEST_SUPABASE_PROJECT_MARKER: ${{ secrets.TEST_SUPABASE_PROJECT_MARKER }}
+      ALLOW_TEST_SUPABASE_SERVICE_ROLE: 1
+      REQUIRE_TEST_SUPABASE_SERVICE_ROLE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:supabase:service-role
+
   build:
     runs-on: ubuntu-latest
     steps:

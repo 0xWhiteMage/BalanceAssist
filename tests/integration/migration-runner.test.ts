@@ -81,4 +81,24 @@ describe('test migration runner', () => {
       workflow.indexOf('- run: npm run test:db\n')
     );
   });
+
+  it('runs the configured Supabase service-role check only with test secrets', async () => {
+    const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
+    const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
+
+    expect(packageJson.scripts['test:supabase:service-role']).toBe(
+      'vitest run tests/integration/supabase-service-role.test.ts'
+    );
+    expect(workflow).toContain('supabase-service-role:');
+    for (const secret of [
+      'TEST_SUPABASE_URL',
+      'TEST_SUPABASE_SERVICE_ROLE_KEY',
+      'TEST_SUPABASE_ANON_KEY',
+      'TEST_SUPABASE_PROJECT_MARKER'
+    ]) {
+      expect(workflow).toContain(`secrets.${secret}`);
+    }
+    expect(workflow).toContain('ALLOW_TEST_SUPABASE_SERVICE_ROLE: 1');
+    expect(workflow).toContain('REQUIRE_TEST_SUPABASE_SERVICE_ROLE: 1');
+  });
 });

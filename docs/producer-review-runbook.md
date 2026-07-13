@@ -40,6 +40,21 @@ This is a forward-only RLS and grant change. Validate it in staging before produ
 6. Re-run the grant and RLS inventory after the smoke checks. Each affected table must have RLS enabled and neither `anon` nor `authenticated` may retain table privileges.
 7. Deploy to production only after staging validation succeeds. Monitor route errors, PostgREST authorization failures, and handoff delivery during the rollout window.
 
+### Isolated Service-Role Test
+
+Use only a disposable or staging Supabase project that already has the RLS migration applied. Never set these variables to a production URL or production service-role key. Set `TEST_SUPABASE_PROJECT_MARKER` to a unique test-project substring in the URL host, then run:
+
+```bash
+export TEST_SUPABASE_URL=https://test-project.supabase.co
+export TEST_SUPABASE_SERVICE_ROLE_KEY=<test-project-service-role-key>
+export TEST_SUPABASE_ANON_KEY=<test-project-anon-key>
+export TEST_SUPABASE_PROJECT_MARKER=test-project
+export ALLOW_TEST_SUPABASE_SERVICE_ROLE=1
+npm run test:supabase:service-role
+```
+
+The test inserts and removes an isolated `sessions` row with the configured service-role key, and verifies the anon key cannot select or insert. CI runs it only when all `TEST_SUPABASE_*` secrets are configured; required mode fails on incomplete configuration instead of skipping.
+
 ## Failure Patterns
 
 ### Brief saved but producer not notified
