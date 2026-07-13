@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+export const MAX_CHAT_BODY_BYTES = 50_000;
+export const MAX_CHAT_MESSAGES = 20;
+export const MAX_CHAT_MESSAGE_CHARACTERS = 8_000;
+export const MAX_CHAT_TOTAL_CHARACTERS = 40_000;
+
 export const createSessionPayloadSchema = z.object({
   sourceUrl: z.string().url(),
   referrer: z.string().url().optional(),
@@ -74,11 +79,11 @@ export const chatRequestPayloadSchema = z.object({
     .array(
       z.object({
         role: z.literal('user'),
-        content: z.string().max(8000)
+        content: z.string().max(MAX_CHAT_MESSAGE_CHARACTERS)
       })
     )
     .min(1)
-    .max(20),
+    .max(MAX_CHAT_MESSAGES),
   context: z
     .object({
       step: z.string().optional(),
@@ -87,4 +92,10 @@ export const chatRequestPayloadSchema = z.object({
       sessionId: z.string().optional()
     })
     .optional()
-});
+  })
+  .superRefine((value, context) => {
+    const total = value.messages.reduce((sum, message) => sum + message.content.length, 0);
+    if (total > MAX_CHAT_TOTAL_CHARACTERS) {
+      context.addIssue({ code: z.ZodIssueCode.too_big, maximum: MAX_CHAT_TOTAL_CHARACTERS, type: 'string', inclusive: true, message: 'Total message content is too large' });
+    }
+  });

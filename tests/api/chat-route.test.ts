@@ -4,12 +4,14 @@ const {
   createServerSupabaseClientMock,
   hasSupabaseServerConfigMock,
   requireSessionMock,
-  emitEventMock
+  emitEventMock,
+  consumeRateLimitMock
 } = vi.hoisted(() => ({
   createServerSupabaseClientMock: vi.fn(),
   hasSupabaseServerConfigMock: vi.fn(() => false),
   requireSessionMock: vi.fn(),
-  emitEventMock: vi.fn()
+  emitEventMock: vi.fn(),
+  consumeRateLimitMock: vi.fn()
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -23,6 +25,10 @@ vi.mock('@/lib/api/require-session', () => ({
 
 vi.mock('@/lib/observability/events', () => ({
   emitEvent: emitEventMock
+}));
+
+vi.mock('@/lib/security/rate-limit', () => ({
+  consumeRateLimit: consumeRateLimitMock
 }));
 
 describe('POST /api/chat', () => {
@@ -41,6 +47,22 @@ describe('POST /api/chat', () => {
     createServerSupabaseClientMock.mockReset();
     createServerSupabaseClientMock.mockReturnValue(null);
     requireSessionMock.mockReset();
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'test-session', capability: 'test-session.secret' },
+      supabase: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { draft: {}, draft_version: 0 }, error: null })
+            })
+          }),
+          update: () => ({ eq: async () => ({ error: null }) })
+        })
+      }
+    });
+    consumeRateLimitMock.mockReset();
+    consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
   });
 
   afterEach(() => {
@@ -136,19 +158,166 @@ describe('POST /api/chat', () => {
     return { supabase, state, sessionUpdates };
   }
 
-  async function postChat(body: unknown, options?: { headers?: HeadersInit }) {
+  async function postChat(body: unknown, options?: { headers?: HeadersInit; includeSessionId?: boolean }) {
     const { POST } = await import('@/app/api/chat/route');
     const req = new Request('http://localhost/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Origin: 'https://balancestudio.tv',
+        'x-session-capability': 'test-session.secret',
         ...(options?.headers ?? {})
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(options?.includeSessionId === false
+        ? body
+        : {
+            ...(body as Record<string, unknown>),
+            context: {
+              sessionId: 'test-session',
+              ...((body as { context?: Record<string, unknown> }).context ?? {})
+            }
+          })
     });
     const res = await POST(req);
     return { res, data: await res.json() };
   }
+
+  test('rejects an omitted session capability before calling the provider', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+    requireSessionMock.mockResolvedValue({
+      ok: false,
+      response: new Response(JSON.stringify({ error: 'Session capability required' }), { status: 401 })
+    });
+
+    const { res } = await postChat(
+      { messages: [{ role: 'user', content: 'Hello' }] },
+      { headers: { 'x-session-capability': '' } }
+    );
+
+    expect(res.status).toBe(401);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects an untrusted origin before calling the provider', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+    requireSessionMock.mockResolvedValue({
+      ok: false,
+      response: new Response(JSON.stringify({ error: 'Untrusted origin' }), { status: 403 })
+    });
+
+    const { res } = await postChat(
+      { messages: [{ role: 'user', content: 'Hello' }] },
+      { headers: { Origin: 'https://evil.example' } }
+    );
+
+    expect(res.status).toBe(403);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('does not allow an omitted capability to reach the provider', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    requireSessionMock.mockResolvedValue({
+      ok: false,
+      response: new Response(JSON.stringify({ error: 'Session capability required' }), { status: 401 })
+    });
+
+    const { res } = await postChat({ messages: [{ role: 'user', content: 'Hello' }] });
+
+    expect(res.status).toBe(401);
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('does not let an omitted client sessionId bypass the capability rate limit', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+    consumeRateLimitMock.mockResolvedValue({ permitted: false, retryAfterSeconds: 42 });
+
+    const { res, data } = await postChat(
+      { messages: [{ role: 'user', content: 'Hello' }] },
+      { includeSessionId: false }
+    );
+
+    expect(res.status).toBe(429);
+    expect(data.code).toBe('rate_limited');
+    expect(res.headers.get('Retry-After')).toBe('42');
+    expect(consumeRateLimitMock).toHaveBeenCalledWith('chat:test-session.secret', 20, 3600);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('returns 503 without calling the provider when durable rate limiting is unavailable', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+    consumeRateLimitMock.mockRejectedValue(new Error('database unavailable'));
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'Hello' }] });
+
+    expect(res.status).toBe(503);
+    expect(data.code).toBe('rate_limit_unavailable');
+    expect(data.detail).toBeUndefined();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('returns 413 without calling the provider when Content-Length exceeds the chat body limit', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat(
+      { messages: [{ role: 'user', content: 'Hello' }] },
+      { headers: { 'Content-Length': '50001' } }
+    );
+
+    expect(res.status).toBe(413);
+    expect(data.code).toBe('payload_too_large');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('returns 413 without calling the provider when total message content exceeds the shared bound', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+
+    const { res } = await postChat({
+      messages: Array.from({ length: 20 }, () => ({ role: 'user', content: 'a'.repeat(8000) }))
+    });
+
+    expect(res.status).toBe(413);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('redirects careers intent before provider calls or draft persistence', async () => {
+    const harness = createChatSupabase({ id: 'careers-session', draft: {}, draft_version: 0 });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'careers-session', capability: 'careers-session.secret' },
+      supabase: harness.supabase
+    });
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'Are you hiring designers?' }],
+      context: { sessionId: 'careers-session' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toContain('https://balancestudio.tv/careers');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(harness.sessionUpdates).toEqual([]);
+  });
+
+  test('redirects careers intent before the local fallback path', async () => {
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'Where do I submit my CV?' }]
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toContain('https://balancestudio.tv/careers');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 
   test('uses the authenticated server draft in the system prompt instead of browser-owned draft context', async () => {
     let capturedSystemPrompt = '';

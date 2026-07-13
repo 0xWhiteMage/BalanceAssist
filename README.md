@@ -137,7 +137,9 @@ curl -X POST http://127.0.0.1:3000/api/telegram/simulate \
 
 ## Database setup
 
-The authoritative schema is the incremental chain from `001_initial_schema.sql` through `018_public_schema_rls.sql` (including the intentionally absent `005` version). `000_full_schema.sql` is a legacy snapshot and must not be combined with the incremental chain.
+The authoritative schema is the incremental chain from `001_initial_schema.sql` through `019_api_rate_limits.sql` (including the intentionally absent `005` version). `000_full_schema.sql` is a legacy snapshot and must not be combined with the incremental chain.
+
+Chat requires an authenticated session capability and an allowed request origin. Chat calls are limited durably to 20 per session capability per hour; session creation is limited to 10 per client IP per hour. The creation limiter hashes the first trusted `X-Forwarded-For` value (or `X-Real-IP`); deployments that do not provide either header use the shared `missing-forwarded-ip` fallback bucket rather than a spoofable client value.
 
 For a disposable PostgreSQL database, set `TEST_DATABASE_URL`, prepare the schema, then run the database tests:
 

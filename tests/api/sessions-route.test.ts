@@ -2,14 +2,20 @@ import { NextRequest } from 'next/server';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { extractSessionIdFromCapability } from '@/lib/security/session-capability';
 
-const { hasSupabaseServerConfigMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
+const { hasSupabaseServerConfigMock, createServerSupabaseClientMock, consumeRateLimitMock } = vi.hoisted(() => ({
   hasSupabaseServerConfigMock: vi.fn(),
-  createServerSupabaseClientMock: vi.fn()
+  createServerSupabaseClientMock: vi.fn(),
+  consumeRateLimitMock: vi.fn()
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
   hasSupabaseServerConfig: hasSupabaseServerConfigMock,
   createServerSupabaseClient: createServerSupabaseClientMock
+}));
+
+vi.mock('@/lib/security/rate-limit', () => ({
+  consumeRateLimit: consumeRateLimitMock,
+  getClientIpMaterial: () => '203.0.113.7'
 }));
 
 import { POST } from '@/app/api/sessions/route';
@@ -23,6 +29,8 @@ const validConsent = {
 beforeEach(() => {
   hasSupabaseServerConfigMock.mockReset();
   createServerSupabaseClientMock.mockReset();
+  consumeRateLimitMock.mockReset();
+  consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
   hasSupabaseServerConfigMock.mockReturnValue(true);
   createServerSupabaseClientMock.mockImplementation(() => ({
     from: () => ({
@@ -41,6 +49,22 @@ beforeEach(() => {
       })
     })
   }));
+});
+
+test('returns 429 and does not persist a session when the durable creation limiter rejects the client', async () => {
+  consumeRateLimitMock.mockResolvedValue({ permitted: false, retryAfterSeconds: 60 });
+  const request = new NextRequest('https://www.balancestudio.tv/api/sessions', {
+    method: 'POST',
+    headers: { origin: 'https://www.balancestudio.tv', 'x-forwarded-for': '203.0.113.7' },
+    body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
+  });
+
+  const response = await POST(request);
+
+  expect(response.status).toBe(429);
+  await expect(response.json()).resolves.toEqual({ ok: false, code: 'rate_limited' });
+  expect(response.headers.get('Retry-After')).toBe('60');
+  expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
 });
 
 test('persists and returns the ID embedded in the session capability', async () => {

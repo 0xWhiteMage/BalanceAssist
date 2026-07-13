@@ -1,5 +1,4 @@
-import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
-import { z } from 'zod';
+import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
@@ -7,7 +6,6 @@ import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
-import { checkRateLimit } from '@/lib/conversation/rate-limit';
 import { isBriefReadyForApproval, missingReviewFields, REVIEW_PROMPT } from '@/lib/conversation/review-state';
 import {
   guardAgainstFabricatedBriefFields,
@@ -24,24 +22,9 @@ import { clearField, getVisibleDraftValues, normalizeVersionedDraft, updateField
 import { requireSession } from '@/lib/api/require-session';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
-
-const chatMessageSchema = z.object({
-  role: z.literal('user'),
-  content: z.string().max(8000)
-});
-
-const chatRequestSchema = z.object({
-  messages: z.array(chatMessageSchema).min(1).max(20),
-  context: z
-    .object({
-      step: z.string().optional(),
-      isTeamConnected: z.boolean().optional(),
-      draft: z.string().optional(),
-      sessionId: z.string().optional(),
-      capturedFields: z.array(z.string()).optional()
-    })
-    .optional()
-});
+import { chatRequestPayloadSchema, MAX_CHAT_BODY_BYTES } from '@/lib/api/contracts';
+import { consumeRateLimit } from '@/lib/security/rate-limit';
+import { getCareersRedirect, isCareersIntent } from '@/lib/conversation/careers-redirect';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -359,29 +342,15 @@ function toLeadDraftState(draft: Record<string, string>): Partial<LeadDraft> {
   return leadDraft;
 }
 
-async function loadAuthenticatedDraftState(request: Request, sessionId: string | undefined) {
+async function loadAuthenticatedDraftState(session: Awaited<ReturnType<typeof requireSession>>) {
   const emptyDraft = {} as VersionedDraft;
   const emptyPromptDraft: Record<string, string> = {};
   const emptyPriorDraft: Partial<LeadDraft> = {};
 
-  if (!sessionId) {
-    return {
-      authenticated: false,
-      sessionId: undefined,
-      supabase: null,
-      versionedDraft: emptyDraft,
-      draftVersion: 0,
-      promptDraft: emptyPromptDraft,
-      priorDraft: emptyPriorDraft,
-      response: null as Response | null
-    };
-  }
-
-  const session = await requireSession(request);
   if (!session.ok) {
     return {
       authenticated: false,
-      sessionId,
+      sessionId: undefined,
       supabase: null,
       versionedDraft: emptyDraft,
       draftVersion: 0,
@@ -391,18 +360,7 @@ async function loadAuthenticatedDraftState(request: Request, sessionId: string |
     };
   }
 
-  if (session.auth.sessionId !== sessionId) {
-    return {
-      authenticated: false,
-      sessionId,
-      supabase: null,
-      versionedDraft: emptyDraft,
-      draftVersion: 0,
-      promptDraft: emptyPromptDraft,
-      priorDraft: emptyPriorDraft,
-      response: jsonWithCors({ error: 'Session mismatch' }, { status: 403 })
-    };
-  }
+  const sessionId = session.auth.sessionId;
 
   const { data, error } = await session.supabase
     .from('sessions')
@@ -516,30 +474,53 @@ function buildLlmContext(context: ChatContext, promptDraft: Record<string, strin
 }
 
 export async function POST(request: Request) {
-  const parsed = await parseRequestBody(request, chatRequestSchema);
   const requestId = extractRequestId(request);
+  const session = await requireSession(request);
+  if (!session.ok) return session.response;
 
-  if (!parsed.ok) {
-    return parsed.response;
+  const contentLength = request.headers.get('content-length');
+  if (contentLength && Number(contentLength) > MAX_CHAT_BODY_BYTES) {
+    return jsonWithCors({ error: 'Payload too large', code: 'payload_too_large' }, { status: 413 }, request);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonWithCors({ error: 'Invalid JSON body' }, { status: 400 }, request);
+  }
+  const parsed = chatRequestPayloadSchema.safeParse(payload);
+
+  if (!parsed.success) {
+    const tooLarge = parsed.error.issues.some((issue) => issue.code === 'too_big');
+    return jsonWithCors(
+      { error: tooLarge ? 'Payload too large' : 'Invalid request payload', ...(tooLarge ? { code: 'payload_too_large' } : { issues: parsed.error.issues }) },
+      { status: tooLarge ? 413 : 400 },
+      request
+    );
   }
 
   const { messages, context } = parsed.data;
   const env = getEnv();
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
-  const sessionId = context?.sessionId;
+  const sessionId = session.auth.sessionId;
   const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
 
-  if (sessionId) {
-    const limit = checkRateLimit(sessionId);
-    if (!limit.allowed) {
-      return jsonWithCors(
-        {
-          error: 'Rate limit reached',
-          detail: `Max ${limit.max} LLM calls per session per hour.`
-        },
-        { status: 429 }
-      );
+  if (context?.sessionId && context.sessionId !== sessionId) {
+    return jsonWithCors({ error: 'Session mismatch' }, { status: 403 }, request);
+  }
+
+  if (isCareersIntent(lastUserMessage)) {
+    return jsonWithCors({ message: `Please apply through ${getCareersRedirect()}.`, draftUpdates: {}, briefReady: false, reviewPrompt: null, missingFields: [], truncated: false }, undefined, request);
+  }
+
+  try {
+    const limit = await consumeRateLimit(`chat:${session.auth.capability}`, 20, 60 * 60);
+    if (!limit.permitted) {
+      return jsonWithCors({ error: 'Rate limit reached', code: 'rate_limited' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }, request);
     }
+  } catch {
+    return jsonWithCors({ error: 'Service unavailable', code: 'rate_limit_unavailable' }, { status: 503 }, request);
   }
 
   if (faqResponse) {
@@ -561,7 +542,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const draftState = await loadAuthenticatedDraftState(request, sessionId);
+  const draftState = await loadAuthenticatedDraftState(session);
   if (draftState.response) {
     return draftState.response;
   }

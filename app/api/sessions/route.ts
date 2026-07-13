@@ -6,6 +6,10 @@ import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { generateCapability, hashCapability } from '@/lib/security/session-capability';
+import { consumeRateLimit, getClientIpMaterial } from '@/lib/security/rate-limit';
+
+const SESSION_CREATION_LIMIT = 10;
+const SESSION_CREATION_WINDOW_SECONDS = 60 * 60;
 
 function setSessionCapabilityCookie(response: NextResponse, request: Request, capability: string, expiresAt: string) {
   const url = new URL(request.url);
@@ -32,6 +36,16 @@ export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, createSessionPayloadSchema);
   const requestId = extractRequestId(request);
   const logger = createLogger('sessions', requestId);
+
+  try {
+    const limit = await consumeRateLimit(`session-create:${getClientIpMaterial(request)}`, SESSION_CREATION_LIMIT, SESSION_CREATION_WINDOW_SECONDS);
+    if (!limit.permitted) {
+      return jsonWithCors({ ok: false, code: 'rate_limited' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }, request);
+    }
+  } catch {
+    logger.error('Session creation rate limit is unavailable');
+    return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
+  }
 
   if (!parsed.ok) {
     return parsed.response;
