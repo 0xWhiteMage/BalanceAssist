@@ -6,7 +6,6 @@ import {
   createAttachmentConsent,
   hasAnalysisConsent,
   hasProducerShareConsent,
-  hasRequiredConsent,
   type AttachmentConsent
 } from '@/lib/uploads/consent';
 import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
@@ -14,7 +13,7 @@ import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
 
-type FileStatus = 'queued' | 'validating' | 'analysing' | 'stored' | 'failed' | 'retryable';
+type FileStatus = 'queued' | 'validating' | 'stored' | 'failed' | 'retryable';
 
 type QueuedFile = {
   file: File;
@@ -34,7 +33,6 @@ async function readFileBuffer(file: File): Promise<ArrayBuffer> {
 export function AttachmentDropzone({
   onAddLink,
   onAddFile,
-  onFileAnalyzed,
   sessionId,
   consent
 }: {
@@ -151,8 +149,8 @@ export function AttachmentDropzone({
 
     const consentToUse = effectiveConsent ?? null;
 
-    if (!hasRequiredConsent(consentToUse)) {
-      setError('Please choose whether Balance Assist may analyse these files or the Balance team may review them before uploading.');
+    if (!hasAnalysisConsent(consentToUse)) {
+      setError('Please confirm that Balance Assist may analyse these files before uploading.');
       return;
     }
 
@@ -161,8 +159,7 @@ export function AttachmentDropzone({
       return;
     }
 
-    if (consentToUse.aiAnalysis && !await persistConsent('analysis')) return;
-    if (consentToUse.producerShare && !await persistConsent('producer_transfer')) return;
+    if (!await persistConsent('analysis')) return;
 
     const fileArray = Array.from(files);
     const buffers = await Promise.all(fileArray.map((f) => readFileBuffer(f)));
@@ -186,8 +183,6 @@ export function AttachmentDropzone({
         continue;
       }
 
-      updateFileStatus(file.name, 'analysing');
-
       const fd = new FormData();
       fd.append('files', file, file.name);
       fd.append('kind', 'reference');
@@ -205,14 +200,10 @@ export function AttachmentDropzone({
         continue;
       }
 
-      const data = await res.json();
-      const canAnalyze = hasAnalysisConsent(consentToUse);
+      await res.json();
 
       updateFileStatus(file.name, 'stored');
 
-      if (canAnalyze && typeof data.extractedText === 'string' && data.extractedText.trim()) {
-        onFileAnalyzed?.(file.name, data.extractedText);
-      }
     }
   }
 
@@ -355,7 +346,6 @@ export function AttachmentDropzone({
               <span style={{ fontSize: 10 }}>
                 {qf.status === 'queued' && 'Queued'}
                 {qf.status === 'validating' && 'Validating...'}
-                {qf.status === 'analysing' && 'Analysing...'}
                 {qf.status === 'stored' && 'Stored privately'}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}
                 {qf.status === 'retryable' && `Retry: ${qf.error}`}

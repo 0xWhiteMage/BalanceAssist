@@ -10,34 +10,24 @@ export async function POST(request: Request) {
   if (!hasSupabaseServerConfig()) return NextResponse.json({ ok: false, error: 'Supabase not configured' }, { status: 503 });
   const supabase = createServerSupabaseClient();
   if (!supabase) return NextResponse.json({ ok: false, error: 'Supabase client failed' }, { status: 503 });
-  const { data, error } = await supabase.rpc('purge_expired_temporary_sessions');
+  const bucket = privateUploadBucketFromEnv();
+  let cleanup = { deleted: 0, failed: 0, deferredSessionIds: [] as string[] };
+  if (bucket) {
+    try {
+      cleanup = await cleanupExpiredStoredUploads(supabase as unknown as PrivateStorageClient, bucket);
+    } catch {
+      return NextResponse.json({ ok: false, error: 'Private attachment cleanup failed' }, { status: 503 });
+    }
+  }
+  const { data, error } = bucket
+    ? await supabase.rpc('purge_expired_temporary_sessions', { p_deferred_session_ids: cleanup.deferredSessionIds })
+    : await supabase.rpc('purge_expired_temporary_sessions');
   if (error) return NextResponse.json({ ok: false, error: 'Expiry cleanup failed' }, { status: 500 });
   const counts = data && typeof data === 'object' ? data as Record<string, unknown> : {};
   const deletedSessions = typeof counts.deleted_sessions === 'number' ? counts.deleted_sessions : 0;
   const deferredSessions = typeof counts.deferred_sessions === 'number' ? counts.deferred_sessions : 0;
   const releasedClaims = typeof counts.released_claims === 'number' ? counts.released_claims : 0;
   emitEvent('temporary_sessions_expired', { deletedSessions, deferredSessions, releasedClaims });
-  const bucket = privateUploadBucketFromEnv();
   if (!bucket) return NextResponse.json({ ok: true, deletedSessions, deferredSessions, releasedClaims });
-
-  try {
-    const cleanup = await cleanupExpiredStoredUploads(supabase as unknown as PrivateStorageClient, bucket);
-    return NextResponse.json({
-      ok: true,
-      deletedSessions,
-      deferredSessions,
-      releasedClaims,
-      deletedStoredObjects: cleanup.deleted,
-      failedStoredObjectDeletes: cleanup.failed
-    });
-  } catch {
-    return NextResponse.json({
-      ok: true,
-      deletedSessions,
-      deferredSessions,
-      releasedClaims,
-      deletedStoredObjects: 0,
-      failedStoredObjectDeletes: 1
-    });
-  }
+  return NextResponse.json({ ok: true, deletedSessions, deferredSessions, releasedClaims, deletedStoredObjects: cleanup.deleted, failedStoredObjectDeletes: cleanup.failed });
 }

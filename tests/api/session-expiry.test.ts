@@ -38,7 +38,7 @@ describe('POST /api/internal/session-expiry', () => {
   test('reports private object cleanup only after the storage adapter deletes objects', async () => {
     process.env.CRON_SECRET = 'secret';
     process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
-    cleanupPrivateUploadsMock.mockResolvedValue({ deleted: 2, failed: 1 });
+    cleanupPrivateUploadsMock.mockResolvedValue({ deleted: 2, failed: 1, deferredSessionIds: ['session-with-object'] });
     const { POST } = await import('@/app/api/internal/session-expiry/route');
 
     const response = await POST(new Request('https://example.test/api/internal/session-expiry', { method: 'POST', headers: { authorization: 'Bearer secret' } }));
@@ -46,5 +46,6 @@ describe('POST /api/internal/session-expiry', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, deletedSessions: 2, deferredSessions: 1, releasedClaims: 0, deletedStoredObjects: 2, failedStoredObjectDeletes: 1 });
     expect(cleanupPrivateUploadsMock).toHaveBeenCalledWith(client, 'temporary-attachments');
+    expect(client.rpc).toHaveBeenCalledWith('purge_expired_temporary_sessions', { p_deferred_session_ids: ['session-with-object'] });
   });
 });

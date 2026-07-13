@@ -131,6 +131,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     await grantClient.connect();
     try {
       await grantClient.query(`
+        CREATE SCHEMA storage;
+        CREATE TABLE storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false);
+        CREATE TABLE storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL);
         GRANT USAGE ON SCHEMA public TO anon, authenticated, server_role_simulation;
         GRANT ALL PRIVILEGES ON TABLE
           public.sessions,
@@ -143,6 +146,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           public.handoff_outbox,
           public.schema_migrations
         TO anon, authenticated, server_role_simulation;
+        CREATE POLICY temporary_attachments_anon_read ON storage.objects FOR SELECT TO anon USING (bucket_id = 'temporary-attachments');
+        CREATE POLICY temporary_attachments_authenticated_read ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'temporary-attachments');
       `);
       publicRoleGrantsBeforeHardening = (
         await grantClient.query(`
@@ -206,9 +211,12 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '022_session_consents_append_only.sql',
       '023_temporary_session_retention.sql',
       '024_temporary_expiry_hardening.sql',
-      '025_in_flight_handoff_retention.sql',
-      '026_handoff_claim_ownership.sql',
-      '027_handoff_send_reservations.sql'
+       '025_in_flight_handoff_retention.sql',
+       '026_handoff_claim_ownership.sql',
+       '027_handoff_send_reservations.sql',
+       '028_handoff_reservation_consent_recheck.sql',
+       '029_private_attachment_storage.sql',
+       '030_private_attachment_retention.sql'
     ]);
   });
 
@@ -449,6 +457,42 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(remaining.rows).toEqual([{ session: false, handoff: false }]);
   });
 
+  it('defers an expired session until private-object cleanup completes', async () => {
+    const session = await client!.query(
+      "insert into public.sessions (source_url, draft_expires_at) values ('https://deferred-private-object.example.test', now()) returning id"
+    );
+    const sessionId = session.rows[0].id;
+
+    const purged = await client!.query('select public.purge_expired_temporary_sessions(array[$1]::uuid[]) as count', [sessionId]);
+    const remaining = await client!.query('select exists(select 1 from public.sessions where id = $1) as session', [sessionId]);
+
+    expect(purged.rows).toEqual([{ count: { deleted_sessions: 0, deferred_sessions: 1, released_claims: 0 } }]);
+    expect(remaining.rows).toEqual([{ session: true }]);
+    await client!.query('delete from public.sessions where id = $1', [sessionId]);
+  });
+
+  it('provisions a private bucket and removes target-bucket public API policies', async () => {
+    const bucket = await client!.query("select id, public from storage.buckets where id = 'temporary-attachments'");
+    const policies = await client!.query(`
+      select policyname
+      from pg_policies
+      where schemaname = 'storage' and tablename = 'objects'
+        and (roles && array['anon'::name, 'authenticated'::name] or roles && array['public'::name])
+        and (coalesce(qual, '') ilike '%temporary-attachments%' or coalesce(with_check, '') ilike '%temporary-attachments%')
+    `);
+    const readiness = await client!.query("select status from public.private_attachment_storage_readiness where bucket = 'temporary-attachments'");
+    const privileges = await client!.query(`
+      select
+        has_table_privilege('anon', 'storage.objects', 'SELECT') as anon_read,
+        has_table_privilege('authenticated', 'storage.objects', 'SELECT') as authenticated_read
+    `);
+
+    expect(bucket.rows).toEqual([{ id: 'temporary-attachments', public: false }]);
+    expect(policies.rows).toEqual([]);
+    expect(readiness.rows).toEqual([{ status: 'ready' }]);
+    expect(privileges.rows).toEqual([{ anon_read: false, authenticated_read: false }]);
+  });
+
   it('suppresses an unclaimed handoff when producer-transfer consent was revoked', async () => {
     const session = await client!.query(
       `insert into public.sessions (source_url, draft_expires_at)
@@ -554,9 +598,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
   it('grants the expiry RPC only to service_role', async () => {
     const privileges = await client!.query(
       `select
-         has_function_privilege('service_role', 'public.purge_expired_temporary_sessions()', 'EXECUTE') as service_purge,
-         has_function_privilege('anon', 'public.purge_expired_temporary_sessions()', 'EXECUTE') as anon_purge,
-         has_function_privilege('authenticated', 'public.purge_expired_temporary_sessions()', 'EXECUTE') as authenticated_purge`
+          has_function_privilege('service_role', 'public.purge_expired_temporary_sessions(uuid[])', 'EXECUTE') as service_purge,
+          has_function_privilege('anon', 'public.purge_expired_temporary_sessions(uuid[])', 'EXECUTE') as anon_purge,
+          has_function_privilege('authenticated', 'public.purge_expired_temporary_sessions(uuid[])', 'EXECUTE') as authenticated_purge`
     );
 
     expect(privileges.rows).toEqual([{
@@ -602,7 +646,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        '026:026_handoff_claim_ownership.sql',
        '027:027_handoff_send_reservations.sql',
         '028:028_handoff_reservation_consent_recheck.sql',
-        '029:029_private_attachment_storage.sql'
+         '029:029_private_attachment_storage.sql',
+         '030:030_private_attachment_retention.sql'
     ]);
   });
 
