@@ -133,19 +133,15 @@ curl -X POST http://127.0.0.1:3000/api/telegram/simulate \
 
 ## Database setup
 
-Run the SQL files in `supabase/migrations/` in order, in the Supabase SQL editor:
+The authoritative schema is the incremental chain from `001_initial_schema.sql` through `017_handoff_claim_leases.sql` (including the intentionally absent `005` version). `000_full_schema.sql` is a legacy snapshot and must not be combined with the incremental chain.
 
-1. `001_initial_schema.sql` — sessions, events, leads
-2. `002_human_messages.sql` — handoff messages
-3. `003_telegram_topics.sql` — Telegram forum-topic tracking
-4. `004_contact_capture.sql` — captured contact fields on sessions
-5. `006_human_file_request_state.sql` — human-side file-request flag
-6. `007_uploaded_files.sql` — uploaded-files registry
-7. `008_schedule_request.sql` — schedule-request flag
-8. `009_brief_attachments.sql` — denormalised reference link/file columns on leads and sessions
-9. `010_uploaded_files_telegram_metadata.sql` — Telegram file-id + filename/mime/kind on uploaded_files
-10. `011_reference_links_table.sql` — normalised `reference_links` table for the dropzone
-11. `012_reference_links_session_nullable.sql` — allow `reference_links.session_id` to be null (for admin-tagged links)
+For a disposable PostgreSQL database, set `TEST_DATABASE_URL` and use the migration runner rather than applying partial SQL by hand:
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/balance_assist_test npm run db:migrate:test
+```
+
+Run `npm run test:db` to apply the chain and verify the resulting schema. Do not point `TEST_DATABASE_URL` at production data.
 
 ## Intake flow
 

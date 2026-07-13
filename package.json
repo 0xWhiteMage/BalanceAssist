@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:migrate:test": "node scripts/apply-test-migrations.mjs",
+    "test:db": "node scripts/apply-test-migrations.mjs && vitest run tests/integration/database-schema.test.ts",
     "test:e2e": "playwright install chromium && playwright test"
   },
   "overrides": {
@@ -26,6 +28,7 @@
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.3.0",
     "@types/node": "24.1.0",
+    "@types/pg": "^8.20.0",
     "@types/react": "19.1.8",
     "@types/react-dom": "19.1.6",
     "ajv": "^8.20.0",
@@ -34,6 +37,7 @@
     "eslint": "8.57.1",
     "eslint-config-next": "^15.5.20",
     "jsdom": "26.1.0",
+    "pg": "^8.22.0",
     "postcss": "8.5.16",
     "tailwindcss": "3.4.17",
     "typescript": "5.8.3",
