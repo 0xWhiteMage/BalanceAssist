@@ -32,8 +32,17 @@
 ## Handoff Retry Timing
 
 - A failed handoff is eligible for its next attempt no sooner than five minutes later; actual dispatch depends on the next GitHub Actions run and may be later.
-- The dispatcher allows three delivery attempts and escalates handoffs once they are older than 15 minutes when a dispatch run evaluates them. Scheduler delay can make escalation later; it cannot make retries occur faster.
+- The dispatcher allows four delivery attempts. The fourth evaluation escalates handoffs that are at least 15 minutes old, including a run exactly on the five-minute boundary. Scheduler delay can make escalation later; it cannot make retries occur faster.
 - Use `workflow_dispatch` after resolving an incident to process due rows. Do not infer delivery from a successful workflow run; inspect the outbox state and handoff events.
+
+## Scheduled Workflow Disablement
+
+GitHub automatically disables scheduled workflows after 60 days without repository activity on public repositories. This produces no failed run, so failed-run notifications alone do not detect it.
+
+1. Alert when no `Handoff dispatch` run has started within 15 minutes, or when the oldest pending `handoff_outbox` row is older than 15 minutes.
+2. An administrator checks the workflow's run history in GitHub Actions. If no scheduled run exists, treat the scheduler as disabled rather than waiting for a failure notification.
+3. Re-enable scheduling by editing and committing the workflow's `schedule` entry, then confirm the next scheduled run starts.
+4. Confirm the oldest pending outbox row is processed or explicitly escalated. Use `workflow_dispatch` only to recover due work; it does not prove recurring scheduling is re-enabled.
 
 ## Database Access Hardening Rollout
 

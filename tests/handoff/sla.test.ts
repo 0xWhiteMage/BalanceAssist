@@ -68,8 +68,8 @@ describe('handoff/sla', () => {
   });
 
   describe('getMaxRetries', () => {
-    it('returns default max retries', () => {
-      expect(getMaxRetries()).toBe(3);
+    it('returns the default four delivery attempts', () => {
+      expect(getMaxRetries()).toBe(4);
     });
 
     it('returns custom max retries from SLA', () => {

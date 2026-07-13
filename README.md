@@ -81,9 +81,11 @@ In **Settings → Secrets and variables → Actions** add:
 | `CRON_SECRET` | Authenticates GitHub Actions calls to `/api/internal/handoff-dispatch`; also set the same value in Vercel runtime environment variables |
 | `TELEGRAM_BOT_TOKEN` | Same as in Vercel env |
 
-The `Handoff dispatch` workflow runs every five minutes and can be started with `workflow_dispatch`. This is a best-effort cadence: GitHub scheduled workflows can be delayed, especially during high load, so it does not guarantee dispatch exactly every five minutes. Dispatch retries wait at least one five-minute scheduler window, and pending handoffs are escalated after three windows (15 minutes), subject to scheduler delay.
+The `Handoff dispatch` workflow runs every five minutes and can be started with `workflow_dispatch`. This is a best-effort cadence: GitHub scheduled workflows can be delayed, especially during high load, so it does not guarantee dispatch exactly every five minutes. Dispatch retries wait at least one five-minute scheduler window. A fourth failed dispatch evaluation escalates pending handoffs at or after 15 minutes, subject to scheduler delay.
 
 Enable GitHub Actions failure notifications for repository administrators and monitor failed `Handoff dispatch` runs, `handoff_failed`/`handoff_escalated` events, and pending or escalated `handoff_outbox` rows. A failed workflow needs investigation or a manual `workflow_dispatch` run; it does not prove a handoff was delivered.
+
+GitHub automatically disables scheduled workflows after 60 days without repository activity on public repositories. Failed-run notifications do not detect this silent disablement. Alert when no `Handoff dispatch` run starts within 15 minutes or when the oldest pending `handoff_outbox` row exceeds 15 minutes. An administrator must inspect the workflow's run history, re-enable scheduling by editing and committing the workflow's `schedule` entry, then verify that the next scheduled run starts and that the oldest pending row is processed.
 
 ### 4. Verify the webhook
 

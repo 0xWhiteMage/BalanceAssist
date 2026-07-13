@@ -5,7 +5,7 @@ export type HandoffSLA = {
 };
 
 const DEFAULT_SLA: HandoffSLA = {
-  maxRetryAttempts: 3,
+  maxRetryAttempts: 4,
   retryBackoffMs: [300_000, 300_000, 300_000], // GitHub Actions schedules every five minutes.
   escalationThresholdMs: 900_000, // Three five-minute scheduler windows.
 };
@@ -19,7 +19,7 @@ export function getRetryDelay(attempt: number, sla?: HandoffSLA): number {
 export function shouldEscalate(createdAt: string, sla?: HandoffSLA): boolean {
   const config = sla ?? DEFAULT_SLA;
   const elapsed = Date.now() - new Date(createdAt).getTime();
-  return elapsed > config.escalationThresholdMs;
+  return elapsed >= config.escalationThresholdMs;
 }
 
 export function getMaxRetries(sla?: HandoffSLA): number {

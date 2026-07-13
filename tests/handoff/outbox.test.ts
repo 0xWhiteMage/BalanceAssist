@@ -206,14 +206,14 @@ describe('handoff/outbox', () => {
       expect(row?.next_attempt_at).toBe('2026-07-11T12:05:00.000Z');
     });
 
-    it('marks the row failed when retries are exhausted', async () => {
+    it('marks the row failed when all four delivery attempts are exhausted', async () => {
       const harness = createOutboxSupabase([
         {
           id: 'ho-2',
           session_id: 'session-2',
           payload: { sessionId: 'session-2', type: 'approval', summary: 'Hello' },
           state: 'pending',
-          attempts: 2,
+          attempts: 3,
           created_at: '2026-07-11T11:59:00.000Z',
           updated_at: '2026-07-11T11:59:00.000Z',
           next_attempt_at: '2026-07-11T11:59:00.000Z',
@@ -227,8 +227,80 @@ describe('handoff/outbox', () => {
       expect(outcome).toEqual({ shouldRetry: false, escalated: false, retryDelayMs: 0 });
       expect(row).toMatchObject({
         state: 'failed',
-        attempts: 3,
+        attempts: 4,
         last_error: 'still failing'
+      });
+    });
+
+    it('escalates on the fourth normal five-minute dispatch evaluation', async () => {
+      const harness = createOutboxSupabase([
+        {
+          id: 'ho-timeline-normal',
+          session_id: 'session-timeline-normal',
+          payload: { sessionId: 'session-timeline-normal', type: 'approval', summary: 'Hello' },
+          state: 'pending',
+          attempts: 0,
+          created_at: '2026-07-11T12:00:00.000Z',
+          updated_at: '2026-07-11T12:00:00.000Z',
+          next_attempt_at: '2026-07-11T12:00:00.000Z',
+          last_error: null
+        }
+      ]);
+
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toMatchObject({
+        shouldRetry: true,
+        retryDelayMs: 300_000
+      });
+
+      vi.setSystemTime(new Date('2026-07-11T12:05:00.000Z'));
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toMatchObject({
+        shouldRetry: true,
+        retryDelayMs: 300_000
+      });
+
+      vi.setSystemTime(new Date('2026-07-11T12:10:00.000Z'));
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toMatchObject({
+        shouldRetry: true,
+        retryDelayMs: 300_000
+      });
+
+      vi.setSystemTime(new Date('2026-07-11T12:15:00.000Z'));
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-normal', 'failed')).toEqual({
+        shouldRetry: false,
+        escalated: true,
+        retryDelayMs: 0
+      });
+    });
+
+    it('escalates when dispatch evaluations run slightly after cron boundaries', async () => {
+      const harness = createOutboxSupabase([
+        {
+          id: 'ho-timeline-delayed',
+          session_id: 'session-timeline-delayed',
+          payload: { sessionId: 'session-timeline-delayed', type: 'approval', summary: 'Hello' },
+          state: 'pending',
+          attempts: 0,
+          created_at: '2026-07-11T12:00:00.000Z',
+          updated_at: '2026-07-11T12:00:00.000Z',
+          next_attempt_at: '2026-07-11T12:00:00.000Z',
+          last_error: null
+        }
+      ]);
+
+      for (const time of ['2026-07-11T12:00:20.000Z', '2026-07-11T12:05:20.000Z', '2026-07-11T12:10:20.000Z']) {
+        vi.setSystemTime(new Date(time));
+        expect(await markFailed(harness.supabase as never, 'ho-timeline-delayed', 'failed')).toMatchObject({
+          shouldRetry: true,
+          escalated: false,
+          retryDelayMs: 300_000
+        });
+      }
+
+      vi.setSystemTime(new Date('2026-07-11T12:15:20.000Z'));
+      expect(await markFailed(harness.supabase as never, 'ho-timeline-delayed', 'failed')).toEqual({
+        shouldRetry: false,
+        escalated: true,
+        retryDelayMs: 0
       });
     });
 
