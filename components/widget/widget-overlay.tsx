@@ -159,6 +159,7 @@ export function WidgetOverlay({
   const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [isTeamConnected, setIsTeamConnected] = useState(false);
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const [humanStatus, setHumanStatus] = useState<'idle' | 'connected' | 'delivered' | 'awaiting' | 'replied'>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
@@ -522,13 +523,8 @@ export function WidgetOverlay({
         consentedAt: noticeConsent.consentedAt
       });
 
-      if (session?.sessionId) {
-        if (session.persisted === false) {
-          console.error(
-            '[widget] Session not persisted to Supabase. Check Vercel env vars and redeploy.'
-          );
-        }
-
+      if (session?.sessionId && session.persisted !== false) {
+        setSessionUnavailable(false);
         setSessionId(session.sessionId);
         setDraftVersion(0);
         sessionIdRef.current = session.sessionId;
@@ -538,6 +534,7 @@ export function WidgetOverlay({
       console.error('[widget] Failed to create session', error);
     }
 
+    setSessionUnavailable(true);
     return null;
   }, [noticeConsent]);
 
@@ -558,10 +555,12 @@ export function WidgetOverlay({
 
   const startConversation = useCallback(async () => {
     if (hasStarted || isTeamConnected || !noticeConsent) return;
-    setHasStarted(true);
     cancelRef.current = false;
 
-    await loadOrCreateSession();
+    const activeSessionId = await loadOrCreateSession();
+    if (!activeSessionId) return;
+
+    setHasStarted(true);
     await advanceStep('intro', createDefaultLeadDraft());
   }, [advanceStep, hasStarted, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
@@ -731,14 +730,14 @@ export function WidgetOverlay({
 
   async function handleTeamConnect() {
     if (isTeamConnected || !noticeConsent) return;
+    const activeSessionId = await loadOrCreateSession();
+    if (!activeSessionId) return;
+
     setIsTeamConnected(true);
     setHumanStatus('connected');
     setCurrentStep('free-chat');
 
-    await loadOrCreateSession();
-    if (sessionIdRef.current) {
-      void logEvent({ sessionId: sessionIdRef.current, eventName: 'human_handoff' });
-    }
+    void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
 
     const connectMsg: ChatMessage = {
       id: nextId(),
@@ -1431,6 +1430,11 @@ export function WidgetOverlay({
                     <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.mutedText }}>
                       Choose how you want to continue. Start with Balance Assist for an AI-led brief, or go straight to the team.
                     </p>
+                    {sessionUnavailable && (
+                      <p role="status" style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.warmGold }}>
+                        Session service is temporarily unavailable. Please try again.
+                      </p>
+                    )}
                     <button
                       type="button"
                       onClick={() => {

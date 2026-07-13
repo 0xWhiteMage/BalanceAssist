@@ -369,6 +369,71 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     });
   });
 
+  test('keeps the intake choices available when session persistence fails', async () => {
+    global.fetch = makeFetchRecorder([
+      ({ url, method }) => {
+        if (url.includes('/api/sessions/inspect')) {
+          return new Response(JSON.stringify({ ok: true, exists: false }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        if (url.includes('/api/sessions') && method === 'POST') {
+          return new Response(JSON.stringify({ ok: false, code: 'session_unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        return null;
+      }
+    ]);
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+
+    await waitFor(() => {
+      expect(screen.getByText(/session service is temporarily unavailable/i)).toBeTruthy();
+      expect(screen.getByRole('button', { name: /start with balance assist/i })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /talk to a human/i })).toBeTruthy();
+    });
+    expect(screen.queryByPlaceholderText(/type a message/i)).toBeNull();
+  });
+
+  test('does not enter chat from an explicitly non-persisted session response', async () => {
+    global.fetch = makeFetchRecorder([
+      ({ url, method }) => {
+        if (url.includes('/api/sessions/inspect')) {
+          return new Response(JSON.stringify({ ok: true, exists: false }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        if (url.includes('/api/sessions') && method === 'POST') {
+          return new Response(JSON.stringify({ sessionId: 'ephemeral-session', persisted: false }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        return null;
+      }
+    ]);
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+
+    await waitFor(() => {
+      expect(screen.getByText(/session service is temporarily unavailable/i)).toBeTruthy();
+      expect(screen.getByRole('button', { name: /start with balance assist/i })).toBeTruthy();
+    });
+    expect(screen.queryByPlaceholderText(/type a message/i)).toBeNull();
+  });
+
   test('intro copy does not invite job applications or CV capture after the notice gate', async () => {
     global.fetch = makeFetchRecorder([
       ({ url, method }) => {

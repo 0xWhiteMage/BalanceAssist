@@ -39,58 +39,48 @@ export async function POST(request: Request) {
 
   const { sourceUrl, referrer, utm, consentVersion, consentedAt } = parsed.data;
 
-  if (hasSupabaseServerConfig()) {
-    const supabase = createServerSupabaseClient();
-
-    if (supabase) {
-      const capability = generateCapability(crypto.randomUUID());
-
-      const { data, error } = await supabase
-        .from('sessions')
-        .insert({
-          source_url: sourceUrl,
-          referrer: referrer ?? null,
-          utm: utm ?? null,
-          consent_version: consentVersion ?? null,
-          consented_at: consentedAt ?? null,
-          status: 'open',
-          capability_hash: hashCapability(capability.capability),
-          capability_expires_at: capability.expiresAt
-        })
-        .select('id, status, source_url, created_at')
-        .single();
-
-      if (!error && data) {
-        emitEvent('consent_granted', { sessionId: data.id, consentVersion }, requestId);
-        emitEvent('capability_issued', { sessionId: data.id }, requestId);
-        return setSessionCapabilityCookie(jsonWithCors({
-          sessionId: data.id,
-          expiresAt: capability.expiresAt,
-          status: data.status,
-          sourceUrl: data.source_url,
-          createdAt: data.created_at,
-          persisted: true
-        }, undefined, request), request, capability.capability, capability.expiresAt);
-      }
-
-      logger.error('Failed to insert session into Supabase', {
-        errorCode: error?.code,
-        errorMessage: error?.message,
-        errorDetails: error?.details,
-        hint: error?.hint
-      });
-    } else {
-      logger.error('Supabase client creation failed despite hasSupabaseServerConfig() returning true');
-    }
+  if (!hasSupabaseServerConfig()) {
+    logger.error('Supabase server configuration is unavailable');
+    return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
   }
 
-  const fallbackCapability = generateCapability(crypto.randomUUID());
+  const supabase = createServerSupabaseClient();
+  if (!supabase) {
+    logger.error('Supabase client creation failed despite configured server credentials');
+    return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
+  }
 
+  const sessionId = crypto.randomUUID();
+  const capability = generateCapability(sessionId);
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert({
+      id: sessionId,
+      source_url: sourceUrl,
+      referrer: referrer ?? null,
+      utm: utm ?? null,
+      consent_version: consentVersion ?? null,
+      consented_at: consentedAt ?? null,
+      status: 'open',
+      capability_hash: hashCapability(capability.capability),
+      capability_expires_at: capability.expiresAt
+    })
+    .select('id, status, source_url, created_at')
+    .single();
+
+  if (error || !data || data.id !== sessionId) {
+    logger.error('Failed to persist session', { errorCode: error?.code });
+    return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
+  }
+
+  emitEvent('consent_granted', { sessionId, consentVersion }, requestId);
+  emitEvent('capability_issued', { sessionId }, requestId);
   return setSessionCapabilityCookie(jsonWithCors({
-    sessionId: fallbackCapability.sessionId,
-    expiresAt: fallbackCapability.expiresAt,
-    status: 'open',
-    sourceUrl,
-    persisted: false
-  }, undefined, request), request, fallbackCapability.capability, fallbackCapability.expiresAt);
+    sessionId,
+    expiresAt: capability.expiresAt,
+    status: data.status,
+    sourceUrl: data.source_url,
+    createdAt: data.created_at,
+    persisted: true
+  }, undefined, request), request, capability.capability, capability.expiresAt);
 }

@@ -1,4 +1,17 @@
 import { NextRequest } from 'next/server';
+import { beforeEach, expect, test, vi } from 'vitest';
+import { extractSessionIdFromCapability } from '@/lib/security/session-capability';
+
+const { hasSupabaseServerConfigMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
+  hasSupabaseServerConfigMock: vi.fn(),
+  createServerSupabaseClientMock: vi.fn()
+}));
+
+vi.mock('@/lib/supabase/server', () => ({
+  hasSupabaseServerConfig: hasSupabaseServerConfigMock,
+  createServerSupabaseClient: createServerSupabaseClientMock
+}));
+
 import { POST } from '@/app/api/sessions/route';
 import { OPTIONS } from '@/app/api/sessions/route';
 
@@ -7,7 +20,51 @@ const validConsent = {
   consentedAt: '2026-07-11T10:00:00.000Z'
 };
 
-test('creates a session response with capability set via cookie only', async () => {
+beforeEach(() => {
+  hasSupabaseServerConfigMock.mockReset();
+  createServerSupabaseClientMock.mockReset();
+  hasSupabaseServerConfigMock.mockReturnValue(true);
+  createServerSupabaseClientMock.mockImplementation(() => ({
+    from: () => ({
+      insert: (session: Record<string, unknown>) => ({
+        select: () => ({
+          single: async () => ({
+            data: {
+              id: session.id,
+              status: 'open',
+              source_url: session.source_url,
+              created_at: '2026-07-13T10:00:00.000Z'
+            },
+            error: null
+          })
+        })
+      })
+    })
+  }));
+});
+
+test('persists and returns the ID embedded in the session capability', async () => {
+  let insertedSession: Record<string, unknown> | undefined;
+  createServerSupabaseClientMock.mockReturnValue({
+    from: () => ({
+      insert: (session: Record<string, unknown>) => {
+        insertedSession = session;
+        return {
+          select: () => ({
+            single: async () => ({
+              data: {
+                id: session.id,
+                status: 'open',
+                source_url: session.source_url,
+                created_at: '2026-07-13T10:00:00.000Z'
+              },
+              error: null
+            })
+          })
+        };
+      }
+    })
+  });
   const request = new NextRequest('http://localhost:3000/api/sessions', {
     method: 'POST',
     body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
@@ -21,9 +78,49 @@ test('creates a session response with capability set via cookie only', async () 
   expect(payload.capability).toBeUndefined();
   expect(payload.expiresAt).toBeTruthy();
 
+  expect(insertedSession?.id).toBe(payload.sessionId);
+
   const setCookie = response.headers.get('set-cookie');
   expect(setCookie).toContain('session_capability=');
   expect(setCookie).toContain('HttpOnly');
+  const capability = setCookie?.match(/session_capability=([^;]+)/)?.[1];
+  expect(extractSessionIdFromCapability(capability ?? '')).toBe(payload.sessionId);
+});
+
+test('fails closed without a capability cookie when session persistence is unavailable', async () => {
+  hasSupabaseServerConfigMock.mockReturnValue(false);
+  const request = new NextRequest('http://localhost:3000/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
+  });
+
+  const response = await POST(request);
+
+  expect(response.status).toBe(503);
+  await expect(response.json()).resolves.toEqual({ ok: false, code: 'session_unavailable' });
+  expect(response.headers.get('set-cookie')).toBeNull();
+});
+
+test('fails closed without a capability cookie when the session insert fails', async () => {
+  createServerSupabaseClientMock.mockReturnValue({
+    from: () => ({
+      insert: () => ({
+        select: () => ({
+          single: async () => ({ data: null, error: { code: '23505', message: 'internal detail' } })
+        })
+      })
+    })
+  });
+  const request = new NextRequest('http://localhost:3000/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
+  });
+
+  const response = await POST(request);
+
+  expect(response.status).toBe(503);
+  await expect(response.json()).resolves.toEqual({ ok: false, code: 'session_unavailable' });
+  expect(response.headers.get('set-cookie')).toBeNull();
 });
 
 test('returns 400 for invalid JSON body', async () => {
