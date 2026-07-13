@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate:test": "node scripts/apply-test-migrations.mjs",
-    "test:db": "node scripts/apply-test-migrations.mjs && vitest run tests/integration/database-schema.test.ts",
+    "test:db": "node scripts/apply-test-migrations.mjs && vitest run tests/integration/database-schema.test.ts tests/integration/session-capability.test.ts",
     "test:e2e": "playwright install chromium && playwright test"
   },
   "overrides": {
