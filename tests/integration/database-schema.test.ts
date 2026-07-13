@@ -23,6 +23,8 @@ let serverSimulationClient: import('pg').Client | undefined;
 let adminClient: import('pg').Client | undefined;
 let rolelessConnectionString: string | undefined;
 let grantConnectionString: string | undefined;
+let backfillConnectionString: string | undefined;
+let legacySessionId: string | undefined;
 let rolelessMigration: MigrationResult | undefined;
 let hardeningMigration: MigrationResult | undefined;
 let publicRoleGrantsBeforeHardening: Array<Record<string, unknown>> | undefined;
@@ -75,8 +77,10 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const suffix = `${process.pid}_${Date.now()}`;
     const rolelessDatabase = `balance_assist_roleless_${suffix}`;
     const grantDatabase = `balance_assist_grants_${suffix}`;
+    const backfillDatabase = `balance_assist_backfill_${suffix}`;
     rolelessConnectionString = withDatabase(connectionString!, rolelessDatabase);
     grantConnectionString = withDatabase(connectionString!, grantDatabase);
+    backfillConnectionString = withDatabase(connectionString!, backfillDatabase);
 
     await adminClient.query(`create database ${rolelessDatabase}`);
     rolelessMigration = await runner.applyMigrations({
@@ -84,11 +88,32 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       migrationsDir
     });
 
+    await adminClient.query(`create database ${backfillDatabase}`);
+    await runner.applyMigrations({
+      connectionString: backfillConnectionString,
+      migrationsDir,
+      throughVersion: '022'
+    });
+    const backfillClient = new Client({ connectionString: backfillConnectionString });
+    await backfillClient.connect();
+    try {
+      const legacySession = await backfillClient.query(
+        `insert into public.sessions (source_url, created_at, updated_at)
+         values ('https://legacy.example.test', '2025-01-01T00:00:00Z', '2025-01-02T03:04:05Z')
+         returning id`
+      );
+      legacySessionId = legacySession.rows[0].id;
+    } finally {
+      await backfillClient.end();
+    }
+    await runner.applyMigrations({ connectionString: backfillConnectionString, migrationsDir });
+
     // Plain PostgreSQL CI lacks Supabase roles. Create restricted API roles only after
     // the roleless migration proves 018's conditional grants are portable.
     await adminClient.query(`
       CREATE ROLE anon NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
       CREATE ROLE authenticated NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+      CREATE ROLE service_role NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
       CREATE ROLE server_role_simulation LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD 'test-service-role-password';
       CREATE DATABASE ${grantDatabase};
     `);
@@ -146,12 +171,14 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
   afterAll(async () => {
     await client?.end();
     await serverSimulationClient?.end();
-    if (adminClient && rolelessConnectionString && grantConnectionString) {
+    if (adminClient && rolelessConnectionString && grantConnectionString && backfillConnectionString) {
       const rolelessDatabase = new URL(rolelessConnectionString).pathname.slice(1);
       const grantDatabase = new URL(grantConnectionString).pathname.slice(1);
+      const backfillDatabase = new URL(backfillConnectionString).pathname.slice(1);
       await adminClient.query(`drop database if exists ${rolelessDatabase}`);
       await adminClient.query(`drop database if exists ${grantDatabase}`);
-      await adminClient.query('drop role if exists server_role_simulation, anon, authenticated');
+      await adminClient.query(`drop database if exists ${backfillDatabase}`);
+      await adminClient.query('drop role if exists server_role_simulation, service_role, anon, authenticated');
     }
     await adminClient?.end();
   });
@@ -162,6 +189,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(rolelessMigration?.applied).toContain('020_api_rate_limit_retention.sql');
     expect(rolelessMigration?.applied).toContain('021_session_consents.sql');
     expect(rolelessMigration?.applied).toContain('022_session_consents_append_only.sql');
+    expect(rolelessMigration?.applied).toContain('023_temporary_session_retention.sql');
+    expect(rolelessMigration?.applied).toContain('024_temporary_expiry_hardening.sql');
   });
 
   it('applies security migrations after public roles receive representative grants', () => {
@@ -174,7 +203,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '019_api_rate_limits.sql',
       '020_api_rate_limit_retention.sql',
       '021_session_consents.sql',
-      '022_session_consents_append_only.sql'
+      '022_session_consents_append_only.sql',
+      '023_temporary_session_retention.sql',
+      '024_temporary_expiry_hardening.sql'
     ]);
   });
 
@@ -282,6 +313,78 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       'uploaded_files.status',
       'uploaded_files.storage_path'
     ]);
+  });
+
+  it('backfills legacy temporary-session fields and supplies 24-hour defaults', async () => {
+    const { Client } = await import('pg');
+    const backfillClient = new Client({ connectionString: backfillConnectionString });
+    await backfillClient.connect();
+    try {
+      const legacy = await backfillClient.query(
+        `select last_activity_at = '2025-01-02T03:04:05Z'::timestamptz as activity_backfilled,
+                draft_expires_at = '2025-01-03T03:04:05Z'::timestamptz as expiry_backfilled
+         from public.sessions where id = $1`,
+        [legacySessionId]
+      );
+      const defaults = await client!.query(
+        `insert into public.sessions (source_url) values ('https://defaults.example.test')
+         returning last_activity_at is not null as activity_defaulted,
+                   draft_expires_at - last_activity_at = interval '24 hours' as expiry_defaulted`
+      );
+
+      expect(legacy.rows).toEqual([{ activity_backfilled: true, expiry_backfilled: true }]);
+      expect(defaults.rows).toEqual([{ activity_defaulted: true, expiry_defaulted: true }]);
+    } finally {
+      await backfillClient.end();
+    }
+  });
+
+  it('purges only expired sessions and cascades session-owned rows under the controlled purge', async () => {
+    const expired = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at)
+       values ('https://expired.example.test', now()) returning id`
+    );
+    const active = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at)
+       values ('https://active.example.test', now() + interval '1 hour') returning id`
+    );
+    const expiredSessionId = expired.rows[0].id;
+    const activeSessionId = active.rows[0].id;
+    const expiredHandoff = await client!.query(
+      `insert into public.handoff_outbox (session_id, payload, state, idempotency_key)
+       values ($1, '{}'::jsonb, 'claiming', 'expired-handoff-' || gen_random_uuid()) returning id`,
+      [expiredSessionId]
+    );
+    await client!.query("select public.record_session_consent($1, 'analysis', true, '1.0')", [expiredSessionId]);
+    const purged = await client!.query('select public.purge_expired_temporary_sessions() as count');
+    const remaining = await client!.query(
+      `select
+         exists(select 1 from public.sessions where id = $1) as expired_session,
+         exists(select 1 from public.session_consents where session_id = $1) as expired_consent,
+         exists(select 1 from public.handoff_outbox where id = $3) as expired_handoff,
+         exists(select 1 from public.sessions where id = $2) as active_session`,
+      [expiredSessionId, activeSessionId, expiredHandoff.rows[0].id]
+    );
+
+    expect(purged.rows).toEqual([{ count: 1 }]);
+    expect(remaining.rows).toEqual([{ expired_session: false, expired_consent: false, expired_handoff: false, active_session: true }]);
+
+    await client!.query('delete from public.sessions where id = $1', [activeSessionId]);
+  });
+
+  it('grants the expiry RPC only to service_role', async () => {
+    const privileges = await client!.query(
+      `select
+         has_function_privilege('service_role', 'public.purge_expired_temporary_sessions()', 'EXECUTE') as service_purge,
+         has_function_privilege('anon', 'public.purge_expired_temporary_sessions()', 'EXECUTE') as anon_purge,
+         has_function_privilege('authenticated', 'public.purge_expired_temporary_sessions()', 'EXECUTE') as authenticated_purge`
+    );
+
+    expect(privileges.rows).toEqual([{
+      service_purge: true,
+      anon_purge: false,
+      authenticated_purge: false
+    }]);
   });
 
   it('does not reapply recorded migrations', async () => {

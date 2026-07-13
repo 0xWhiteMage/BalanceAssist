@@ -23,6 +23,7 @@ import { requireSession } from '@/lib/api/require-session';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { chatRequestPayloadSchema, MAX_CHAT_BODY_BYTES } from '@/lib/api/contracts';
+import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
 import { consumeRateLimit } from '@/lib/security/rate-limit';
 import { getCareersRedirect, isCareersIntent } from '@/lib/conversation/careers-redirect';
 
@@ -414,7 +415,7 @@ async function persistAuthenticatedDraftState(
   state: Awaited<ReturnType<typeof loadAuthenticatedDraftState>>,
   draftUpdates: Record<string, string | boolean>
 ) {
-  if (!state.authenticated || !state.supabase || !state.sessionId || Object.keys(draftUpdates).length === 0) {
+  if (!state.authenticated || !state.supabase || !state.sessionId) {
     return;
   }
 
@@ -450,13 +451,11 @@ async function persistAuthenticatedDraftState(
     changed = true;
   }
 
-  if (!changed) {
-    return;
-  }
-
   await state.supabase
     .from('sessions')
-    .update({ draft: nextDraft, draft_version: state.draftVersion + 1 })
+    .update(changed
+      ? { draft: nextDraft, draft_version: state.draftVersion + 1, last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() }
+      : { last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
     .eq('id', state.sessionId);
 }
 

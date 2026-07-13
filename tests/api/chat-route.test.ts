@@ -607,6 +607,8 @@ describe('POST /api/chat', () => {
     expect(harness.sessionUpdates).toHaveLength(1);
     expect(harness.sessionUpdates[0]).toMatchObject({
       draft_version: 4,
+      last_activity_at: expect.any(String),
+      draft_expires_at: expect.any(String),
       draft: {
         projectScope: {
           value: 'Launch film',
