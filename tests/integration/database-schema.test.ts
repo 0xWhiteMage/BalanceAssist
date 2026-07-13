@@ -155,9 +155,10 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     await adminClient?.end();
   });
 
-  it('applies the full chain, including 019, before public roles exist', () => {
+  it('applies the full chain, including 020, before public roles exist', () => {
     expect(rolelessMigration?.applied).toContain('018_public_schema_rls.sql');
     expect(rolelessMigration?.applied).toContain('019_api_rate_limits.sql');
+    expect(rolelessMigration?.applied).toContain('020_api_rate_limit_retention.sql');
   });
 
   it('applies security migrations after public roles receive representative grants', () => {
@@ -165,7 +166,11 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       { role_name: 'anon', schema_usage: true, table_select: true },
       { role_name: 'authenticated', schema_usage: true, table_select: true }
     ]);
-    expect(hardeningMigration?.applied).toEqual(['018_public_schema_rls.sql', '019_api_rate_limits.sql']);
+    expect(hardeningMigration?.applied).toEqual([
+      '018_public_schema_rls.sql',
+      '019_api_rate_limits.sql',
+      '020_api_rate_limit_retention.sql'
+    ]);
   });
 
   it('creates the required current tables', async () => {
@@ -217,30 +222,6 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         .map((relname) => ({ relname, relrowsecurity: true }))
     );
     expect(privileges.rows).toEqual([]);
-  });
-
-  it('consumes a rate-limit bucket atomically under concurrent calls', async () => {
-    const key = 'a'.repeat(64);
-    const { Client } = await import('pg');
-    const concurrentClients = await Promise.all(
-      Array.from({ length: 10 }, async () => {
-        const concurrentClient = new Client({ connectionString: grantConnectionString! });
-        await concurrentClient.connect();
-        return concurrentClient;
-      })
-    );
-    const results = await Promise.all(
-      concurrentClients.map((concurrentClient) =>
-        concurrentClient.query('select * from public.consume_api_rate_limit($1, $2, $3)', [key, 5, 60])
-      )
-    );
-    await Promise.all(concurrentClients.map((concurrentClient) => concurrentClient.end()));
-
-    expect(results.filter((result) => result.rows[0].permitted).length).toBe(5);
-    expect(results.filter((result) => !result.rows[0].permitted).length).toBe(5);
-    expect(await client!.query('select key_hash, request_count from public.api_rate_limits where key_hash = $1', [key])).toMatchObject({
-      rows: [{ key_hash: key, request_count: 10 }]
-    });
   });
 
   it('creates no policies on protected tables', async () => {
@@ -323,7 +304,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '016:016_uploaded_files_metadata_alignment.sql',
       '017:017_handoff_claim_leases.sql',
       '018:018_public_schema_rls.sql',
-      '019:019_api_rate_limits.sql'
+      '019:019_api_rate_limits.sql',
+      '020:020_api_rate_limit_retention.sql'
     ]);
   });
 });

@@ -1,7 +1,13 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import { getClientIpMaterial, hashRateLimitKey } from '@/lib/security/rate-limit';
 
 describe('rate limit key material', () => {
+  const originalTrustedHeader = process.env.TRUSTED_CLIENT_IP_HEADER;
+
+  afterEach(() => {
+    if (originalTrustedHeader === undefined) delete process.env.TRUSTED_CLIENT_IP_HEADER;
+    else process.env.TRUSTED_CLIENT_IP_HEADER = originalTrustedHeader;
+  });
   test('hashes limiter keys without retaining their source material', () => {
     const source = 'chat:capability.secret';
 
@@ -11,13 +17,23 @@ describe('rate limit key material', () => {
     expect(key).not.toContain(source);
   });
 
-  test('uses the first forwarded address and a safe fallback when proxy headers are absent', () => {
-    const forwarded = new Request('https://balancestudio.tv/api/sessions', {
-      headers: { 'x-forwarded-for': '203.0.113.10, 10.0.0.2' }
+  test('ignores spoofable forwarding headers when no trusted deployment header is configured', () => {
+    const spoofed = new Request('https://balancestudio.tv/api/sessions', {
+      headers: { 'x-forwarded-for': '203.0.113.10', 'x-real-ip': '203.0.113.11' }
     });
-    const absent = new Request('https://balancestudio.tv/api/sessions');
 
-    expect(getClientIpMaterial(forwarded)).toBe('203.0.113.10');
-    expect(getClientIpMaterial(absent)).toBe('missing-forwarded-ip');
+    expect(getClientIpMaterial(spoofed)).toBe('untrusted-client-ip');
+  });
+
+  test('uses Vercel-sanitized client address only when explicitly configured', () => {
+    process.env.TRUSTED_CLIENT_IP_HEADER = 'x-vercel-forwarded-for';
+    const request = new Request('https://balancestudio.tv/api/sessions', {
+      headers: {
+        'x-vercel-forwarded-for': '203.0.113.10',
+        'x-forwarded-for': '198.51.100.9'
+      }
+    });
+
+    expect(getClientIpMaterial(request)).toBe('203.0.113.10');
   });
 });

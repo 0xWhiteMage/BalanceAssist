@@ -274,6 +274,74 @@ describe('POST /api/chat', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  test('returns 413 for an oversized chunked body without trusting a forged Content-Length', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+    const oversized = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(50_001)));
+        controller.close();
+      }
+    });
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://balancestudio.tv',
+        'x-session-capability': 'test-session.secret',
+        'Content-Length': '1'
+      },
+      body: oversized,
+      // Required by undici when a ReadableStream is the request body.
+      duplex: 'half'
+    } as RequestInit);
+    const { POST } = await import('@/app/api/chat/route');
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({ code: 'payload_too_large' });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('returns 413 for an oversized streamed body without Content-Length', async () => {
+    const oversized = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(50_001)));
+        controller.close();
+      }
+    });
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://balancestudio.tv',
+        'x-session-capability': 'test-session.secret'
+      },
+      body: oversized,
+      duplex: 'half'
+    } as RequestInit);
+    const { POST } = await import('@/app/api/chat/route');
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({ code: 'payload_too_large' });
+  });
+
+  test('returns 413 when an accepted context field exceeds its shared bound', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+
+    const { res } = await postChat({
+      messages: [{ role: 'user', content: 'Hello' }],
+      context: { step: 'x'.repeat(257) }
+    });
+
+    expect(res.status).toBe(413);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   test('returns 413 without calling the provider when total message content exceeds the shared bound', async () => {
     process.env.DEEPSEEK_API_KEY = 'test-key';
     global.fetch = vi.fn();
@@ -316,6 +384,23 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.message).toContain('https://balancestudio.tv/careers');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('redirects careers intent from an earlier submitted message before rate limiting or provider activity', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [
+        { role: 'user', content: 'I am looking for an internship.' },
+        { role: 'user', content: 'My portfolio has motion work.' }
+      ]
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toContain('https://balancestudio.tv/careers');
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 

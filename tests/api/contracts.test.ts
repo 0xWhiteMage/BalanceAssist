@@ -1,4 +1,13 @@
-import { createSessionPayloadSchema, chatResponsePayloadSchema, chatRequestPayloadSchema } from '@/lib/api/contracts';
+import {
+  createSessionPayloadSchema,
+  chatResponsePayloadSchema,
+  chatRequestPayloadSchema,
+  MAX_CHAT_CAPTURED_FIELDS,
+  MAX_CHAT_CAPTURED_FIELD_CHARACTERS,
+  MAX_CHAT_CONTEXT_DRAFT_CHARACTERS,
+  MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS,
+  MAX_CHAT_CONTEXT_STEP_CHARACTERS
+} from '@/lib/api/contracts';
 import { expect, test } from 'vitest';
 
 test('validates a session create payload', () => {
@@ -60,4 +69,19 @@ test('chat request payload rejects system messages from the browser', () => {
 test('chat request payload rejects when messages is empty', () => {
   const result = chatRequestPayloadSchema.safeParse({ messages: [] });
   expect(result.success).toBe(false);
+});
+
+test('chat request payload bounds every accepted context field', () => {
+  const valid = { messages: [{ role: 'user', content: 'hi' }] };
+  const oversizedContexts = [
+    { step: 'x'.repeat(MAX_CHAT_CONTEXT_STEP_CHARACTERS + 1) },
+    { draft: 'x'.repeat(MAX_CHAT_CONTEXT_DRAFT_CHARACTERS + 1) },
+    { sessionId: 'x'.repeat(MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS + 1) },
+    { capturedFields: Array.from({ length: MAX_CHAT_CAPTURED_FIELDS + 1 }, () => 'field') },
+    { capturedFields: ['x'.repeat(MAX_CHAT_CAPTURED_FIELD_CHARACTERS + 1)] }
+  ];
+
+  for (const context of oversizedContexts) {
+    expect(chatRequestPayloadSchema.safeParse({ ...valid, context }).success).toBe(false);
+  }
 });

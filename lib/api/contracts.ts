@@ -4,6 +4,11 @@ export const MAX_CHAT_BODY_BYTES = 50_000;
 export const MAX_CHAT_MESSAGES = 20;
 export const MAX_CHAT_MESSAGE_CHARACTERS = 8_000;
 export const MAX_CHAT_TOTAL_CHARACTERS = 40_000;
+export const MAX_CHAT_CONTEXT_STEP_CHARACTERS = 256;
+export const MAX_CHAT_CONTEXT_DRAFT_CHARACTERS = 16_000;
+export const MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS = 128;
+export const MAX_CHAT_CAPTURED_FIELDS = 20;
+export const MAX_CHAT_CAPTURED_FIELD_CHARACTERS = 64;
 
 export const createSessionPayloadSchema = z.object({
   sourceUrl: z.string().url(),
@@ -86,10 +91,11 @@ export const chatRequestPayloadSchema = z.object({
     .max(MAX_CHAT_MESSAGES),
   context: z
     .object({
-      step: z.string().optional(),
+      step: z.string().max(MAX_CHAT_CONTEXT_STEP_CHARACTERS).optional(),
       isTeamConnected: z.boolean().optional(),
-      draft: z.string().optional(),
-      sessionId: z.string().optional()
+      draft: z.string().max(MAX_CHAT_CONTEXT_DRAFT_CHARACTERS).optional(),
+      sessionId: z.string().max(MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS).optional(),
+      capturedFields: z.array(z.string().max(MAX_CHAT_CAPTURED_FIELD_CHARACTERS)).max(MAX_CHAT_CAPTURED_FIELDS).optional()
     })
     .optional()
   })

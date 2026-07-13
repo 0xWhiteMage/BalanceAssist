@@ -11,10 +11,13 @@ export function hashRateLimitKey(material: string): string {
 }
 
 export function getClientIpMaterial(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  // Hosts without trusted proxy headers share this conservative key instead of trusting spoofable input.
-  return forwarded || realIp || 'missing-forwarded-ip';
+  const trustedHeader = process.env.TRUSTED_CLIENT_IP_HEADER?.toLowerCase();
+  if (trustedHeader === 'x-vercel-forwarded-for') {
+    return request.headers.get(trustedHeader)?.trim() || 'untrusted-client-ip';
+  }
+
+  // Never accept client-controlled forwarding headers without an explicit deployment guarantee.
+  return 'untrusted-client-ip';
 }
 
 export async function consumeRateLimit(

@@ -75,7 +75,7 @@ describe('test migration runner', () => {
 
     expect(packageJson.scripts['test:db:prepare']).toBe('node scripts/apply-test-migrations.mjs');
     expect(packageJson.scripts['test:db']).toBe(
-      'vitest run tests/integration/database-schema.test.ts tests/integration/session-capability.test.ts'
+      'vitest run --no-file-parallelism tests/integration/database-schema.test.ts tests/integration/rate-limit.test.ts tests/integration/session-capability.test.ts'
     );
     expect(workflow.indexOf('- run: npm run test:db:prepare')).toBeLessThan(
       workflow.indexOf('- run: npm run test:db\n')

@@ -46,6 +46,48 @@ export function jsonWithCors(body: unknown, init?: ResponseInit, source: CorsSou
   });
 }
 
+export async function readJsonBodyLimited(
+  request: Request,
+  maxBytes: number
+): Promise<{ ok: true; data: unknown } | { ok: false; tooLarge: boolean }> {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
+    return { ok: false, tooLarge: true };
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: false, tooLarge: false };
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        return { ok: false, tooLarge: true };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, tooLarge: false };
+  }
+
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return { ok: true, data: JSON.parse(new TextDecoder().decode(body)) };
+  } catch {
+    return { ok: false, tooLarge: false };
+  }
+}
+
 export async function parseRequestBody<T>(
   request: Request,
   schema: ZodSchema<T>

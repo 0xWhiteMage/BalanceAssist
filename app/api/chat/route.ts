@@ -1,4 +1,4 @@
-import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
+import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
@@ -478,18 +478,14 @@ export async function POST(request: Request) {
   const session = await requireSession(request);
   if (!session.ok) return session.response;
 
-  const contentLength = request.headers.get('content-length');
-  if (contentLength && Number(contentLength) > MAX_CHAT_BODY_BYTES) {
+  const body = await readJsonBodyLimited(request, MAX_CHAT_BODY_BYTES);
+  if (!body.ok && body.tooLarge) {
     return jsonWithCors({ error: 'Payload too large', code: 'payload_too_large' }, { status: 413 }, request);
   }
-
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
+  if (!body.ok) {
     return jsonWithCors({ error: 'Invalid JSON body' }, { status: 400 }, request);
   }
-  const parsed = chatRequestPayloadSchema.safeParse(payload);
+  const parsed = chatRequestPayloadSchema.safeParse(body.data);
 
   if (!parsed.success) {
     const tooLarge = parsed.error.issues.some((issue) => issue.code === 'too_big');
@@ -501,7 +497,6 @@ export async function POST(request: Request) {
   }
 
   const { messages, context } = parsed.data;
-  const env = getEnv();
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const sessionId = session.auth.sessionId;
   const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
@@ -510,7 +505,7 @@ export async function POST(request: Request) {
     return jsonWithCors({ error: 'Session mismatch' }, { status: 403 }, request);
   }
 
-  if (isCareersIntent(lastUserMessage)) {
+  if (messages.some((message) => isCareersIntent(message.content))) {
     return jsonWithCors({ message: `Please apply through ${getCareersRedirect()}.`, draftUpdates: {}, briefReady: false, reviewPrompt: null, missingFields: [], truncated: false }, undefined, request);
   }
 
@@ -522,6 +517,8 @@ export async function POST(request: Request) {
   } catch {
     return jsonWithCors({ error: 'Service unavailable', code: 'rate_limit_unavailable' }, { status: 503 }, request);
   }
+
+  const env = getEnv();
 
   if (faqResponse) {
     const sharedWork = faqResponse.sharedWorkQuery
