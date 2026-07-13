@@ -339,7 +339,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
-  it('purges only expired sessions and cascades session-owned rows under the controlled purge', async () => {
+  it('purges expired pending and completed handoffs, but defers a valid in-flight claim', async () => {
     const expired = await client!.query(
       `insert into public.sessions (source_url, draft_expires_at)
        values ('https://expired.example.test', now()) returning id`
@@ -350,26 +350,110 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     );
     const expiredSessionId = expired.rows[0].id;
     const activeSessionId = active.rows[0].id;
-    const expiredHandoff = await client!.query(
+    const pendingHandoff = await client!.query(
       `insert into public.handoff_outbox (session_id, payload, state, idempotency_key)
-       values ($1, '{}'::jsonb, 'claiming', 'expired-handoff-' || gen_random_uuid()) returning id`,
+        values ($1, '{}'::jsonb, 'pending', 'expired-pending-handoff-' || gen_random_uuid()) returning id`,
       [expiredSessionId]
+    );
+    const completed = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at) values ('https://completed.example.test', now()) returning id`
+    );
+    const completedHandoff = await client!.query(
+      `insert into public.handoff_outbox (session_id, payload, state, idempotency_key)
+        values ($1, '{}'::jsonb, 'sent', 'completed-handoff-' || gen_random_uuid()) returning id`,
+      [completed.rows[0].id]
+    );
+    const inFlight = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at) values ('https://in-flight.example.test', now()) returning id`
+    );
+    const inFlightHandoff = await client!.query(
+      `insert into public.handoff_outbox (session_id, payload, state, claim_expires_at, idempotency_key)
+        values ($1, '{}'::jsonb, 'claiming', now() + interval '1 hour', 'in-flight-handoff-' || gen_random_uuid()) returning id`,
+      [inFlight.rows[0].id]
     );
     await client!.query("select public.record_session_consent($1, 'analysis', true, '1.0')", [expiredSessionId]);
     const purged = await client!.query('select public.purge_expired_temporary_sessions() as count');
     const remaining = await client!.query(
       `select
-         exists(select 1 from public.sessions where id = $1) as expired_session,
-         exists(select 1 from public.session_consents where session_id = $1) as expired_consent,
-         exists(select 1 from public.handoff_outbox where id = $3) as expired_handoff,
-         exists(select 1 from public.sessions where id = $2) as active_session`,
-      [expiredSessionId, activeSessionId, expiredHandoff.rows[0].id]
+          exists(select 1 from public.sessions where id = $1) as expired_session,
+          exists(select 1 from public.session_consents where session_id = $1) as expired_consent,
+          exists(select 1 from public.handoff_outbox where id = $3) as expired_handoff,
+          exists(select 1 from public.sessions where id = $2) as active_session,
+          exists(select 1 from public.sessions where id = $4) as completed_session,
+          exists(select 1 from public.handoff_outbox where id = $5) as completed_handoff,
+          exists(select 1 from public.sessions where id = $6) as in_flight_session,
+          exists(select 1 from public.handoff_outbox where id = $7) as in_flight_handoff`,
+       [expiredSessionId, activeSessionId, pendingHandoff.rows[0].id, completed.rows[0].id, completedHandoff.rows[0].id, inFlight.rows[0].id, inFlightHandoff.rows[0].id]
     );
 
-    expect(purged.rows).toEqual([{ count: 1 }]);
-    expect(remaining.rows).toEqual([{ expired_session: false, expired_consent: false, expired_handoff: false, active_session: true }]);
+    expect(purged.rows).toEqual([{ count: { deleted_sessions: 2, deferred_sessions: 1, released_claims: 0 } }]);
+    expect(remaining.rows).toEqual([{ expired_session: false, expired_consent: false, expired_handoff: false, active_session: true, completed_session: false, completed_handoff: false, in_flight_session: true, in_flight_handoff: true }]);
 
     await client!.query('delete from public.sessions where id = $1', [activeSessionId]);
+    await client!.query('delete from public.sessions where id = $1', [inFlight.rows[0].id]);
+  });
+
+  it('purges an expired session once its handoff lease has expired', async () => {
+    const session = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at) values ('https://expired-lease.example.test', now()) returning id`
+    );
+    const handoff = await client!.query(
+      `insert into public.handoff_outbox (session_id, payload, state, claim_expires_at, idempotency_key)
+       values ($1, '{}'::jsonb, 'claiming', now() - interval '1 second', 'expired-lease-' || gen_random_uuid()) returning id`,
+      [session.rows[0].id]
+    );
+
+    const purged = await client!.query('select public.purge_expired_temporary_sessions() as count');
+    const remaining = await client!.query(
+      'select exists(select 1 from public.sessions where id = $1) as session, exists(select 1 from public.handoff_outbox where id = $2) as handoff',
+      [session.rows[0].id, handoff.rows[0].id]
+    );
+
+    expect(purged.rows[0].count.released_claims).toBeGreaterThanOrEqual(1);
+    expect(remaining.rows).toEqual([{ session: false, handoff: false }]);
+  });
+
+  it('suppresses an unclaimed handoff when producer-transfer consent was revoked', async () => {
+    const session = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at)
+       values ('https://revoked-handoff.example.test', now() + interval '1 hour') returning id`
+    );
+    const sessionId = session.rows[0].id;
+    const handoff = await client!.query(
+      `insert into public.handoff_outbox (session_id, payload, state, idempotency_key)
+       values ($1, '{}'::jsonb, 'pending', 'revoked-handoff-' || gen_random_uuid()) returning id`,
+      [sessionId]
+    );
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', false, '1.0')", [sessionId]);
+
+    const claim = await client!.query('select * from public.claim_next_handoff()');
+    const state = await client!.query('select state, claim_expires_at from public.handoff_outbox where id = $1', [handoff.rows[0].id]);
+
+    expect(claim.rows).toEqual([expect.objectContaining({ id: handoff.rows[0].id, resolution: 'suppressed' })]);
+    expect(state.rows).toEqual([{ state: 'failed', claim_expires_at: null }]);
+    await client!.query('delete from public.sessions where id = $1', [sessionId]);
+  });
+
+  it('suppresses an unclaimed handoff when its session is already expired', async () => {
+    const session = await client!.query(
+      `insert into public.sessions (source_url, draft_expires_at)
+       values ('https://expired-pending-handoff.example.test', now()) returning id`
+    );
+    const sessionId = session.rows[0].id;
+    const handoff = await client!.query(
+      `insert into public.handoff_outbox (session_id, payload, state, idempotency_key)
+       values ($1, '{}'::jsonb, 'pending', 'expired-pending-' || gen_random_uuid()) returning id`,
+      [sessionId]
+    );
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+
+    const claim = await client!.query('select * from public.claim_next_handoff()');
+    const state = await client!.query('select state, claim_expires_at from public.handoff_outbox where id = $1', [handoff.rows[0].id]);
+
+    expect(claim.rows).toEqual([expect.objectContaining({ id: handoff.rows[0].id, resolution: 'suppressed' })]);
+    expect(state.rows).toEqual([{ state: 'failed', claim_expires_at: null }]);
+    await client!.query('delete from public.sessions where id = $1', [sessionId]);
   });
 
   it('grants the expiry RPC only to service_role', async () => {
@@ -418,7 +502,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '021:021_session_consents.sql',
       '022:022_session_consents_append_only.sql',
       '023:023_temporary_session_retention.sql',
-      '024:024_temporary_expiry_hardening.sql'
+      '024:024_temporary_expiry_hardening.sql',
+      '025:025_in_flight_handoff_retention.sql'
     ]);
   });
 

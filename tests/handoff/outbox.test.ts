@@ -23,6 +23,7 @@ function createOutboxSupabase(rows: OutboxRow[]) {
   const byId = new Map(rows.map((row) => [row.id, { ...row }]));
 
   const supabase = {
+    rpc: vi.fn(),
     from(table: string) {
       if (table !== 'handoff_outbox') {
         throw new Error(`Unexpected table ${table}`);
@@ -382,7 +383,7 @@ describe('handoff/outbox', () => {
   });
 
   describe('claimNextHandoff', () => {
-    it('reclaims an expired claiming row and extends its lease', async () => {
+    it('uses the database claim function so claim-time eligibility and leasing are atomic', async () => {
       const harness = createOutboxSupabase([
         {
           id: 'expired-claim',
@@ -397,20 +398,29 @@ describe('handoff/outbox', () => {
           last_error: null
         }
       ]);
+      harness.supabase.rpc.mockResolvedValue({
+        data: [{
+          id: 'expired-claim',
+          session_id: 'session-lease',
+          payload: { sessionId: 'session-lease', type: 'approval', summary: 'Lease expired' },
+          created_at: '2026-07-11T11:58:00.000Z',
+          resolution: 'claimed'
+        }],
+        error: null
+      });
 
       const claimed = await claimNextHandoff(harness.supabase as never);
-      const row = harness.byId.get('expired-claim');
 
       expect(claimed).toMatchObject({
         id: 'expired-claim',
         session_id: 'session-lease',
         payload: { sessionId: 'session-lease', type: 'approval', summary: 'Lease expired' }
       });
-      expect(row?.state).toBe('claiming');
-      expect(row?.claim_expires_at).toBe('2026-07-11T12:01:00.000Z');
+      expect(claimed?.resolution).toBe('claimed');
+      expect(harness.supabase.rpc).toHaveBeenCalledWith('claim_next_handoff');
     });
 
-    it('does not steal an active claiming row whose lease is still valid', async () => {
+    it('returns no handoff when no due or expired-lease row is claimable', async () => {
       const harness = createOutboxSupabase([
         {
           id: 'active-claim',
@@ -425,6 +435,7 @@ describe('handoff/outbox', () => {
           last_error: null
         }
       ]);
+      harness.supabase.rpc.mockResolvedValue({ data: [], error: null });
 
       const claimed = await claimNextHandoff(harness.supabase as never);
       expect(claimed).toBeNull();

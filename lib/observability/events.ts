@@ -18,7 +18,8 @@ type EventName =
   | 'draft_updated'
   | 'correction_requested'
   | 'deletion_requested'
-  | 'project_reset';
+  | 'project_reset'
+  | 'temporary_sessions_expired';
 
 type EventSchemaVersion = 1;
 
@@ -43,6 +44,7 @@ const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: re
   correction_requested: { version: 1, fields: ['sessionId', 'field'] },
   deletion_requested: { version: 1, fields: ['sessionId'] },
   project_reset: { version: 1, fields: ['sessionId', 'draftVersion'] },
+  temporary_sessions_expired: { version: 1, fields: ['deletedSessions', 'deferredSessions', 'releasedClaims'] },
 };
 
 const SENSITIVE_KEYS = new Set([

@@ -5,8 +5,6 @@ const {
   hasSupabaseServerConfigMock,
   createServerSupabaseClientMock,
   claimNextHandoffMock,
-  authorizeHandoffSendMock,
-  suppressHandoffMock,
   markDeliveredMock,
   markFailedMock,
   sendTelegramMessageMock,
@@ -16,8 +14,6 @@ const {
   hasSupabaseServerConfigMock: vi.fn(() => true),
   createServerSupabaseClientMock: vi.fn(() => ({})),
   claimNextHandoffMock: vi.fn(),
-  authorizeHandoffSendMock: vi.fn(),
-  suppressHandoffMock: vi.fn(),
   markDeliveredMock: vi.fn(),
   markFailedMock: vi.fn(),
   sendTelegramMessageMock: vi.fn(),
@@ -32,8 +28,6 @@ vi.mock('@/lib/supabase/server', () => ({
 
 vi.mock('@/lib/handoff/outbox', () => ({
   claimNextHandoff: claimNextHandoffMock,
-  authorizeHandoffSend: authorizeHandoffSendMock,
-  suppressHandoff: suppressHandoffMock,
   markDelivered: markDeliveredMock,
   markFailed: markFailedMock
 }));
@@ -53,14 +47,11 @@ vi.mock('@/lib/observability/events', () => ({
 describe('POST /api/internal/handoff-dispatch delivery events', () => {
   beforeEach(() => {
     claimNextHandoffMock.mockReset();
-    authorizeHandoffSendMock.mockReset();
-    suppressHandoffMock.mockReset();
     markDeliveredMock.mockReset();
     markFailedMock.mockReset();
     sendTelegramMessageMock.mockReset();
     emitEventMock.mockReset();
     validateAdminRequestAnyMock.mockReturnValue({ ok: true });
-    authorizeHandoffSendMock.mockResolvedValue(true);
   });
 
   test('emits handoff_delivered when a claimed handoff is sent', async () => {
@@ -117,16 +108,16 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     );
   });
 
-  test('suppresses a claimed handoff when its session was deleted before Telegram delivery', async () => {
+  test('does not send a handoff suppressed at claim time for an expired or revoked session', async () => {
     claimNextHandoffMock
       .mockResolvedValueOnce({
         id: 'ho-expired',
         session_id: 'sess-expired',
         created_at: '2026-07-11T11:59:00.000Z',
-        payload: { sessionId: 'sess-expired', type: 'approval', summary: 'Do not send' }
+        payload: { sessionId: 'sess-expired', type: 'approval', summary: 'Do not send' },
+        resolution: 'suppressed'
       })
       .mockResolvedValueOnce(null);
-    authorizeHandoffSendMock.mockResolvedValue(false);
 
     const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
     const response = await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
@@ -139,7 +130,6 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
       results: [{ id: 'ho-expired', status: 'suppressed' }]
     });
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
-    expect(suppressHandoffMock).toHaveBeenCalledWith(expect.anything(), 'ho-expired');
     expect(markDeliveredMock).not.toHaveBeenCalled();
     expect(markFailedMock).not.toHaveBeenCalled();
     expect(emitEventMock).toHaveBeenCalledWith(

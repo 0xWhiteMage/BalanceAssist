@@ -17,8 +17,6 @@ export type HandoffPayload = {
   threadId?: number | null;
 };
 
-const CLAIM_LEASE_MS = 60_000;
-
 export function generateIdempotencyKey(sessionId: string, type: string, summary: string): string {
   const hash = createHash('sha256')
     .update(`${sessionId}:${type}:${summary}`)
@@ -159,88 +157,10 @@ export async function getPendingHandoffs(
 
 export async function claimNextHandoff(
   supabase: SupabaseServerClient
-): Promise<{ id: string; session_id: string; payload: HandoffPayload; created_at?: string } | null> {
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const claimExpiresAt = new Date(now.getTime() + CLAIM_LEASE_MS).toISOString();
-
-  const tryClaim = async (
-    row: { id: string; session_id: string; payload: HandoffPayload; created_at?: string } | null,
-    expectedState: 'pending' | 'claiming',
-    expiryColumn: 'next_attempt_at' | 'claim_expires_at'
-  ): Promise<{ id: string; session_id: string; payload: HandoffPayload; created_at?: string } | null> => {
-    if (!row) return null;
-
-    let query = supabase
-      .from('handoff_outbox')
-      .update({ state: 'claiming', updated_at: nowIso, claim_expires_at: claimExpiresAt })
-      .eq('id', row.id)
-      .eq('state', expectedState)
-      .lte(expiryColumn, nowIso)
-      .select('id, session_id, payload, created_at');
-
-    const { data, error } = await query.maybeSingle();
-
-    if (error || !data) {
-      return null;
-    }
-
-    return data as { id: string; session_id: string; payload: HandoffPayload; created_at?: string };
-  };
-
-  const { data: expiredClaims } = await supabase
-    .from('handoff_outbox')
-    .select('id, session_id, payload, created_at')
-    .eq('state', 'claiming')
-    .lte('claim_expires_at', nowIso)
-    .order('claim_expires_at', { ascending: true })
-    .order('created_at', { ascending: true })
-    .limit(1)
-
-  const reclaimed = await tryClaim(
-    ((expiredClaims ?? [])[0] as { id: string; session_id: string; payload: HandoffPayload; created_at?: string } | undefined) ?? null,
-    'claiming',
-    'claim_expires_at'
-  );
-
-  if (reclaimed) {
-    return reclaimed;
-  }
-
-  const { data: pendingRows } = await supabase
-    .from('handoff_outbox')
-    .select('id, session_id, payload, created_at')
-    .eq('state', 'pending')
-    .lte('next_attempt_at', nowIso)
-    .order('next_attempt_at', { ascending: true })
-    .order('created_at', { ascending: true })
-    .limit(1);
-
-  return tryClaim(
-    ((pendingRows ?? [])[0] as { id: string; session_id: string; payload: HandoffPayload; created_at?: string } | undefined) ?? null,
-    'pending',
-    'next_attempt_at'
-  );
-}
-
-export async function authorizeHandoffSend(
-  supabase: SupabaseServerClient,
-  handoffId: string
-): Promise<boolean> {
-  const { data, error } = await supabase.rpc('authorize_handoff_send', { p_handoff_id: handoffId });
-  return !error && data === true;
-}
-
-export async function suppressHandoff(
-  supabase: SupabaseServerClient,
-  handoffId: string
-): Promise<void> {
-  const now = new Date().toISOString();
-  await supabase
-    .from('handoff_outbox')
-    .update({ state: 'failed', last_error: 'session_unavailable', updated_at: now, claim_expires_at: null })
-    .eq('id', handoffId)
-    .eq('state', 'claiming');
+): Promise<{ id: string; session_id: string; payload: HandoffPayload; created_at?: string; resolution: 'claimed' | 'suppressed' } | null> {
+  const { data, error } = await supabase.rpc('claim_next_handoff');
+  if (error || !Array.isArray(data) || data.length === 0) return null;
+  return data[0] as { id: string; session_id: string; payload: HandoffPayload; created_at?: string; resolution: 'claimed' | 'suppressed' };
 }
 
 export async function releaseClaim(

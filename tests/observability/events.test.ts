@@ -40,6 +40,21 @@ describe('emitEvent', () => {
     spy.mockRestore();
   });
 
+  test('emits only aggregate expiry-worker counts', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    emitEvent('temporary_sessions_expired', {
+      deletedSessions: 2,
+      deferredSessions: 1,
+      releasedClaims: 3,
+      sessionId: 'must-not-be-emitted'
+    });
+
+    const parsed = JSON.parse(spy.mock.calls[0][1] as string);
+    expect(parsed).toMatchObject({ event: 'temporary_sessions_expired', deletedSessions: 2, deferredSessions: 1, releasedClaims: 3 });
+    expect(parsed.sessionId).toBeUndefined();
+    spy.mockRestore();
+  });
+
   test('redacts sensitive fields in allowed data', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     emitEvent('attachment_quarantined', {

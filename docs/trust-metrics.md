@@ -14,7 +14,8 @@ These metrics track whether Balance Assist is behaving as a consent-led, truthfu
 - `handoff_delivered`: dispatcher delivered a handoff to Telegram
 - `handoff_failed`: dispatcher could not deliver a handoff and scheduled or exhausted a retry
 - `handoff_escalated`: dispatcher found a handoff beyond the 15-minute escalation threshold
-- `handoff_suppressed`: dispatcher withheld a claimed handoff because its session was unavailable or expired before Telegram delivery
+- `handoff_suppressed`: claim-time eligibility withheld an unclaimed handoff because its session was expired or producer transfer was revoked
+- `temporary_sessions_expired`: expiry worker aggregate counts for deleted sessions, deferred active claims, and released leases
 - `attachment_forwarded`: upload persisted and forwarded to Telegram
 - `attachment_quarantined`: upload persisted without forwarding
 - `draft_updated`: canonical draft edit persisted through the authenticated route
@@ -33,6 +34,7 @@ These metrics track whether Balance Assist is behaving as a consent-led, truthfu
 - Compare `lead_persisted` to `handoff_enqueued` to catch producer-transfer failures.
 - Monitor `handoff_failed` and `handoff_escalated` alongside GitHub Actions `Handoff dispatch` workflow failures and pending outbox age.
 - Monitor `handoff_suppressed` to identify handoffs that expired before delivery without logging their content.
+- Monitor `temporary_sessions_expired.deferredSessions` for in-flight handoffs; a valid dispatch claim authorizes completion and cannot be retracted by later expiry or revocation.
 - Monitor `project_reset` and `deletion_requested` to verify user data-control paths remain functional.
 - Monitor absence of `consent_granted` against traffic expectations to detect intake breakage.
 
