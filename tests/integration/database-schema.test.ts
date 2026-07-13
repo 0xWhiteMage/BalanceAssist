@@ -207,8 +207,41 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '023_temporary_session_retention.sql',
       '024_temporary_expiry_hardening.sql',
       '025_in_flight_handoff_retention.sql',
-      '026_handoff_claim_ownership.sql'
+      '026_handoff_claim_ownership.sql',
+      '027_handoff_send_reservations.sql'
     ]);
+  });
+
+  it('upgrades a tokenless 026-era claim to pending before a new owner can claim it', async () => {
+    const { Client } = await import('pg');
+    const runner = await loadRunner();
+    const database = `balance_assist_claim_upgrade_${process.pid}_${Date.now()}`;
+    const upgradeConnection = withDatabase(connectionString!, database);
+    await adminClient!.query(`create database ${database}`);
+    try {
+      await runner.applyMigrations({ connectionString: upgradeConnection, migrationsDir, throughVersion: '026' });
+      const upgradeClient = new Client({ connectionString: upgradeConnection });
+      await upgradeClient.connect();
+      try {
+        const session = await upgradeClient.query(
+          "insert into public.sessions (source_url, draft_expires_at) values ('https://claim-upgrade.example.test', now() + interval '1 hour') returning id"
+        );
+        await upgradeClient.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [session.rows[0].id]);
+        const handoff = await upgradeClient.query(
+          "insert into public.handoff_outbox (session_id, payload, state, claim_expires_at, claim_token, idempotency_key) values ($1, '{}'::jsonb, 'claiming', now() + interval '1 hour', null, 'legacy-tokenless-' || gen_random_uuid()) returning id",
+          [session.rows[0].id]
+        );
+
+        await runner.applyMigrations({ connectionString: upgradeConnection, migrationsDir });
+        const row = await upgradeClient.query('select state, claim_expires_at, claim_token from public.handoff_outbox where id = $1', [handoff.rows[0].id]);
+
+        expect(row.rows).toEqual([{ state: 'pending', claim_expires_at: null, claim_token: null }]);
+      } finally {
+        await upgradeClient.end();
+      }
+    } finally {
+      await adminClient!.query(`drop database if exists ${database}`);
+    }
   });
 
   it('creates the required current tables', async () => {
@@ -487,6 +520,34 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     expect(first.rows[0].claim_token).not.toBe(second.rows[0].claim_token);
     expect(stale.rows).toEqual([]);
     expect(current.rows).toEqual([{ id: handoff.rows[0].id }]);
+    await client!.query('delete from public.sessions where id = $1', [sessionId]);
+  });
+
+  it('does not reclaim a reserved send before its bounded Telegram-call lease expires', async () => {
+    const session = await client!.query(
+      "insert into public.sessions (source_url, draft_expires_at) values ('https://send-reservation.example.test', now() + interval '1 hour') returning id"
+    );
+    const sessionId = session.rows[0].id;
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    const handoff = await client!.query(
+      "insert into public.handoff_outbox (session_id, payload, state, idempotency_key) values ($1, '{}'::jsonb, 'pending', 'send-reservation-' || gen_random_uuid()) returning id",
+      [sessionId]
+    );
+
+    const first = await client!.query('select * from public.claim_next_handoff()');
+    const reserved = await client!.query('select public.reserve_handoff_send($1, $2) as reserved', [handoff.rows[0].id, first.rows[0].claim_token]);
+    const concurrent = await client!.query('select * from public.claim_next_handoff()');
+    await client!.query("update public.handoff_outbox set claim_expires_at = now() - interval '1 second' where id = $1", [handoff.rows[0].id]);
+    const reclaimed = await client!.query('select * from public.claim_next_handoff()');
+    const staleCompletion = await client!.query(
+      "update public.handoff_outbox set state = 'sent' where id = $1 and state = 'sending' and claim_token = $2 returning id",
+      [handoff.rows[0].id, first.rows[0].claim_token]
+    );
+
+    expect(reserved.rows).toEqual([{ reserved: true }]);
+    expect(concurrent.rows).toEqual([]);
+    expect(reclaimed.rows[0].claim_token).not.toBe(first.rows[0].claim_token);
+    expect(staleCompletion.rows).toEqual([]);
     await client!.query('delete from public.sessions where id = $1', [sessionId]);
   });
 

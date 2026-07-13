@@ -5,7 +5,7 @@ const {
   hasSupabaseServerConfigMock,
   createServerSupabaseClientMock,
   claimNextHandoffMock,
-  renewHandoffClaimMock,
+  reserveHandoffSendMock,
   markDeliveredMock,
   markFailedMock,
   sendTelegramMessageMock,
@@ -15,7 +15,7 @@ const {
   hasSupabaseServerConfigMock: vi.fn(() => true),
   createServerSupabaseClientMock: vi.fn(() => ({})),
   claimNextHandoffMock: vi.fn(),
-  renewHandoffClaimMock: vi.fn(),
+  reserveHandoffSendMock: vi.fn(),
   markDeliveredMock: vi.fn(),
   markFailedMock: vi.fn(),
   sendTelegramMessageMock: vi.fn(),
@@ -30,7 +30,7 @@ vi.mock('@/lib/supabase/server', () => ({
 
 vi.mock('@/lib/handoff/outbox', () => ({
   claimNextHandoff: claimNextHandoffMock,
-  renewHandoffClaim: renewHandoffClaimMock,
+  reserveHandoffSend: reserveHandoffSendMock,
   markDelivered: markDeliveredMock,
   markFailed: markFailedMock
 }));
@@ -50,13 +50,13 @@ vi.mock('@/lib/observability/events', () => ({
 describe('POST /api/internal/handoff-dispatch delivery events', () => {
   beforeEach(() => {
     claimNextHandoffMock.mockReset();
-    renewHandoffClaimMock.mockReset();
+    reserveHandoffSendMock.mockReset();
     markDeliveredMock.mockReset();
     markFailedMock.mockReset();
     sendTelegramMessageMock.mockReset();
     emitEventMock.mockReset();
     validateAdminRequestAnyMock.mockReturnValue({ ok: true });
-    renewHandoffClaimMock.mockResolvedValue(true);
+    reserveHandoffSendMock.mockResolvedValue(true);
     markDeliveredMock.mockResolvedValue(true);
   });
 
@@ -82,6 +82,8 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
 
     expect(response.status).toBe(200);
     expect(body.processed).toBe(1);
+    expect(reserveHandoffSendMock).toHaveBeenCalledWith(expect.anything(), 'ho-1', '11111111-1111-4111-8111-111111111111');
+    expect(reserveHandoffSendMock.mock.invocationCallOrder[0]).toBeLessThan(sendTelegramMessageMock.mock.invocationCallOrder[0]);
     expect(markDeliveredMock).toHaveBeenCalledWith(expect.anything(), 'ho-1', '11111111-1111-4111-8111-111111111111');
     expect(emitEventMock).toHaveBeenCalledWith(
       'handoff_delivered',
@@ -148,7 +150,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     );
   });
 
-  test('does not send when its ownership token can no longer renew the claim', async () => {
+  test('does not send when its ownership token cannot atomically reserve the bounded send', async () => {
     claimNextHandoffMock
       .mockResolvedValueOnce({
         id: 'ho-stale',
@@ -159,7 +161,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
         resolution: 'claimed'
       })
       .mockResolvedValueOnce(null);
-    renewHandoffClaimMock.mockResolvedValue(false);
+    reserveHandoffSendMock.mockResolvedValue(false);
 
     const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
     const response = await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
@@ -168,7 +170,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     }));
 
     await expect(response.json()).resolves.toMatchObject({ results: [{ id: 'ho-stale', status: 'stale' }] });
-    expect(renewHandoffClaimMock).toHaveBeenCalledWith(expect.anything(), 'ho-stale', '22222222-2222-4222-8222-222222222222');
+    expect(reserveHandoffSendMock).toHaveBeenCalledWith(expect.anything(), 'ho-stale', '22222222-2222-4222-8222-222222222222');
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
   });
 });

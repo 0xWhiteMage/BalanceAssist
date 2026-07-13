@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { claimNextHandoff, markDelivered, markFailed, renewHandoffClaim } from '@/lib/handoff/outbox';
+import { claimNextHandoff, markDelivered, markFailed, reserveHandoffSend } from '@/lib/handoff/outbox';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { sendTelegramMessage } from '@/lib/telegram';
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
         continue;
       }
 
-      if (!handoff.claim_token || !await renewHandoffClaim(supabase, handoff.id, handoff.claim_token)) {
+      if (!handoff.claim_token || !await reserveHandoffSend(supabase, handoff.id, handoff.claim_token)) {
         logger.info('Skipped stale handoff claim', { handoffId: handoff.id });
         results.push({ id: handoff.id, status: 'stale' });
         continue;

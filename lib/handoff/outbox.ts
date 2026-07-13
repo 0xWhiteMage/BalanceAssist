@@ -98,7 +98,7 @@ export async function markDelivered(
     .from('handoff_outbox')
     .update({ state: 'sent', updated_at: deliveredAt, next_attempt_at: deliveredAt, claim_expires_at: null })
     .eq('id', handoffId)
-    .eq('state', 'claiming')
+    .eq('state', 'sending')
     .eq('claim_token', claimToken)
     .select('id')
     .maybeSingle();
@@ -141,7 +141,7 @@ export async function markFailed(
       claim_expires_at: null
     })
     .eq('id', handoffId)
-    .eq('state', 'claiming')
+    .eq('state', 'sending')
     .eq('claim_token', claimToken)
     .select('id')
     .maybeSingle();
@@ -174,8 +174,8 @@ export async function claimNextHandoff(
   return data[0] as { id: string; session_id: string; payload: HandoffPayload; created_at?: string; claim_token: string | null; resolution: 'claimed' | 'suppressed' };
 }
 
-export async function renewHandoffClaim(supabase: SupabaseServerClient, handoffId: string, claimToken: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('renew_handoff_claim', { p_handoff_id: handoffId, p_claim_token: claimToken });
+export async function reserveHandoffSend(supabase: SupabaseServerClient, handoffId: string, claimToken: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('reserve_handoff_send', { p_handoff_id: handoffId, p_claim_token: claimToken });
   return !error && data === true;
 }
 
@@ -190,7 +190,7 @@ export async function releaseClaim(
     .from('handoff_outbox')
     .update({ state: finalState, updated_at: now, claim_expires_at: null })
     .eq('id', handoffId)
-    .eq('state', 'claiming')
+    .eq('state', 'sending')
     .eq('claim_token', claimToken)
     .select('id')
     .maybeSingle();

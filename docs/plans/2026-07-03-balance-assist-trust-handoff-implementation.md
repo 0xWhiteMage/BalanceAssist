@@ -360,7 +360,7 @@ Test in deployed widget:
 - subsequent human messages reuse it
 - topic renames when name/company is learned
 - topic updates after final qualification
-- no duplicate team messages
+- no avoidable duplicate team messages while a dispatcher remains within its send reservation; crash and acknowledgement-loss retries remain at-least-once
 
 **Step 5: Commit any final doc or config-only adjustments**
 

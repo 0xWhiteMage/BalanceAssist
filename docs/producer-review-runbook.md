@@ -58,6 +58,10 @@ This is a forward-only RLS and grant change. Validate it in staging before produ
 6. Re-run the grant and RLS inventory after the smoke checks. Each affected table must have RLS enabled and neither `anon` nor `authenticated` may retain table privileges.
 7. Deploy to production only after staging validation succeeds. Monitor route errors, PostgREST authorization failures, and handoff delivery during the rollout window.
 
+## Handoff Send Reservation Rollout
+
+Apply migration `027_handoff_send_reservations.sql` before deploying dispatcher code that calls `reserve_handoff_send`. The migration releases tokenless pre-026 `claiming` rows to `pending`; pause dispatch after applying it and wait at least 90 seconds before enabling the new dispatcher, so an old worker cannot complete a subsequently reclaimed claim with its unconditional legacy update. Do not run old and new dispatcher versions concurrently. After the drain, deploy the new code and resume dispatch. The bounded reservation prevents concurrent reclaim during a normal 45-second Telegram call, but it does not promise exactly-once external delivery after a crash, acknowledgement loss, or process pause beyond 90 seconds.
+
 ### Isolated Service-Role Test
 
 Use only a dedicated disposable or staging Supabase project that already has the RLS migration applied. Never set these variables to a production URL or production service-role key. The project ref must match `balance-assist-test-*`, and the URL must exactly be `https://<project-ref>.supabase.co` with no port, path, query, or fragment.

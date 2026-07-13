@@ -42,10 +42,15 @@ describe('temporary expiry hardening migration', () => {
     expect(migration).toMatch(/claim_expires_at = now_at \+ interval '2 minutes'/i);
   });
 
-  test('documents that in-flight external transfers cannot be retracted', () => {
+  test('documents bounded send reservations and the remaining at-least-once ambiguity', () => {
     const retention = readFileSync(resolve(process.cwd(), 'docs/temporary-session-retention.md'), 'utf8');
     const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8');
-    expect(retention).toMatch(/Once a dispatcher has claimed a handoff.*cannot retract it/i);
-    expect(readme).toMatch(/cannot retract an already claimed transfer/i);
+    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/027_handoff_send_reservations.sql'), 'utf8');
+    expect(retention).toMatch(/reserves it for 90 seconds/i);
+    expect(retention).toMatch(/at-least-once and can duplicate/i);
+    expect(readme).toMatch(/027_handoff_send_reservations\.sql/i);
+    expect(migration).toMatch(/state = 'pending'.*claim_token = NULL/is);
+    expect(migration).toMatch(/CREATE FUNCTION public\.reserve_handoff_send/i);
+    expect(migration).toMatch(/interval '90 seconds'/i);
   });
 });
