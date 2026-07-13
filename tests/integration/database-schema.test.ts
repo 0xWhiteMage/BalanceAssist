@@ -15,6 +15,17 @@ type MigrationRunner = {
 const connectionString = process.env.TEST_DATABASE_URL;
 const migrationsDir = resolve(process.cwd(), 'supabase/migrations');
 let client: import('pg').Client | undefined;
+const applicationTables = [
+  'sessions',
+  'events',
+  'leads',
+  'human_messages',
+  'uploaded_files',
+  'reference_links',
+  'processed_telegram_updates',
+  'handoff_outbox'
+] as const;
+const publicRoles = ['anon', 'authenticated'] as const;
 
 async function loadRunner(): Promise<MigrationRunner> {
   return import(
@@ -24,9 +35,29 @@ async function loadRunner(): Promise<MigrationRunner> {
 
 describe.skipIf(!connectionString)('database schema migrations', () => {
   beforeAll(async () => {
+    const { Client } = await import('pg');
+    const setupClient = new Client({ connectionString });
+    await setupClient.connect();
+    try {
+      // Plain PostgreSQL CI lacks Supabase's API roles; these remain no-login.
+      await setupClient.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            CREATE ROLE anon NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            CREATE ROLE authenticated NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+          END IF;
+        END
+        $$;
+      `);
+    } finally {
+      await setupClient.end();
+    }
+
     const runner = await loadRunner();
     await runner.applyMigrations({ connectionString: connectionString!, migrationsDir });
-    const { Client } = await import('pg');
     client = new Client({ connectionString });
     await client.connect();
   });
@@ -51,6 +82,53 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       'sessions',
       'uploaded_files'
     ]);
+  });
+
+  it('enables RLS and denies direct table privileges to public API roles', async () => {
+    const rls = await client!.query(
+      `select relname, relrowsecurity
+       from pg_class
+       where oid = any($1::regclass[])
+       order by relname`,
+      [applicationTables.map((table) => `public.${table}`)]
+    );
+    const privileges = await client!.query(
+      `select role_name, table_name, privilege_type
+       from unnest($1::text[]) as roles(role_name)
+       cross join unnest($2::text[]) as tables(table_name)
+       cross join unnest($3::text[]) as privileges(privilege_type)
+       where has_table_privilege(role_name, format('public.%I', table_name), privilege_type)
+       order by role_name, table_name, privilege_type`,
+      [
+        publicRoles,
+        applicationTables,
+        ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
+      ]
+    );
+
+    expect(rls.rows).toEqual(
+      applicationTables
+        .slice()
+        .sort()
+        .map((relname) => ({ relname, relrowsecurity: true }))
+    );
+    expect(privileges.rows).toEqual([]);
+  });
+
+  it('denies anonymous and authenticated roles while the migration role retains access', async () => {
+    for (const role of publicRoles) {
+      await client!.query(`set role ${role}`);
+      await expect(client!.query('select 1 from public.sessions limit 1')).rejects.toThrow();
+      await expect(
+        client!.query("insert into public.sessions (source_url) values ('https://example.test')")
+      ).rejects.toThrow();
+      await client!.query('reset role');
+    }
+
+    const inserted = await client!.query(
+      "insert into public.sessions (source_url) values ('https://example.test') returning id"
+    );
+    await client!.query('delete from public.sessions where id = $1', [inserted.rows[0].id]);
   });
 
   it('creates the required current columns', async () => {
@@ -101,7 +179,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '014:014_trust_security_foundation.sql',
       '015:015_trust_delivery_outbox.sql',
       '016:016_uploaded_files_metadata_alignment.sql',
-      '017:017_handoff_claim_leases.sql'
+      '017:017_handoff_claim_leases.sql',
+      '018:018_public_schema_rls.sql'
     ]);
   });
 });
