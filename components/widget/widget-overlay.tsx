@@ -315,7 +315,7 @@ export function WidgetOverlay({
     const scheduleNextPoll = () => {
       pollIntervalRef.current = setTimeout(async () => {
         await pollTeamMessages().catch(() => undefined);
-        if (!cancelRef.current && teamRef.current && sessionIdRef.current) {
+        if (!cancelRef.current && sessionIdRef.current) {
           scheduleNextPoll();
         }
       }, pollRateMsRef.current);
@@ -1265,7 +1265,7 @@ export function WidgetOverlay({
   const canInteract = hasStarted || isTeamConnected;
   const showNoticeGate = !noticeConsent;
   const showStartChoices = noticeConsent !== null && !canInteract && messages.length === 0;
-  const showAttachmentButton = canInteract && (isTeamConnected ? humanFileRequestOpen : allowAttachment);
+  const showAttachmentButton = false;
 
   return (
     <div

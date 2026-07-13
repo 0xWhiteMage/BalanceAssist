@@ -599,7 +599,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       '023:023_temporary_session_retention.sql',
       '024:024_temporary_expiry_hardening.sql',
       '025:025_in_flight_handoff_retention.sql',
-      '026:026_handoff_claim_ownership.sql'
+       '026:026_handoff_claim_ownership.sql',
+       '027:027_handoff_send_reservations.sql',
+       '028:028_handoff_reservation_consent_recheck.sql'
     ]);
   });
 

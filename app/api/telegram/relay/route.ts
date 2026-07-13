@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
-import { editForumTopic, ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
-import { buildTopicName, TOPIC_STATUS_COLOR } from '@/lib/conversation/topic-status';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { getSessionConsent } from '@/lib/privacy/session-consent';
+import { enqueueHandoff } from '@/lib/handoff/outbox';
 
 const relayPayloadSchema = z.object({
   sessionId: z.string().min(1),
@@ -90,11 +89,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const shortId = sessionId.slice(0, 8);
-
-  const detectedName = detectName(text);
-  const detectedCompany = detectCompany(text);
-
   const { data: existingRow, error: fetchError } = await supabase
     .from('sessions')
     .select('telegram_thread_id, contact_name, contact_company')
@@ -115,63 +109,15 @@ export async function POST(request: Request) {
   };
 
   const sessionSnap = existingRow as SessionSnapshot | null;
-  let threadId = sessionSnap?.telegram_thread_id ?? null;
-  let contactName = sessionSnap?.contact_name ?? null;
-  let contactCompany = sessionSnap?.contact_company ?? null;
-
-  const detectedUpdates: Record<string, unknown> = {};
-  if (detectedName && !contactName) {
-    contactName = detectedName;
-    detectedUpdates.contact_name = contactName;
-  }
-  if (detectedCompany && !contactCompany) {
-    contactCompany = detectedCompany;
-    detectedUpdates.contact_company = contactCompany;
-  }
-
-  const newTopicName = buildTopicName(contactName, contactCompany, shortId, 'new');
-  const shouldRename = !threadId
-    || (contactName && contactName !== sessionSnap?.contact_name)
-    || (contactCompany && contactCompany !== sessionSnap?.contact_company);
-
-  if (sessionSnap && !threadId) {
-    const created = await ensureTelegramTopic(supabase, sessionId, contactName, contactCompany, shortId);
-    if (created) {
-      threadId = created;
-      logger.info('Created topic', { sessionId, threadId });
-    } else {
-      logger.warn('createForumTopic failed; falling back to flat message', { sessionId });
-    }
-  } else if (threadId && shouldRename) {
-    const updated = await editForumTopic(threadId, newTopicName, { iconColor: TOPIC_STATUS_COLOR.new });
-    if (updated) {
-      logger.info('Renamed topic', { sessionId, threadId });
-    } else {
-      logger.warn('editForumTopic failed', { sessionId, threadId });
-    }
-  } else if (!sessionSnap) {
-    logger.warn('Session not in DB; sending flat message without topic', { sessionId });
-  }
-
-  const messageHtml = buildMessageHtml(text, contactName, contactCompany, shortId);
-  const telegramMessageId = await sendTelegramMessage(
-    messageHtml,
-    threadId ? { threadId } : undefined
-  );
-
-  emitEvent(
-    telegramMessageId ? 'handoff_delivered' : 'handoff_failed',
-    telegramMessageId
-      ? { handoffId: `relay:${sessionId}`, durationMs: 0 }
-      : { handoffId: `relay:${sessionId}`, reason: 'telegram_send_failed' },
-    requestId
-  );
+  const threadId = sessionSnap?.telegram_thread_id ?? null;
+  const messageHtml = buildMessageHtml(text, sessionSnap?.contact_name ?? null, sessionSnap?.contact_company ?? null, sessionId.slice(0, 8));
+  const handoff = await enqueueHandoff(supabase as never, { sessionId, type: 'relay', summary: messageHtml, threadId });
 
   const insertPayload: Record<string, unknown> = {
     session_id: sessionId,
     sender: 'user',
     text,
-    telegram_message_id: telegramMessageId?.messageId ?? null,
+    telegram_message_id: null,
     telegram_thread_id: threadId
   };
 
@@ -181,7 +127,6 @@ export async function POST(request: Request) {
     logger.error('Failed to insert user message', {
       sessionId,
       threadId,
-      telegramMessageId: telegramMessageId?.messageId,
       insertError: insertError.message ?? insertError
     });
   } else {
@@ -192,24 +137,11 @@ export async function POST(request: Request) {
     emitEvent('session_status_changed', { sessionId, newStatus: 'escalated' }, requestId);
   }
 
-  if (Object.keys(detectedUpdates).length > 0) {
-    const { error: sessionUpdateError } = await supabase
-      .from('sessions')
-      .update(detectedUpdates)
-      .eq('id', sessionId);
-
-    if (sessionUpdateError) {
-      logger.error('Failed to update session detected fields', {
-        sessionId,
-        sessionUpdateError: sessionUpdateError.message ?? sessionUpdateError
-      });
-    }
-  }
-
   return jsonWithCors({
-    ok: telegramMessageId !== null,
+    ok: handoff.persisted,
     sessionId,
-    telegramSent: telegramMessageId !== null,
+    telegramSent: false,
+    queued: handoff.queued,
     persisted: !insertError,
     threadId
   }, undefined, request);

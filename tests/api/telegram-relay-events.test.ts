@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-const { requireSessionMock, sendTelegramMessageMock, ensureTelegramTopicMock, emitEventMock } = vi.hoisted(() => ({
+const { requireSessionMock, sendTelegramMessageMock, ensureTelegramTopicMock, enqueueHandoffMock, emitEventMock } = vi.hoisted(() => ({
   requireSessionMock: vi.fn(),
   sendTelegramMessageMock: vi.fn(),
   ensureTelegramTopicMock: vi.fn(async () => null),
+  enqueueHandoffMock: vi.fn(async () => ({ persisted: true, queued: true, delivered: false, retryable: false })),
   emitEventMock: vi.fn()
 }));
 
@@ -21,6 +22,8 @@ vi.mock('@/lib/telegram', () => ({
 vi.mock('@/lib/observability/events', () => ({
   emitEvent: emitEventMock
 }));
+
+vi.mock('@/lib/handoff/outbox', () => ({ enqueueHandoff: enqueueHandoffMock }));
 
 function createSupabase(consentTransitions: Array<{ scope: string; granted: boolean }> = [{ scope: 'producer_transfer', granted: true }]) {
   return {
@@ -74,7 +77,29 @@ describe('POST /api/telegram/relay delivery events', () => {
       auth: { sessionId: 'sess-relay', capability: 'cap' },
       supabase: createSupabase()
     });
-    sendTelegramMessageMock.mockResolvedValue({ messageId: 7 });
+
+    const { POST } = await import('@/app/api/telegram/relay/route');
+    const request = new Request('http://localhost/api/telegram/relay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-request-id': 'rid-relay' },
+      body: JSON.stringify({ sessionId: 'sess-relay', text: 'Hello team' })
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, queued: true, telegramSent: false });
+    expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
+    expect(sendTelegramMessageMock).not.toHaveBeenCalled();
+  });
+
+  test('emits handoff_failed when Telegram does not accept the relayed message', async () => {
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-relay', capability: 'cap' },
+      supabase: createSupabase()
+    });
 
     const { POST } = await import('@/app/api/telegram/relay/route');
     const request = new Request('http://localhost/api/telegram/relay', {
@@ -88,38 +113,7 @@ describe('POST /api/telegram/relay delivery events', () => {
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(emitEventMock).toHaveBeenCalledWith(
-      'handoff_delivered',
-      expect.objectContaining({ handoffId: 'relay:sess-relay', durationMs: 0 }),
-      'rid-relay'
-    );
-  });
-
-  test('emits handoff_failed when Telegram does not accept the relayed message', async () => {
-    requireSessionMock.mockResolvedValue({
-      ok: true,
-      auth: { sessionId: 'sess-relay', capability: 'cap' },
-      supabase: createSupabase()
-    });
-    sendTelegramMessageMock.mockResolvedValue(null);
-
-    const { POST } = await import('@/app/api/telegram/relay/route');
-    const request = new Request('http://localhost/api/telegram/relay', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-request-id': 'rid-relay' },
-      body: JSON.stringify({ sessionId: 'sess-relay', text: 'Hello team' })
-    });
-
-    const response = await POST(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(false);
-    expect(emitEventMock).toHaveBeenCalledWith(
-      'handoff_failed',
-      { handoffId: 'relay:sess-relay', reason: 'telegram_send_failed' },
-      'rid-relay'
-    );
+    expect(sendTelegramMessageMock).not.toHaveBeenCalled();
   });
 
   test('does not create a topic or send Telegram when producer-transfer consent is absent', async () => {
