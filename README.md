@@ -135,13 +135,14 @@ curl -X POST http://127.0.0.1:3000/api/telegram/simulate \
 
 The authoritative schema is the incremental chain from `001_initial_schema.sql` through `018_public_schema_rls.sql` (including the intentionally absent `005` version). `000_full_schema.sql` is a legacy snapshot and must not be combined with the incremental chain.
 
-For a disposable PostgreSQL database, set `TEST_DATABASE_URL` and use the migration runner rather than applying partial SQL by hand:
+For a disposable PostgreSQL database, set `TEST_DATABASE_URL`, prepare the schema, then run the database tests:
 
 ```bash
-TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/balance_assist_test npm run db:migrate:test
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/balance_assist_test npm run test:db:prepare
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/balance_assist_test npm run test:db
 ```
 
-Run `npm run test:db` to apply the chain and verify the resulting schema. Do not point `TEST_DATABASE_URL` at production data.
+Do not point `TEST_DATABASE_URL` at production data.
 
 ## Intake flow
 
