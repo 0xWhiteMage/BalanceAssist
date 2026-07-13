@@ -42,18 +42,20 @@ This is a forward-only RLS and grant change. Validate it in staging before produ
 
 ### Isolated Service-Role Test
 
-Use only a disposable or staging Supabase project that already has the RLS migration applied. Never set these variables to a production URL or production service-role key. Set `TEST_SUPABASE_PROJECT_MARKER` to a unique test-project substring in the URL host, then run:
+Use only a dedicated disposable or staging Supabase project that already has the RLS migration applied. Never set these variables to a production URL or production service-role key. The project ref must match `balance-assist-test-*`, and the URL must exactly be `https://<project-ref>.supabase.co` with no port, path, query, or fragment.
 
 ```bash
-export TEST_SUPABASE_URL=https://test-project.supabase.co
+export TEST_SUPABASE_URL=https://balance-assist-test-ci.supabase.co
 export TEST_SUPABASE_SERVICE_ROLE_KEY=<test-project-service-role-key>
 export TEST_SUPABASE_ANON_KEY=<test-project-anon-key>
-export TEST_SUPABASE_PROJECT_MARKER=test-project
+export TEST_SUPABASE_PROJECT_REF=balance-assist-test-ci
 export ALLOW_TEST_SUPABASE_SERVICE_ROLE=1
 npm run test:supabase:service-role
 ```
 
-The test inserts and removes an isolated `sessions` row with the configured service-role key, and verifies the anon key cannot select or insert. CI runs it only when all `TEST_SUPABASE_*` secrets are configured; required mode fails on incomplete configuration instead of skipping.
+The test inserts and removes an isolated marker-scoped `sessions` row with the configured service-role key, then verifies valid-anon PostgREST requests receive `401` or `403` for `sessions`, `leads`, and `handoff_outbox`. It does not carry an authenticated-user JWT. Staging validation must therefore include an authenticated JWT PostgREST `select` and `insert` denial check for every affected application table before production rollout.
+
+CI always creates the check job. Set repository variable `REQUIRE_TEST_SUPABASE_SERVICE_ROLE=1` only after configuring the four `TEST_SUPABASE_*` secrets for the dedicated test project; required mode fails on missing configuration without printing secret values. With required mode unset, CI prints an explicit skip and does not send a request.
 
 ## Failure Patterns
 

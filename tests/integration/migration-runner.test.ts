@@ -94,11 +94,14 @@ describe('test migration runner', () => {
       'TEST_SUPABASE_URL',
       'TEST_SUPABASE_SERVICE_ROLE_KEY',
       'TEST_SUPABASE_ANON_KEY',
-      'TEST_SUPABASE_PROJECT_MARKER'
+      'TEST_SUPABASE_PROJECT_REF'
     ]) {
       expect(workflow).toContain(`secrets.${secret}`);
     }
+    expect(workflow).not.toContain('supabase-service-role:\n    if:');
+    expect(workflow).toContain('Skipping isolated Supabase service-role check');
+    expect(workflow).toContain('Required isolated Supabase configuration is missing');
     expect(workflow).toContain('ALLOW_TEST_SUPABASE_SERVICE_ROLE: 1');
-    expect(workflow).toContain('REQUIRE_TEST_SUPABASE_SERVICE_ROLE: 1');
+    expect(workflow).toContain('vars.REQUIRE_TEST_SUPABASE_SERVICE_ROLE');
   });
 });

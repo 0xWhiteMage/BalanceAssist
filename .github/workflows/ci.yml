@@ -69,15 +69,14 @@ jobs:
       - run: npm run test:db
 
   supabase-service-role:
-    if: ${{ secrets.TEST_SUPABASE_URL != '' && secrets.TEST_SUPABASE_SERVICE_ROLE_KEY != '' && secrets.TEST_SUPABASE_ANON_KEY != '' && secrets.TEST_SUPABASE_PROJECT_MARKER != '' }}
     runs-on: ubuntu-latest
     env:
       TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
       TEST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
       TEST_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
-      TEST_SUPABASE_PROJECT_MARKER: ${{ secrets.TEST_SUPABASE_PROJECT_MARKER }}
+      TEST_SUPABASE_PROJECT_REF: ${{ secrets.TEST_SUPABASE_PROJECT_REF }}
       ALLOW_TEST_SUPABASE_SERVICE_ROLE: 1
-      REQUIRE_TEST_SUPABASE_SERVICE_ROLE: 1
+      REQUIRE_TEST_SUPABASE_SERVICE_ROLE: ${{ vars.REQUIRE_TEST_SUPABASE_SERVICE_ROLE || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,7 +84,22 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run test:supabase:service-role
+      - name: Run isolated Supabase service-role check
+        shell: bash
+        run: |
+          if [ "$REQUIRE_TEST_SUPABASE_SERVICE_ROLE" != "1" ]; then
+            echo "Skipping isolated Supabase service-role check: required mode is disabled."
+            exit 0
+          fi
+
+          for name in TEST_SUPABASE_URL TEST_SUPABASE_SERVICE_ROLE_KEY TEST_SUPABASE_ANON_KEY TEST_SUPABASE_PROJECT_REF; do
+            if [ -z "${!name}" ]; then
+              echo "Required isolated Supabase configuration is missing: $name" >&2
+              exit 1
+            fi
+          done
+
+          npm run test:supabase:service-role
 
   build:
     runs-on: ubuntu-latest
