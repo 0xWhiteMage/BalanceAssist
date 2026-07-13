@@ -185,6 +185,7 @@ export function WidgetOverlay({
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollImmediateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionBootstrapPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -523,7 +524,7 @@ export function WidgetOverlay({
         consentedAt: noticeConsent.consentedAt
       });
 
-      if (session?.sessionId && session.persisted !== false) {
+      if (session?.sessionId && session.persisted === true) {
         setSessionUnavailable(false);
         setSessionId(session.sessionId);
         setDraftVersion(0);
@@ -538,19 +539,28 @@ export function WidgetOverlay({
     return null;
   }, [noticeConsent]);
 
-  const loadOrCreateSession = useCallback(async (): Promise<string | null> => {
-    if (sessionIdRef.current) return sessionIdRef.current;
-    if (typeof window === 'undefined' || !noticeConsent) return null;
+  const loadOrCreateSession = useCallback((): Promise<string | null> => {
+    if (sessionIdRef.current) return Promise.resolve(sessionIdRef.current);
+    if (typeof window === 'undefined' || !noticeConsent) return Promise.resolve(null);
+    if (sessionBootstrapPromiseRef.current) return sessionBootstrapPromiseRef.current;
 
-    const currentSession = await getCurrentSession();
-    if (currentSession?.sessionId) {
-      setSessionId(currentSession.sessionId);
-      sessionIdRef.current = currentSession.sessionId;
-      await hydrateCanonicalDraft(currentSession.sessionId);
-      return currentSession.sessionId;
-    }
+    const bootstrap = (async () => {
+      try {
+        const currentSession = await getCurrentSession();
+        if (currentSession?.sessionId) {
+          setSessionId(currentSession.sessionId);
+          sessionIdRef.current = currentSession.sessionId;
+          await hydrateCanonicalDraft(currentSession.sessionId);
+          return currentSession.sessionId;
+        }
 
-    return ensureSession();
+        return ensureSession();
+      } finally {
+        sessionBootstrapPromiseRef.current = null;
+      }
+    })();
+    sessionBootstrapPromiseRef.current = bootstrap;
+    return bootstrap;
   }, [ensureSession, hydrateCanonicalDraft, noticeConsent]);
 
   const startConversation = useCallback(async () => {

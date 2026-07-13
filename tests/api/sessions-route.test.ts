@@ -123,6 +123,30 @@ test('fails closed without a capability cookie when the session insert fails', a
   expect(response.headers.get('set-cookie')).toBeNull();
 });
 
+test('fails closed without a capability cookie when session persistence throws', async () => {
+  createServerSupabaseClientMock.mockReturnValue({
+    from: () => ({
+      insert: () => ({
+        select: () => ({
+          single: async () => {
+            throw new Error('network details must not be exposed');
+          }
+        })
+      })
+    })
+  });
+  const request = new NextRequest('http://localhost:3000/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
+  });
+
+  const response = await POST(request);
+
+  expect(response.status).toBe(503);
+  await expect(response.json()).resolves.toEqual({ ok: false, code: 'session_unavailable' });
+  expect(response.headers.get('set-cookie')).toBeNull();
+});
+
 test('returns 400 for invalid JSON body', async () => {
   const request = new NextRequest('http://localhost:3000/api/sessions', {
     method: 'POST',

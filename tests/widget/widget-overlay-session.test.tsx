@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WidgetOverlay } from '@/components/widget/widget-overlay';
 
 const originalFetch = global.fetch;
@@ -432,6 +432,79 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       expect(screen.getByRole('button', { name: /start with balance assist/i })).toBeTruthy();
     });
     expect(screen.queryByPlaceholderText(/type a message/i)).toBeNull();
+  });
+
+  test('does not enter chat from a session response with omitted persistence status', async () => {
+    global.fetch = makeFetchRecorder([
+      ({ url, method }) => {
+        if (url.includes('/api/sessions/inspect')) {
+          return new Response(JSON.stringify({ ok: true, exists: false }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        if (url.includes('/api/sessions') && method === 'POST') {
+          return new Response(JSON.stringify({ sessionId: 'unknown-persistence-session' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        return null;
+      }
+    ]);
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+
+    await waitFor(() => {
+      expect(screen.getByText(/session service is temporarily unavailable/i)).toBeTruthy();
+      expect(screen.getByRole('button', { name: /start with balance assist/i })).toBeTruthy();
+    });
+    expect(screen.queryByPlaceholderText(/type a message/i)).toBeNull();
+  });
+
+  test('deduplicates concurrent AI and human session startup', async () => {
+    let sessionCreateCalls = 0;
+    const inspectResolvers: Array<(response: Response) => void> = [];
+    global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/sessions/inspect')) {
+        return new Promise<Response>((resolve) => inspectResolvers.push(resolve));
+      }
+
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        sessionCreateCalls += 1;
+        return Promise.resolve(new Response(JSON.stringify({ sessionId: 'shared-session', persisted: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
+      if (url.includes('/api/events')) {
+        return Promise.resolve(new Response('{}', { status: 200 }));
+      }
+
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await acknowledgeNotice();
+    fireEvent.click(await screen.findByRole('button', { name: /start with balance assist/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /talk to a human/i }));
+
+    await waitFor(() => expect(inspectResolvers).toHaveLength(1));
+    await act(async () => {
+      const resolve = inspectResolvers[0];
+      resolve(new Response(JSON.stringify({ ok: true, exists: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    });
+    await waitFor(() => expect(sessionCreateCalls).toBe(1));
   });
 
   test('intro copy does not invite job applications or CV capture after the notice gate', async () => {
