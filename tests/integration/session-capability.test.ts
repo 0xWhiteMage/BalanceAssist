@@ -1,7 +1,5 @@
 // @vitest-environment node
 
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { extractSessionIdFromCapability } from '@/lib/security/session-capability';
@@ -19,24 +17,11 @@ vi.mock('@/lib/supabase/server', () => ({
 import { POST } from '@/app/api/sessions/route';
 import { requireSession } from '@/lib/api/require-session';
 
-type MigrationRunner = {
-  applyMigrations(options: { connectionString: string; migrationsDir: string }): Promise<unknown>;
-};
-
 const connectionString = process.env.TEST_DATABASE_URL;
-const migrationsDir = resolve(process.cwd(), 'supabase/migrations');
 let client: import('pg').Client | undefined;
-
-async function loadRunner(): Promise<MigrationRunner> {
-  return import(
-    pathToFileURL(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs')).href
-  ) as Promise<MigrationRunner>;
-}
 
 describe.skipIf(!connectionString)('persisted session capabilities', () => {
   beforeAll(async () => {
-    const runner = await loadRunner();
-    await runner.applyMigrations({ connectionString: connectionString!, migrationsDir });
     const { Client } = await import('pg');
     client = new Client({ connectionString });
     await client.connect();

@@ -19,7 +19,7 @@ type MigrationRunner = {
 const connectionString = process.env.TEST_DATABASE_URL;
 const migrationsDir = resolve(process.cwd(), 'supabase/migrations');
 let client: import('pg').Client | undefined;
-let serviceClient: import('pg').Client | undefined;
+let serverSimulationClient: import('pg').Client | undefined;
 let adminClient: import('pg').Client | undefined;
 let rolelessConnectionString: string | undefined;
 let grantConnectionString: string | undefined;
@@ -50,9 +50,9 @@ function withDatabase(connection: string, database: string) {
   return url.toString();
 }
 
-function serviceConnection(connection: string) {
+function serverSimulationConnection(connection: string) {
   const url = new URL(connection);
-  url.username = 'service_role';
+  url.username = 'server_role_simulation';
   url.password = 'test-service-role-password';
   return url.toString();
 }
@@ -65,7 +65,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     await adminClient.connect();
 
     const roleCheck = await adminClient.query(
-      "select rolname from pg_roles where rolname = any(array['anon', 'authenticated', 'service_role'])"
+      "select rolname from pg_roles where rolname = any(array['anon', 'authenticated', 'server_role_simulation'])"
     );
     expect(roleCheck.rows).toEqual([]);
 
@@ -86,7 +86,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     await adminClient.query(`
       CREATE ROLE anon NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
       CREATE ROLE authenticated NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-      CREATE ROLE service_role LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD 'test-service-role-password';
+      CREATE ROLE server_role_simulation LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD 'test-service-role-password';
       CREATE DATABASE ${grantDatabase};
     `);
 
@@ -96,14 +96,14 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       throughVersion: '017'
     });
     await adminClient.query(`
-      GRANT CONNECT ON DATABASE ${grantDatabase} TO service_role;
+      GRANT CONNECT ON DATABASE ${grantDatabase} TO server_role_simulation;
     `);
 
     const grantClient = new Client({ connectionString: grantConnectionString });
     await grantClient.connect();
     try {
       await grantClient.query(`
-        GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+        GRANT USAGE ON SCHEMA public TO anon, authenticated, server_role_simulation;
         GRANT ALL PRIVILEGES ON TABLE
           public.sessions,
           public.events,
@@ -113,7 +113,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           public.reference_links,
           public.processed_telegram_updates,
           public.handoff_outbox
-        TO anon, authenticated, service_role;
+        TO anon, authenticated, server_role_simulation;
       `);
       publicRoleGrantsBeforeHardening = (
         await grantClient.query(`
@@ -135,19 +135,19 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     });
     client = new Client({ connectionString: grantConnectionString });
     await client.connect();
-    serviceClient = new Client({ connectionString: serviceConnection(grantConnectionString) });
-    await serviceClient.connect();
+    serverSimulationClient = new Client({ connectionString: serverSimulationConnection(grantConnectionString) });
+    await serverSimulationClient.connect();
   });
 
   afterAll(async () => {
     await client?.end();
-    await serviceClient?.end();
+    await serverSimulationClient?.end();
     if (adminClient && rolelessConnectionString && grantConnectionString) {
       const rolelessDatabase = new URL(rolelessConnectionString).pathname.slice(1);
       const grantDatabase = new URL(grantConnectionString).pathname.slice(1);
       await adminClient.query(`drop database if exists ${rolelessDatabase}`);
       await adminClient.query(`drop database if exists ${grantDatabase}`);
-      await adminClient.query('drop role if exists service_role, anon, authenticated');
+      await adminClient.query('drop role if exists server_role_simulation, anon, authenticated');
     }
     await adminClient?.end();
   });
@@ -236,11 +236,11 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
-  it('allows the distinct service role to access application tables', async () => {
-    const inserted = await serviceClient!.query(
+  it('allows the restricted server-role simulation to access application tables', async () => {
+    const inserted = await serverSimulationClient!.query(
       "insert into public.sessions (source_url) values ('https://example.test') returning id"
     );
-    await serviceClient!.query('delete from public.sessions where id = $1', [inserted.rows[0].id]);
+    await serverSimulationClient!.query('delete from public.sessions where id = $1', [inserted.rows[0].id]);
   });
 
   it('creates the required current columns', async () => {

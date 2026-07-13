@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -67,5 +67,18 @@ describe('test migration runner', () => {
     const runner = await loadRunner();
 
     expect(() => runner.getIncrementalMigrations(migrationsDir)).toThrow(/Duplicate migration version 001/);
+  });
+
+  it('prepares the shared database before database test files run', async () => {
+    const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
+    const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
+
+    expect(packageJson.scripts['test:db:prepare']).toBe('node scripts/apply-test-migrations.mjs');
+    expect(packageJson.scripts['test:db']).toBe(
+      'vitest run tests/integration/database-schema.test.ts tests/integration/session-capability.test.ts'
+    );
+    expect(workflow.indexOf('- run: npm run test:db:prepare')).toBeLessThan(
+      workflow.indexOf('- run: npm run test:db\n')
+    );
   });
 });

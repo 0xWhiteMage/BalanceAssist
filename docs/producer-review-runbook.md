@@ -36,8 +36,9 @@ This is a forward-only RLS and grant change. Validate it in staging before produ
 2. Run the migration against a production-shaped disposable database or staging clone. Confirm it applies once and leaves all server migrations recorded.
 3. In staging, exercise service-role-backed routes for session creation, event capture, lead finalization, uploads, Telegram relay/replay protection, and handoff dispatch. Confirm the server still reads and writes each affected table.
 4. Run PostgREST/public access smoke checks with the project URL and anon key. `select` and `insert` against every affected table must be denied for both anonymous and authenticated JWT contexts.
-5. Re-run the grant and RLS inventory after the smoke checks. Each affected table must have RLS enabled and neither `anon` nor `authenticated` may retain table privileges.
-6. Deploy to production only after staging validation succeeds. Monitor route errors, PostgREST authorization failures, and handoff delivery during the rollout window.
+5. Run a staging PostgREST smoke check with the deployed Supabase service key. Confirm representative `select` and `insert` operations still succeed through the project URL, then remove test data. The disposable plain-PostgreSQL `server_role_simulation` test does not validate a deployed Supabase service key.
+6. Re-run the grant and RLS inventory after the smoke checks. Each affected table must have RLS enabled and neither `anon` nor `authenticated` may retain table privileges.
+7. Deploy to production only after staging validation succeeds. Monitor route errors, PostgREST authorization failures, and handoff delivery during the rollout window.
 
 ## Failure Patterns
 
