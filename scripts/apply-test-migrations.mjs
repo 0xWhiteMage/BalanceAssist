@@ -16,21 +16,27 @@ export function getIncrementalMigrations(migrationsDir) {
 
       return {
         version: match[1],
+        numericVersion: BigInt(match[1]),
         filename: entry.name,
         path: resolve(migrationsDir, entry.name)
       };
-    })
-    .sort((left, right) => left.filename.localeCompare(right.filename));
+    });
 
   const versions = new Set();
   for (const migration of migrations) {
-    if (versions.has(migration.version)) {
+    if (versions.has(migration.numericVersion)) {
       throw new Error(`Duplicate migration version ${migration.version}`);
     }
-    versions.add(migration.version);
+    versions.add(migration.numericVersion);
   }
 
-  return migrations;
+  return migrations
+    .sort((left, right) => {
+      if (left.numericVersion < right.numericVersion) return -1;
+      if (left.numericVersion > right.numericVersion) return 1;
+      return left.filename.localeCompare(right.filename);
+    })
+    .map(({ numericVersion, ...migration }) => migration);
 }
 
 export async function applyMigrations({
