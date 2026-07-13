@@ -3,21 +3,21 @@ import { getRetryDelay, shouldEscalate, getMaxRetries, type HandoffSLA } from '@
 
 describe('handoff/sla', () => {
   describe('getRetryDelay', () => {
-    it('returns first delay for attempt 0', () => {
-      expect(getRetryDelay(0)).toBe(1000);
+    it('does not promise a retry before the five-minute scheduler cadence', () => {
+      expect(getRetryDelay(0)).toBe(300_000);
     });
 
     it('returns second delay for attempt 1', () => {
-      expect(getRetryDelay(1)).toBe(5000);
+      expect(getRetryDelay(1)).toBe(300_000);
     });
 
     it('returns third delay for attempt 2', () => {
-      expect(getRetryDelay(2)).toBe(15000);
+      expect(getRetryDelay(2)).toBe(300_000);
     });
 
     it('clamps to last delay for attempts beyond array length', () => {
-      expect(getRetryDelay(3)).toBe(15000);
-      expect(getRetryDelay(100)).toBe(15000);
+      expect(getRetryDelay(3)).toBe(300_000);
+      expect(getRetryDelay(100)).toBe(300_000);
     });
 
     it('uses custom SLA when provided', () => {
@@ -38,25 +38,25 @@ describe('handoff/sla', () => {
       expect(shouldEscalate(now)).toBe(false);
     });
 
-    it('returns true for a handoff older than threshold', () => {
-      const old = new Date(Date.now() - 600_000).toISOString(); // 10 minutes ago
+    it('returns true for a handoff older than the three-cadence threshold', () => {
+      const old = new Date(Date.now() - 1_200_000).toISOString(); // 20 minutes ago
       expect(shouldEscalate(old)).toBe(true);
     });
 
     it('returns true when exactly at threshold boundary (just over)', () => {
-      const justOver = new Date(Date.now() - 300_001).toISOString();
+      const justOver = new Date(Date.now() - 900_001).toISOString();
       expect(shouldEscalate(justOver)).toBe(true);
     });
 
     it('returns false when just under threshold', () => {
-      const justUnder = new Date(Date.now() - 299_999).toISOString();
+      const justUnder = new Date(Date.now() - 899_999).toISOString();
       expect(shouldEscalate(justUnder)).toBe(false);
     });
 
     it('respects custom SLA threshold', () => {
       const sla: HandoffSLA = {
         maxRetryAttempts: 3,
-        retryBackoffMs: [1000, 5000, 15000],
+        retryBackoffMs: [300_000, 300_000, 300_000],
         escalationThresholdMs: 5_000, // 5 seconds
       };
       const old = new Date(Date.now() - 10_000).toISOString();

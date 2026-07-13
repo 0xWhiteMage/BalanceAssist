@@ -23,8 +23,17 @@
    - `TELEGRAM_CHAT_ID`
    - `TELEGRAM_ALLOWED_USERNAMES`
 5. Confirm the dispatcher scheduler is invoking the authenticated dispatch route.
-   - Vercel cron path: `/api/internal/handoff-dispatch`
-   - Required auth secret: `CRON_SECRET` (or `INTERNAL_DISPATCH_SECRET` for manual/internal callers)
+    - GitHub Actions workflow: `Handoff dispatch` (`.github/workflows/handoff-dispatch.yml`)
+    - Dispatch path: `/api/internal/handoff-dispatch`
+    - Required GitHub Actions secrets: `PRODUCTION_URL` and `CRON_SECRET`; the same `CRON_SECRET` must be configured in Vercel runtime environment variables.
+    - The workflow is scheduled every five minutes and can be manually run with `workflow_dispatch`. GitHub cron is best effort and may be delayed, so do not treat this as an exact five-minute SLA.
+    - Review failed workflow runs and GitHub Actions notifications. Monitor `handoff_failed` and `handoff_escalated` events and pending/escalated `handoff_outbox` rows.
+
+## Handoff Retry Timing
+
+- A failed handoff is eligible for its next attempt no sooner than five minutes later; actual dispatch depends on the next GitHub Actions run and may be later.
+- The dispatcher allows three delivery attempts and escalates handoffs once they are older than 15 minutes when a dispatch run evaluates them. Scheduler delay can make escalation later; it cannot make retries occur faster.
+- Use `workflow_dispatch` after resolving an incident to process due rows. Do not infer delivery from a successful workflow run; inspect the outbox state and handoff events.
 
 ## Database Access Hardening Rollout
 

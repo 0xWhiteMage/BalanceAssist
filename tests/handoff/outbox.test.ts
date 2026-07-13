@@ -197,13 +197,13 @@ describe('handoff/outbox', () => {
       const outcome = await markFailed(harness.supabase as never, 'ho-1', 'Telegram send failed');
       const row = harness.byId.get('ho-1');
 
-      expect(outcome).toEqual({ shouldRetry: true, escalated: false, retryDelayMs: 1000 });
+      expect(outcome).toEqual({ shouldRetry: true, escalated: false, retryDelayMs: 300_000 });
       expect(row).toMatchObject({
         state: 'pending',
         attempts: 1,
         last_error: 'Telegram send failed'
       });
-      expect(row?.next_attempt_at).toBe('2026-07-11T12:00:01.000Z');
+      expect(row?.next_attempt_at).toBe('2026-07-11T12:05:00.000Z');
     });
 
     it('marks the row failed when retries are exhausted', async () => {
@@ -240,9 +240,9 @@ describe('handoff/outbox', () => {
           payload: { sessionId: 'session-3', type: 'approval', summary: 'Hello' },
           state: 'pending',
           attempts: 0,
-          created_at: '2026-07-11T11:50:00.000Z',
-          updated_at: '2026-07-11T11:50:00.000Z',
-          next_attempt_at: '2026-07-11T11:50:00.000Z',
+          created_at: '2026-07-11T11:40:00.000Z',
+          updated_at: '2026-07-11T11:40:00.000Z',
+          next_attempt_at: '2026-07-11T11:40:00.000Z',
           last_error: null
         }
       ]);

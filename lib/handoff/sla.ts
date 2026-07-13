@@ -6,8 +6,8 @@ export type HandoffSLA = {
 
 const DEFAULT_SLA: HandoffSLA = {
   maxRetryAttempts: 3,
-  retryBackoffMs: [1000, 5000, 15000],
-  escalationThresholdMs: 300_000, // 5 minutes
+  retryBackoffMs: [300_000, 300_000, 300_000], // GitHub Actions schedules every five minutes.
+  escalationThresholdMs: 900_000, // Three five-minute scheduler windows.
 };
 
 export function getRetryDelay(attempt: number, sla?: HandoffSLA): number {

@@ -68,9 +68,7 @@ git push -u origin main
 3. Add every environment variable from `.env.example`
 4. Click **Deploy**
 
-Vercel auto-deploys on every push to `main`.
-
-Set `CRON_SECRET` in Vercel to enable the authenticated `/api/internal/handoff-dispatch` cron configured in `vercel.json`.
+Vercel auto-deploys on every push to `main`. GitHub Actions, not Vercel Cron, schedules authenticated handoff dispatches.
 
 ### 3. Configure GitHub secrets
 
@@ -80,8 +78,12 @@ In **Settings → Secrets and variables → Actions** add:
 |---|---|
 | `PRODUCTION_URL` | Deployed domain, e.g. `https://balance-assist.vercel.app` |
 | `SETUP_TOKEN` | Same value as in Vercel env |
-| `CRON_SECRET` | Authenticates the scheduled `/api/internal/handoff-dispatch` cron |
+| `CRON_SECRET` | Authenticates GitHub Actions calls to `/api/internal/handoff-dispatch`; also set the same value in Vercel runtime environment variables |
 | `TELEGRAM_BOT_TOKEN` | Same as in Vercel env |
+
+The `Handoff dispatch` workflow runs every five minutes and can be started with `workflow_dispatch`. This is a best-effort cadence: GitHub scheduled workflows can be delayed, especially during high load, so it does not guarantee dispatch exactly every five minutes. Dispatch retries wait at least one five-minute scheduler window, and pending handoffs are escalated after three windows (15 minutes), subject to scheduler delay.
+
+Enable GitHub Actions failure notifications for repository administrators and monitor failed `Handoff dispatch` runs, `handoff_failed`/`handoff_escalated` events, and pending or escalated `handoff_outbox` rows. A failed workflow needs investigation or a manual `workflow_dispatch` run; it does not prove a handoff was delivered.
 
 ### 4. Verify the webhook
 

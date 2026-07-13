@@ -11,6 +11,9 @@ These metrics track whether Balance Assist is behaving as a consent-led, truthfu
 - `lead_persisted`: canonical brief persisted successfully
 - `lead_skipped`: finalization skipped because canonical brief lacked substance
 - `handoff_enqueued`: producer handoff queued after persistence
+- `handoff_delivered`: dispatcher delivered a handoff to Telegram
+- `handoff_failed`: dispatcher could not deliver a handoff and scheduled or exhausted a retry
+- `handoff_escalated`: dispatcher found a handoff beyond the 15-minute escalation threshold
 - `attachment_forwarded`: upload persisted and forwarded to Telegram
 - `attachment_quarantined`: upload persisted without forwarding
 - `draft_updated`: canonical draft edit persisted through the authenticated route
@@ -27,6 +30,7 @@ These metrics track whether Balance Assist is behaving as a consent-led, truthfu
 
 - Monitor spikes in `attachment_quarantined` for upload abuse or MIME regressions.
 - Compare `lead_persisted` to `handoff_enqueued` to catch producer-transfer failures.
+- Monitor `handoff_failed` and `handoff_escalated` alongside GitHub Actions `Handoff dispatch` workflow failures and pending outbox age.
 - Monitor `project_reset` and `deletion_requested` to verify user data-control paths remain functional.
 - Monitor absence of `consent_granted` against traffic expectations to detect intake breakage.
 

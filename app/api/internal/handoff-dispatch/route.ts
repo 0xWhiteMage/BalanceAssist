@@ -26,8 +26,8 @@ export async function POST(request: Request) {
 
   const sla: HandoffSLA = {
     maxRetryAttempts: getMaxRetries(),
-    retryBackoffMs: [1000, 5000, 15000],
-    escalationThresholdMs: 300_000,
+    retryBackoffMs: [300_000, 300_000, 300_000],
+    escalationThresholdMs: 900_000,
   };
 
   const results: Array<{ id: string; status: string; escalated?: boolean; retryDelayMs?: number }> = [];
