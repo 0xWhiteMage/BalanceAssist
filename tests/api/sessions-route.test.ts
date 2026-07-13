@@ -54,12 +54,12 @@ beforeEach(() => {
   }));
 });
 
-test('returns a stable 503 without consuming a global bucket when trusted client identity is unavailable', async () => {
+test('returns a stable 503 before parsing or consuming when trusted client identity is unavailable', async () => {
   getClientIpMaterialMock.mockReturnValue(null);
   const request = new NextRequest('https://www.balancestudio.tv/api/sessions', {
     method: 'POST',
     headers: { 'x-forwarded-for': '203.0.113.7', 'x-real-ip': '203.0.113.8' },
-    body: JSON.stringify({ sourceUrl: 'https://www.balancestudio.tv', ...validConsent })
+    body: 'not-json'
   });
 
   const response = await POST(request);
@@ -210,7 +210,8 @@ test('returns 400 for invalid JSON body', async () => {
   const response = await POST(request);
 
   expect(response.status).toBe(400);
-  expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  expect(consumeRateLimitMock).toHaveBeenCalledWith('session-create:203.0.113.7', 10, 3600);
+  expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
 });
 
 test('returns 400 for schema-invalid payload', async () => {
@@ -222,7 +223,30 @@ test('returns 400 for schema-invalid payload', async () => {
   const response = await POST(request);
 
   expect(response.status).toBe(400);
-  expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  expect(consumeRateLimitMock).toHaveBeenCalledWith('session-create:203.0.113.7', 10, 3600);
+  expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
+});
+
+test('returns 413 after limiting an oversized streamed session body without creating a session', async () => {
+  const oversized = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('x'.repeat(16_385)));
+      controller.close();
+    }
+  });
+  const request = new Request('https://www.balancestudio.tv/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: oversized,
+    duplex: 'half'
+  } as RequestInit);
+
+  const response = await POST(request);
+
+  expect(response.status).toBe(413);
+  await expect(response.json()).resolves.toEqual({ ok: false, code: 'payload_too_large' });
+  expect(consumeRateLimitMock).toHaveBeenCalledWith('session-create:203.0.113.7', 10, 3600);
+  expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
 });
 
 test('includes CORS headers in response', async () => {

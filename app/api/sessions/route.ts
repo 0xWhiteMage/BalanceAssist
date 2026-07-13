@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createSessionPayloadSchema } from '@/lib/api/contracts';
-import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
+import { createSessionPayloadSchema, MAX_SESSION_BODY_BYTES } from '@/lib/api/contracts';
+import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { SESSION_CAPABILITY_COOKIE_NAME } from '@/lib/api/require-session';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
@@ -33,13 +33,8 @@ export async function OPTIONS(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const parsed = await parseRequestBody(request, createSessionPayloadSchema);
   const requestId = extractRequestId(request);
   const logger = createLogger('sessions', requestId);
-
-  if (!parsed.ok) {
-    return parsed.response;
-  }
 
   const clientIpMaterial = getClientIpMaterial(request);
   if (!clientIpMaterial) {
@@ -55,6 +50,19 @@ export async function POST(request: Request) {
   } catch {
     logger.error('Session creation rate limit is unavailable');
     return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
+  }
+
+  const body = await readJsonBodyLimited(request, MAX_SESSION_BODY_BYTES);
+  if (!body.ok) {
+    if (body.tooLarge) {
+      return jsonWithCors({ ok: false, code: 'payload_too_large' }, { status: 413 }, request);
+    }
+    return jsonWithCors({ error: 'Invalid JSON body' }, { status: 400 }, request);
+  }
+
+  const parsed = createSessionPayloadSchema.safeParse(body.data);
+  if (!parsed.success) {
+    return jsonWithCors({ error: 'Invalid request payload', issues: parsed.error.issues }, { status: 400 }, request);
   }
 
   const { sourceUrl, referrer, utm, consentVersion, consentedAt } = parsed.data;

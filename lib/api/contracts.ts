@@ -9,6 +9,7 @@ export const MAX_CHAT_CONTEXT_DRAFT_CHARACTERS = 16_000;
 export const MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS = 128;
 export const MAX_CHAT_CAPTURED_FIELDS = 20;
 export const MAX_CHAT_CAPTURED_FIELD_CHARACTERS = 64;
+export const MAX_SESSION_BODY_BYTES = 16_384;
 
 export const createSessionPayloadSchema = z.object({
   sourceUrl: z.string().url(),
