@@ -18,12 +18,26 @@ const MAGIC_BYTES: Array<{ mime: string; bytes: number[] }> = [
   { mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47] },
   { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
   { mime: 'image/gif', bytes: [0x47, 0x49, 0x46, 0x38] },
-  { mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] },
   { mime: 'application/pdf', bytes: [0x25, 0x50, 0x44, 0x46] },
 ];
 
 function detectMimeFromBytes(buffer: ArrayBuffer): string | null {
   const bytes = new Uint8Array(buffer.slice(0, 16));
+
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+
   for (const { mime, bytes: magic } of MAGIC_BYTES) {
     if (magic.length > bytes.length) continue;
     let match = true;

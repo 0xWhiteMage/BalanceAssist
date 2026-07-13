@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyCapability, extractSessionIdFromCapability } from '@/lib/security/session-capability';
+import { isAllowedOrigin } from '@/lib/security/origin';
+import { jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 
 export type SessionAuth = {
@@ -7,15 +9,29 @@ export type SessionAuth = {
   capability: string;
 };
 
-export async function requireSession(request: Request): Promise<
-  | { ok: true; auth: SessionAuth; supabase: ReturnType<typeof createServerSupabaseClient> }
+export const SESSION_CAPABILITY_COOKIE_NAME = 'session_capability';
+
+const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+export async function requireSession(request: Request, expectedSessionId?: string | null): Promise<
+  | { ok: true; auth: SessionAuth; supabase: NonNullable<ReturnType<typeof createServerSupabaseClient>> }
   | { ok: false; response: NextResponse }
 > {
   if (!hasSupabaseServerConfig()) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Service unavailable' }, { status: 503 })
+      response: jsonWithCors({ error: 'Service unavailable' }, { status: 503 }, request)
     };
+  }
+
+  if (STATE_CHANGING_METHODS.has(request.method.toUpperCase())) {
+    const origin = request.headers.get('origin');
+    if (!isAllowedOrigin(origin)) {
+      return {
+        ok: false,
+        response: jsonWithCors({ error: 'Untrusted origin' }, { status: 403 }, request)
+      };
+    }
   }
 
   // Try capability header first
@@ -25,15 +41,15 @@ export async function requireSession(request: Request): Promise<
   const capabilityCookie = cookieHeader
     .split(';')
     .map(c => c.trim())
-    .find(c => c.startsWith('session_capability='))
-    ?.slice('session_capability='.length);
+    .find(c => c.startsWith(`${SESSION_CAPABILITY_COOKIE_NAME}=`))
+    ?.slice(`${SESSION_CAPABILITY_COOKIE_NAME}=`.length);
 
   const capability = capabilityHeader ?? capabilityCookie;
 
   if (!capability) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Session capability required' }, { status: 401 })
+      response: jsonWithCors({ error: 'Session capability required' }, { status: 401 }, request)
     };
   }
 
@@ -41,7 +57,14 @@ export async function requireSession(request: Request): Promise<
   if (!sessionId) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Invalid session capability' }, { status: 401 })
+      response: jsonWithCors({ error: 'Invalid session capability' }, { status: 401 }, request)
+    };
+  }
+
+  if (expectedSessionId && expectedSessionId !== sessionId) {
+    return {
+      ok: false,
+      response: jsonWithCors({ error: 'Session mismatch' }, { status: 403 }, request)
     };
   }
 
@@ -49,7 +72,7 @@ export async function requireSession(request: Request): Promise<
   if (!supabase) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Service unavailable' }, { status: 503 })
+      response: jsonWithCors({ error: 'Service unavailable' }, { status: 503 }, request)
     };
   }
 
@@ -62,7 +85,7 @@ export async function requireSession(request: Request): Promise<
   if (error || !session) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Session not found' }, { status: 401 })
+      response: jsonWithCors({ error: 'Session not found' }, { status: 401 }, request)
     };
   }
 
@@ -71,7 +94,7 @@ export async function requireSession(request: Request): Promise<
   if (!row.capability_hash || !row.capability_expires_at) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Session not authorized' }, { status: 401 })
+      response: jsonWithCors({ error: 'Session not authorized' }, { status: 401 }, request)
     };
   }
 
@@ -80,7 +103,7 @@ export async function requireSession(request: Request): Promise<
   if (!valid) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Invalid or expired session capability' }, { status: 401 })
+      response: jsonWithCors({ error: 'Invalid or expired session capability' }, { status: 401 }, request)
     };
   }
 

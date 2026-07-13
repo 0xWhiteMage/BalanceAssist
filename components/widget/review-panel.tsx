@@ -135,6 +135,15 @@ export function ReviewPanel({
 
   const missing = missingReviewFields(draft);
 
+  const confirmationSummary =
+    telegramBroadcastStatus === 'sent'
+      ? `${completed} of ${TOTAL_FIELDS} fields captured · The Balance team has been notified.`
+      : telegramBroadcastStatus === 'queued'
+        ? 'Approval saved. Team notification queued.'
+        : telegramBroadcastStatus === 'pending' || telegramPending
+          ? 'Approval saved. Team notification pending verification.'
+          : 'Approval saved. Team notification still needs confirmation.';
+
   const approveButtonLabel = approved
     ? 'Approved'
     : isApproveInFlight
@@ -272,7 +281,7 @@ export function ReviewPanel({
               lineHeight: 1.45
             }}
           >
-            {completed} of {TOTAL_FIELDS} fields captured · The Balance team has been notified.
+            {confirmationSummary}
           </div>
           <div
             data-testid="approve-confirmation-telegram"

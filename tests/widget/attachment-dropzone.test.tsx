@@ -8,6 +8,14 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+function enableAnalysisConsent() {
+  fireEvent.click(screen.getByLabelText(/balance assist may analyse/i));
+}
+
+function enableProducerShareConsent() {
+  fireEvent.click(screen.getByLabelText(/balance team may review/i));
+}
+
 test('classifies a pasted YouTube URL and adds a chip', async () => {
   const onAdd = vi.fn();
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -19,6 +27,7 @@ test('classifies a pasted YouTube URL and adds a chip', async () => {
   }) as unknown as typeof fetch;
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
+  enableProducerShareConsent();
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
@@ -39,6 +48,7 @@ test('surfaces the server error message when /api/attachments/link returns a str
   }) as unknown as typeof fetch;
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
+  enableProducerShareConsent();
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
@@ -60,6 +70,7 @@ test('falls back to a generic message when the error response is not JSON', asyn
   }) as unknown as typeof fetch;
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
+  enableProducerShareConsent();
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
@@ -94,4 +105,95 @@ test('URL submit button uses the uppercase ADD LINK pill copy', () => {
   const addLinkButton = screen.getByRole('button', { name: /add link/i });
   expect(addLinkButton).toBeInTheDocument();
   expect(addLinkButton.tagName).toBe('BUTTON');
+});
+
+test('blocks links until the user explicitly allows producer review', async () => {
+  global.fetch = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
+
+  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+
+  const input = screen.getByPlaceholderText(/paste a reference link/i);
+  fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
+  fireEvent.submit(input.closest('form')!);
+
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(/balance team may review this link/i);
+  });
+  expect(global.fetch).not.toHaveBeenCalled();
+});
+
+test('sends the explicit consent payload with links and only adds producer-share links to the review list', async () => {
+  const onAddLink = vi.fn();
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ ok: true, persisted: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }) as unknown as typeof fetch;
+
+  render(<AttachmentDropzone onAddLink={onAddLink} onAddFile={vi.fn()} sessionId="sess-1" />);
+
+  enableAnalysisConsent();
+  enableProducerShareConsent();
+  const input = screen.getByPlaceholderText(/paste a reference link/i);
+  fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
+  fireEvent.submit(input.closest('form')!);
+
+  await waitFor(() => {
+    expect(onAddLink).toHaveBeenCalledWith(expect.objectContaining({ kind: 'youtube', url: 'https://youtu.be/abc' }));
+  });
+
+  expect(requestBodies).toHaveLength(1);
+  expect(requestBodies[0]).toMatchObject({
+    sessionId: 'sess-1',
+    url: 'https://youtu.be/abc',
+    kind: 'youtube',
+    consent: {
+      aiAnalysis: true,
+      producerShare: true
+    }
+  });
+});
+
+test('allows analysis-only uploads without producer forwarding metadata', async () => {
+  const onAddFile = vi.fn();
+  const onFileAnalyzed = vi.fn();
+  const uploadedConsents: string[] = [];
+
+  global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const form = init?.body as FormData;
+    uploadedConsents.push(String(form.get('consent')));
+    return new Response(JSON.stringify({ ok: true, extractedText: 'Project scope: launch film', forwarded: false }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }) as unknown as typeof fetch;
+
+  const { container } = render(
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={onAddFile} onFileAnalyzed={onFileAnalyzed} sessionId="sess-2" />
+  );
+
+  enableAnalysisConsent();
+
+  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+  if (!fileInput) {
+    throw new Error('File input missing');
+  }
+
+  const file = new File(['brief text'], 'brief.txt', { type: 'text/plain' });
+  fireEvent.change(fileInput, { target: { files: [file] } });
+
+  await waitFor(() => {
+    expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Project scope: launch film');
+  });
+
+  expect(onAddFile).not.toHaveBeenCalled();
+  expect(uploadedConsents).toHaveLength(1);
+  expect(JSON.parse(uploadedConsents[0]!)).toMatchObject({
+    aiAnalysis: true,
+    producerShare: false
+  });
 });

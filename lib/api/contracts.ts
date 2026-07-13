@@ -4,8 +4,8 @@ export const createSessionPayloadSchema = z.object({
   sourceUrl: z.string().url(),
   referrer: z.string().url().optional(),
   utm: z.record(z.string()).optional(),
-  consentVersion: z.string().optional(),
-  consentedAt: z.string().datetime().optional()
+  consentVersion: z.string().min(1),
+  consentedAt: z.string().datetime()
 });
 
 export const eventPayloadSchema = z.object({
@@ -73,7 +73,7 @@ export const chatRequestPayloadSchema = z.object({
   messages: z
     .array(
       z.object({
-        role: z.enum(['system', 'user', 'assistant']),
+        role: z.literal('user'),
         content: z.string().max(8000)
       })
     )

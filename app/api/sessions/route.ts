@@ -1,14 +1,37 @@
+import { NextResponse } from 'next/server';
 import { createSessionPayloadSchema } from '@/lib/api/contracts';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
+import { SESSION_CAPABILITY_COOKIE_NAME } from '@/lib/api/require-session';
+import { createLogger, extractRequestId } from '@/lib/logger';
+import { emitEvent } from '@/lib/observability/events';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { generateCapability, hashCapability } from '@/lib/security/session-capability';
 
-export async function OPTIONS() {
-  return corsOptionsResponse();
+function setSessionCapabilityCookie(response: NextResponse, request: Request, capability: string, expiresAt: string) {
+  const url = new URL(request.url);
+  const isSecure = url.protocol === 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1';
+
+  response.cookies.set({
+    name: SESSION_CAPABILITY_COOKIE_NAME,
+    value: capability,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isSecure,
+    path: '/',
+    expires: new Date(expiresAt)
+  });
+
+  return response;
+}
+
+export async function OPTIONS(request: Request) {
+  return corsOptionsResponse(request);
 }
 
 export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, createSessionPayloadSchema);
+  const requestId = extractRequestId(request);
+  const logger = createLogger('sessions', requestId);
 
   if (!parsed.ok) {
     return parsed.response;
@@ -38,36 +61,36 @@ export async function POST(request: Request) {
         .single();
 
       if (!error && data) {
-        return jsonWithCors({
+        emitEvent('consent_granted', { sessionId: data.id, consentVersion }, requestId);
+        emitEvent('capability_issued', { sessionId: data.id }, requestId);
+        return setSessionCapabilityCookie(jsonWithCors({
           sessionId: data.id,
-          capability: capability.capability,
           expiresAt: capability.expiresAt,
           status: data.status,
           sourceUrl: data.source_url,
           createdAt: data.created_at,
           persisted: true
-        });
+        }, undefined, request), request, capability.capability, capability.expiresAt);
       }
 
-      console.error('[sessions] Failed to insert session into Supabase', {
+      logger.error('Failed to insert session into Supabase', {
         errorCode: error?.code,
         errorMessage: error?.message,
         errorDetails: error?.details,
         hint: error?.hint
       });
     } else {
-      console.error('[sessions] Supabase client creation failed despite hasSupabaseServerConfig() returning true');
+      logger.error('Supabase client creation failed despite hasSupabaseServerConfig() returning true');
     }
   }
 
   const fallbackCapability = generateCapability(crypto.randomUUID());
 
-  return jsonWithCors({
+  return setSessionCapabilityCookie(jsonWithCors({
     sessionId: fallbackCapability.sessionId,
-    capability: fallbackCapability.capability,
     expiresAt: fallbackCapability.expiresAt,
     status: 'open',
     sourceUrl,
     persisted: false
-  });
+  }, undefined, request), request, fallbackCapability.capability, fallbackCapability.expiresAt);
 }

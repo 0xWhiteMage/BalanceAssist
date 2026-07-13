@@ -327,7 +327,8 @@ export async function ensureTelegramTopic(
   sessionId: string,
   contactName: string | null,
   contactCompany: string | null,
-  shortId: string
+  shortId: string,
+  caseId?: string
 ): Promise<number | null> {
   const { data: sessionRow } = await supabase
     .from('sessions')
@@ -339,7 +340,7 @@ export async function ensureTelegramTopic(
   let threadId = snap?.telegram_thread_id ?? null;
 
   if (snap && !threadId) {
-    const name = buildTopicName(contactName ?? snap.contact_name, contactCompany ?? snap.contact_company, shortId, 'new');
+    const name = buildTopicName(contactName ?? snap.contact_name, contactCompany ?? snap.contact_company, shortId, 'new', caseId);
     const topic = await createForumTopic(name, { iconColor: TOPIC_STATUS_COLOR.new });
 
     if (topic) {

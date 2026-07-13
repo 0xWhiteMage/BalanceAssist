@@ -12,13 +12,11 @@ export function missingReviewFields(draft: Partial<LeadDraft>): string[] {
     missing.push('contactName');
     missing.push('contactEmail');
   }
-  if (!draft.consentToShare) missing.push('consentToShare');
   return missing;
 }
 
 export function isBriefReadyForApproval(draft: Partial<LeadDraft>): boolean {
   const hasProjectNeed = Boolean(draft.projectScope?.trim() || draft.service?.trim());
   const hasContactMethod = Boolean(draft.contactName?.trim() || draft.contactEmail?.trim());
-  const hasConsent = draft.consentToShare === true;
-  return hasProjectNeed && hasContactMethod && hasConsent;
+  return hasProjectNeed && hasContactMethod;
 }

@@ -675,7 +675,7 @@ describe('WorkCardRow prev/next arrow buttons', () => {
     await waitFor(() => {
       nextButton = screen.getByTestId('work-card-row-next');
     });
-    const next = nextButton as HTMLButtonElement;
+    const next = nextButton as unknown as HTMLButtonElement;
     expect(next.style.opacity).toBe('1');
   });
 

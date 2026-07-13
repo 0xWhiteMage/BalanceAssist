@@ -31,7 +31,7 @@ export function verifyWebhookSender(
   senderUsername: string | null,
   allowedUsernames: string[] | null
 ): boolean {
-  if (!allowedUsernames || allowedUsernames.length === 0) return true;
+  if (!allowedUsernames || allowedUsernames.length === 0) return false;
   if (!senderUsername) return false;
   return allowedUsernames.includes(senderUsername.toLowerCase());
 }

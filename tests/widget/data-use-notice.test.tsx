@@ -9,7 +9,7 @@ describe('DataUseNotice', () => {
     expect(screen.getByText(DATA_USE_NOTICE_COPY.body)).toBeInTheDocument();
   });
 
-  test('renders the title', () => {
+  test('renders the Balance Assist AI title', () => {
     render(<DataUseNotice onConsent={() => {}} />);
     expect(screen.getByText(DATA_USE_NOTICE_COPY.title)).toBeInTheDocument();
   });
@@ -40,5 +40,15 @@ describe('DataUseNotice', () => {
   test('includes data-testid="data-use-notice" on the wrapper', () => {
     render(<DataUseNotice onConsent={() => {}} />);
     expect(screen.getByTestId('data-use-notice')).toBeInTheDocument();
+  });
+
+  test('links to the privacy page for more detail', () => {
+    render(<DataUseNotice onConsent={() => {}} />);
+    expect(screen.getByRole('link', { name: /privacy/i })).toHaveAttribute('href', DATA_USE_NOTICE_COPY.privacyLink);
+  });
+
+  test('copy does not invite job applications or CV capture', () => {
+    render(<DataUseNotice onConsent={() => {}} />);
+    expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/job application|cv|resume/i);
   });
 });

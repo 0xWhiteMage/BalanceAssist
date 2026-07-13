@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { MessageBubble } from '@/components/chat/message-bubble';
 import { CalendlyEmbed } from '@/components/chat/calendly-embed';
@@ -15,6 +15,7 @@ import {
 } from '@/components/widget/widget-overlay-parts';
 import { ReviewPanel } from '@/components/widget/review-panel';
 import { AttachmentDropzone, type ReferenceFile, type ReferenceLink } from '@/components/widget/attachment-dropzone';
+import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
 import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
@@ -22,45 +23,18 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
-import { addReferenceLink, createSession, fetchTeamMessages, finalizeLead, logEvent, notifyScheduleCompleted, relayUserMessage, uploadRequestedFiles, verifySession, type TeamMessage } from '@/lib/api/client';
+import { createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { scoreLead } from '@/lib/qualification/score';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
+import type { ConsentRecord } from '@/lib/privacy/notice';
+import { createAttachmentConsent } from '@/lib/uploads/consent';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 
 let messageCounter = 0;
 function nextId() {
   messageCounter += 1;
   return `msg-${messageCounter}`;
-}
-
-export const SESSION_STORAGE_KEY = 'balance-assist:sessionId';
-
-function readStoredSessionId(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage.getItem(SESSION_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredSessionId(sessionId: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-  } catch {
-    // ignore quota / privacy mode errors
-  }
-}
-
-function clearStoredSessionId(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -177,6 +151,7 @@ export function WidgetOverlay({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
   const [draft, setDraft] = useState<LeadDraft>(createDefaultLeadDraft());
+  const [noticeConsent, setNoticeConsent] = useState<ConsentRecord | null>(null);
   const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -198,6 +173,7 @@ export function WidgetOverlay({
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
+  const [draftVersion, setDraftVersion] = useState(0);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -213,6 +189,7 @@ export function WidgetOverlay({
   const cancelRef = useRef(false);
   const messagesRef = useRef<ChatMessage[]>(messages);
   const draftRef = useRef(draft);
+  const draftVersionRef = useRef(draftVersion);
   const stepRef = useRef(currentStep);
   const teamRef = useRef(isTeamConnected);
   const humanFileRequestOpenRef = useRef(humanFileRequestOpen);
@@ -221,12 +198,34 @@ export function WidgetOverlay({
 
   messagesRef.current = messages;
   draftRef.current = draft;
+  draftVersionRef.current = draftVersion;
   stepRef.current = currentStep;
   teamRef.current = isTeamConnected;
   sessionIdRef.current = sessionId;
   humanFileRequestOpenRef.current = humanFileRequestOpen;
   humanFileRequestNoteRef.current = humanFileRequestNote;
   humanScheduleRequestOpenRef.current = humanScheduleRequestOpen;
+
+  const applyCanonicalDraftState = useCallback((draftValues: Record<string, string>, nextDraftVersion: number) => {
+    const mergedDraft = {
+      ...createDefaultLeadDraft(),
+      ...draftValues
+    } as LeadDraft;
+
+    setDraft(mergedDraft);
+    setDraftVersion(nextDraftVersion);
+    setHasProjectIntent(detectProjectIntent(mergedDraft));
+    setBriefApproved(false);
+  }, []);
+
+  const hydrateCanonicalDraft = useCallback(async (activeSessionId: string) => {
+    const projectDraft = await fetchProjectDraft(activeSessionId);
+    if (!projectDraft) {
+      return;
+    }
+
+    applyCanonicalDraftState(projectDraft.draft, projectDraft.draftVersion);
+  }, [applyCanonicalDraftState]);
 
   const pollTeamMessages = useCallback(async () => {
     if (isPollingRef.current) return;
@@ -510,13 +509,18 @@ export function WidgetOverlay({
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (sessionIdRef.current) return sessionIdRef.current;
-    if (typeof window === 'undefined') return null;
+    if (typeof window === 'undefined' || !noticeConsent) return null;
 
     const sourceUrl = window.location.href;
     const referrer = document.referrer || undefined;
 
     try {
-      const session = await createSession({ sourceUrl, referrer });
+      const session = await createSession({
+        sourceUrl,
+        referrer,
+        consentVersion: noticeConsent.consentVersion,
+        consentedAt: noticeConsent.consentedAt
+      });
 
       if (session?.sessionId) {
         if (session.persisted === false) {
@@ -526,8 +530,8 @@ export function WidgetOverlay({
         }
 
         setSessionId(session.sessionId);
+        setDraftVersion(0);
         sessionIdRef.current = session.sessionId;
-        writeStoredSessionId(session.sessionId);
         return session.sessionId;
       }
     } catch (error) {
@@ -535,50 +539,31 @@ export function WidgetOverlay({
     }
 
     return null;
-  }, []);
+  }, [noticeConsent]);
 
   const loadOrCreateSession = useCallback(async (): Promise<string | null> => {
     if (sessionIdRef.current) return sessionIdRef.current;
-    if (typeof window === 'undefined') return null;
+    if (typeof window === 'undefined' || !noticeConsent) return null;
 
-    const stored = readStoredSessionId();
-    if (stored) {
-      try {
-        const valid = await verifySession(stored);
-        if (valid) {
-          setSessionId(stored);
-          sessionIdRef.current = stored;
-          return stored;
-        }
-      } catch {
-        // fall through to creation
-      }
-      clearStoredSessionId();
+    const currentSession = await getCurrentSession();
+    if (currentSession?.sessionId) {
+      setSessionId(currentSession.sessionId);
+      sessionIdRef.current = currentSession.sessionId;
+      await hydrateCanonicalDraft(currentSession.sessionId);
+      return currentSession.sessionId;
     }
 
     return ensureSession();
-  }, [ensureSession]);
+  }, [ensureSession, hydrateCanonicalDraft, noticeConsent]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (sessionIdRef.current) return;
-    loadOrCreateSession().catch(() => undefined);
-  }, [loadOrCreateSession]);
-
-const startConversation = useCallback(async () => {
-    if (hasStarted) return;
+  const startConversation = useCallback(async () => {
+    if (hasStarted || isTeamConnected || !noticeConsent) return;
     setHasStarted(true);
     cancelRef.current = false;
 
+    await loadOrCreateSession();
     await advanceStep('intro', createDefaultLeadDraft());
-  }, [hasStarted, advanceStep]);
-
-  useEffect(() => {
-    if (isOpen && !hasStarted) {
-      const t = setTimeout(() => startConversation(), 400);
-      return () => clearTimeout(t);
-    }
-  }, [isOpen, hasStarted, startConversation]);
+  }, [advanceStep, hasStarted, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
   function handleClose() {
     if (sessionIdRef.current) {
@@ -614,7 +599,6 @@ const startConversation = useCallback(async () => {
   }
 
   function handleReset() {
-    clearStoredSessionId();
     setSessionId(null);
     sessionIdRef.current = null;
     cancelRef.current = true;
@@ -634,6 +618,7 @@ const startConversation = useCallback(async () => {
     messagesRef.current = [];
     setMessages([]);
     setDraft(createDefaultLeadDraft());
+    setDraftVersion(0);
     setHasProjectIntent(false);
     setBriefApproved(false);
     setCurrentStep('intro');
@@ -648,13 +633,10 @@ const startConversation = useCallback(async () => {
     setReferenceFiles([]);
     setAttachmentOpen(false);
     setView('chat');
+    setCalendlyUrl(null);
     setAllowAttachment(false);
     approveInFlightRef.current = false;
     cancelRef.current = false;
-    resetTimerRef.current = setTimeout(() => {
-      resetTimerRef.current = null;
-      startConversation();
-    }, 200);
   }
 
   async function handleLLMResponse(history: ChatMessage[]) {
@@ -662,10 +644,10 @@ const startConversation = useCallback(async () => {
 
     try {
       const llmMessages = history
-        .filter((message) => message.text.trim().length > 0)
+        .filter((message) => message.sender === 'user' && message.text.trim().length > 0)
         .slice(-6)
         .map((message) => ({
-          role: message.sender === 'user' ? 'user' : 'assistant',
+          role: 'user' as const,
           content: message.text
         }));
 
@@ -679,7 +661,6 @@ const startConversation = useCallback(async () => {
           context: {
             step: stepRef.current,
             isTeamConnected: teamRef.current,
-            draft: JSON.stringify(draftRef.current),
             sessionId: sessionIdRef.current ?? undefined,
             capturedFields
           }
@@ -749,12 +730,12 @@ const startConversation = useCallback(async () => {
   }
 
   async function handleTeamConnect() {
-    if (isTeamConnected) return;
+    if (isTeamConnected || !noticeConsent) return;
     setIsTeamConnected(true);
     setHumanStatus('connected');
     setCurrentStep('free-chat');
 
-    await ensureSession();
+    await loadOrCreateSession();
     if (sessionIdRef.current) {
       void logEvent({ sessionId: sessionIdRef.current, eventName: 'human_handoff' });
     }
@@ -793,6 +774,35 @@ const startConversation = useCallback(async () => {
     if (nextStep !== currentStep) {
       setCurrentStep(nextStep);
     }
+
+    const activeSessionId = sessionIdRef.current;
+    if (!activeSessionId) {
+      return;
+    }
+
+    const provenance = value.trim().length > 0 ? 'confirmed' : 'cleared';
+    void updateProjectDraft(
+      activeSessionId,
+      [{ field: key, value, provenance }],
+      draftVersionRef.current
+    ).then(async (result) => {
+      if (!result) {
+        return;
+      }
+
+      if (result.ok) {
+        applyCanonicalDraftState(result.draft, result.draftVersion);
+        return;
+      }
+
+      if (result.conflict) {
+        applyCanonicalDraftState(result.draft, result.draftVersion);
+        await botSay('This brief changed elsewhere, so I reloaded the latest saved version before applying more edits.');
+        return;
+      }
+
+      await botSay('Sorry — I could not save that brief edit. Please try again.');
+    });
   }
 
   async function appendReferenceLink(link: ReferenceLink) {
@@ -844,7 +854,7 @@ const startConversation = useCallback(async () => {
       } as const;
 
       const finalizeResponse = await finalizeLead(payload);
-      if (!finalizeResponse || !finalizeResponse.ok) {
+      if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
         approveInFlightRef.current = false;
         setTelegramBroadcastStatus('unconfigured');
         await botSay('Sorry — the brief could not be saved. Please try again or contact the team directly.');
@@ -982,7 +992,15 @@ const startConversation = useCallback(async () => {
       const memoryResetPattern = /forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i;
       if (!isTeamConnected && memoryResetPattern.test(trimmed)) {
         appendUserMessage(trimmed);
-        await botSay("I've cleared my memory of this project. We can start fresh.");
+        const activeSessionId = sessionIdRef.current ?? await loadOrCreateSession();
+        const cleared = activeSessionId ? await resetProject(activeSessionId) : false;
+
+        if (!cleared) {
+          await botSay("Sorry — I couldn't clear the saved project yet. You can keep editing it here or request deletion from the team.");
+          return;
+        }
+
+        await botSay("I've cleared the saved project for this session. We can start fresh.");
         if (resetTimerRef.current) {
           clearTimeout(resetTimerRef.current);
         }
@@ -990,6 +1008,21 @@ const startConversation = useCallback(async () => {
           resetTimerRef.current = null;
           handleReset();
         }, 200);
+        return;
+      }
+
+      const deletionPattern = /delete.*(this )?(project|data)|erase.*(this )?(project|data)|remove.*my.*data/i;
+      if (!isTeamConnected && deletionPattern.test(trimmed)) {
+        appendUserMessage(trimmed);
+        const activeSessionId = sessionIdRef.current ?? await loadOrCreateSession();
+        const deletionResult = activeSessionId ? await requestProjectDeletion(activeSessionId) : { ok: false };
+
+        if (!deletionResult.ok) {
+          await botSay("Sorry — I couldn't submit the deletion request right now. Please try again or ask the team directly.");
+          return;
+        }
+
+        await botSay(deletionResult.message ?? 'We recorded your deletion request.');
         return;
       }
 
@@ -1138,6 +1171,17 @@ const startConversation = useCallback(async () => {
       const id = sessionIdRef.current;
       if (!id) return;
 
+      const confirmed =
+        typeof window === 'undefined'
+          ? true
+          : window.confirm('These files will be shared directly with the Balance team. Continue?');
+      if (!confirmed) {
+        e.target.value = '';
+        return;
+      }
+
+      const uploadConsent = createAttachmentConsent(false, true);
+
       const nextMessages = [...messagesRef.current];
       for (const file of files) {
         nextMessages.push({
@@ -1153,7 +1197,7 @@ const startConversation = useCallback(async () => {
       setTeamWaitingForReply(true);
       setHumanStatus('delivered');
 
-      const uploadResult = await uploadRequestedFiles(id, files);
+      const uploadResult = await uploadRequestedFiles(id, files, uploadConsent);
       if (!uploadResult.ok) {
         setTeamWaitingForReply(false);
         setHumanStatus('connected');
@@ -1195,7 +1239,10 @@ const startConversation = useCallback(async () => {
     e.target.value = '';
   }
 
-  const showAttachmentButton = isTeamConnected ? humanFileRequestOpen : allowAttachment;
+  const canInteract = hasStarted || isTeamConnected;
+  const showNoticeGate = !noticeConsent;
+  const showStartChoices = noticeConsent !== null && !canInteract && messages.length === 0;
+  const showAttachmentButton = canInteract && (isTeamConnected ? humanFileRequestOpen : allowAttachment);
 
   return (
     <div
@@ -1235,13 +1282,11 @@ const startConversation = useCallback(async () => {
               url={calendlyUrl}
               onBack={() => setView('chat')}
               onScheduled={async () => {
-                if (sessionIdRef.current) {
-                  await notifyScheduleCompleted(sessionIdRef.current);
-                }
-                setHumanScheduleRequestOpen(false);
-                setHumanStatus('delivered');
+                setHumanStatus('connected');
                 setView('chat');
-                await botSay('Your booking has been sent to the Balance team. They have been notified automatically.');
+                await botSay(
+                  "Your booking looks complete. We're still verifying that the Balance team received it."
+                );
               }}
             />
           )}
@@ -1352,200 +1397,266 @@ const startConversation = useCallback(async () => {
             )}
 
             {!(isMobile && tabMode !== 'chat') && (
-            <div
-              id={isMobile ? 'widget-chat-panel' : undefined}
-              role={isMobile ? 'tabpanel' : undefined}
-              aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                padding: '16px 14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px',
-                minWidth: 0,
-                maxWidth: '100%',
-                position: 'relative'
-              }}
-            >
-              {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} onInlineCardClick={handleInlineCardClick} />
-              ))}
+              <div
+                id={isMobile ? 'widget-chat-panel' : undefined}
+                role={isMobile ? 'tabpanel' : undefined}
+                aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
+                style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  padding: '16px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px',
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  position: 'relative'
+                }}
+              >
+                {showNoticeGate ? (
+                  <DataUseNotice onConsent={setNoticeConsent} />
+                ) : showStartChoices ? (
+                  <div
+                    data-testid="widget-start-options"
+                    style={{
+                      display: 'grid',
+                      gap: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: `1px solid ${brandTokens.colors.subtleBorder}`,
+                      background: 'rgba(255, 255, 255, 0.03)'
+                    }}
+                  >
+                    <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.mutedText }}>
+                      Choose how you want to continue. Start with Balance Assist for an AI-led brief, or go straight to the team.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void startConversation();
+                      }}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 999,
+                        border: 'none',
+                        background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
+                        color: brandTokens.colors.baseBlack,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.12em'
+                      }}
+                    >
+                      Start with Balance Assist
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleTeamConnect();
+                      }}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 999,
+                        border: `1px solid ${brandTokens.colors.border}`,
+                        background: 'transparent',
+                        color: brandTokens.colors.lightText,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.12em'
+                      }}
+                    >
+                      Talk to a human
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {messages.map((msg) => (
+                      <MessageBubble key={msg.id} message={msg} onInlineCardClick={handleInlineCardClick} />
+                    ))}
 
-              {isTyping && (
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                  <BotAvatarSmall />
-                  <TypingDots />
-                </div>
-              )}
+                    {isTyping && (
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                        <BotAvatarSmall />
+                        <TypingDots />
+                      </div>
+                    )}
 
-              {!isTyping && isTeamConnected && teamWaitingForReply && <TeamTypingIndicator />}
+                    {!isTyping && isTeamConnected && teamWaitingForReply && <TeamTypingIndicator />}
 
-              {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
+                    {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
+                  </>
+                )}
 
-              <div ref={messagesEndRef} />
-            </div>
+                <div ref={messagesEndRef} />
+              </div>
             )}
           </div>
 
           {/* Input Bar */}
-          {isTeamConnected && humanFileRequestOpen && <FileRequestInputHint />}
-          {showAttachmentButton && (
-            <div
-              style={{
-                padding: '6px 12px 0',
-                background: 'rgba(16, 16, 16, 0.4)',
-                textAlign: 'right',
-                flexShrink: 0
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowUploadPolicy(true)}
+          {canInteract && (
+            <>
+              {isTeamConnected && humanFileRequestOpen && <FileRequestInputHint />}
+              {showAttachmentButton && (
+                <div
+                  style={{
+                    padding: '6px 12px 0',
+                    background: 'rgba(16, 16, 16, 0.4)',
+                    textAlign: 'right',
+                    flexShrink: 0
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowUploadPolicy(true)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: brandTokens.colors.mutedText,
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: '2px'
+                    }}
+                  >
+                    Accepted file types
+                  </button>
+                </div>
+              )}
+              <div
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  color: brandTokens.colors.mutedText,
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  textUnderlineOffset: '2px'
+                  padding: '10px 12px',
+                  borderTop: `1px solid ${brandTokens.colors.subtleBorder}`,
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  background: 'rgba(16, 16, 16, 0.4)',
+                  position: 'relative'
                 }}
               >
-                Accepted file types
-              </button>
-            </div>
-          )}
-          <div
-            style={{
-              padding: '10px 12px',
-              borderTop: `1px solid ${brandTokens.colors.subtleBorder}`,
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              background: 'rgba(16, 16, 16, 0.4)',
-              position: 'relative'
-            }}
-          >
-            {!isTeamConnected && (
-              <>
+                {!isTeamConnected && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Attach references"
+                      aria-expanded={attachmentOpen}
+                      onClick={() => setAttachmentOpen((o) => !o)}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        border: `1px solid ${brandTokens.colors.border}`,
+                        background: attachmentOpen ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        flexShrink: 0
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                    {attachmentOpen && (
+                      <div
+                        data-testid="attachment-popover"
+                        style={{
+                          position: 'absolute',
+                          left: 12,
+                          right: 12,
+                          bottom: 'calc(100% + 6px)',
+                          padding: 12,
+                          borderRadius: 12,
+                          border: `1px solid ${brandTokens.colors.border}`,
+                          background: brandTokens.gradients.panel,
+                          boxShadow: '0 -10px 30px rgba(0,0,0,0.45)',
+                          zIndex: 100
+                        }}
+                      >
+                        <AttachmentDropzone
+                          onAddLink={appendReferenceLink}
+                          onAddFile={appendReferenceFile}
+                          onFileAnalyzed={handleFileAnalyzed}
+                          sessionId={sessionId}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+                {showAttachmentButton && (
+                  <label
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      border: `1px solid ${brandTokens.colors.border}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      flexShrink: 0
+                    }}
+                  >
+                    <input type="file" multiple accept={UPLOAD_ACCEPT_ATTRIBUTE} onChange={handleFileSelect} style={{ display: 'none' }} />
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </label>
+                )}
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={isTeamConnected ? 'Message the team...' : 'Type your message...'}
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    borderRadius: '20px',
+                    border: `1px solid ${brandTokens.colors.subtleBorder}`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                    color: brandTokens.colors.lightText,
+                    fontFamily: brandTokens.typography.ui,
+                    fontSize: '13px',
+                    outline: 'none'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = brandTokens.colors.warmGold)}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = brandTokens.colors.subtleBorder)}
+                />
                 <button
-                  type="button"
-                  aria-label="Attach references"
-                  aria-expanded={attachmentOpen}
-                  onClick={() => setAttachmentOpen((o) => !o)}
+                  onClick={handleSubmitText}
+                  disabled={!inputValue.trim() || isTyping}
                   style={{
                     width: '36px',
                     height: '36px',
                     borderRadius: '50%',
-                    border: `1px solid ${brandTokens.colors.border}`,
-                    background: attachmentOpen ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
+                    border: 'none',
+                    background:
+                      inputValue.trim() && !isTyping
+                        ? `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`
+                        : 'rgba(255, 255, 255, 0.08)',
+                    cursor: inputValue.trim() && !isTyping ? 'pointer' : 'default',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    cursor: 'pointer',
                     flexShrink: 0
                   }}
+                  aria-label="Send message"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke={inputValue.trim() && !isTyping ? '#101010' : brandTokens.colors.mutedText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </button>
-                {attachmentOpen && (
-                  <div
-                    data-testid="attachment-popover"
-                    style={{
-                      position: 'absolute',
-                      left: 12,
-                      right: 12,
-                      bottom: 'calc(100% + 6px)',
-                      padding: 12,
-                      borderRadius: 12,
-                      border: `1px solid ${brandTokens.colors.border}`,
-                      background: brandTokens.gradients.panel,
-                      boxShadow: '0 -10px 30px rgba(0,0,0,0.45)',
-                      zIndex: 100
-                    }}
-                  >
-                    <AttachmentDropzone
-                      onAddLink={appendReferenceLink}
-                      onAddFile={appendReferenceFile}
-                      onFileAnalyzed={handleFileAnalyzed}
-                      sessionId={sessionId}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-            {showAttachmentButton && (
-              <label
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  border: `1px solid ${brandTokens.colors.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  flexShrink: 0
-                }}
-              >
-                <input type="file" multiple accept={UPLOAD_ACCEPT_ATTRIBUTE} onChange={handleFileSelect} style={{ display: 'none' }} />
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </label>
-            )}
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={isTeamConnected ? 'Message the team...' : 'Type your message...'}
-              style={{
-                flex: 1,
-                padding: '10px 14px',
-                borderRadius: '20px',
-                border: `1px solid ${brandTokens.colors.subtleBorder}`,
-                backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                color: brandTokens.colors.lightText,
-                fontFamily: brandTokens.typography.ui,
-                fontSize: '13px',
-                outline: 'none'
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = brandTokens.colors.warmGold)}
-              onBlur={(e) => (e.currentTarget.style.borderColor = brandTokens.colors.subtleBorder)}
-            />
-            <button
-              onClick={handleSubmitText}
-              disabled={!inputValue.trim() || isTyping}
-              style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: 'none',
-                background:
-                  inputValue.trim() && !isTyping
-                    ? `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`
-                    : 'rgba(255, 255, 255, 0.08)',
-                cursor: inputValue.trim() && !isTyping ? 'pointer' : 'default',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0
-              }}
-              aria-label="Send message"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke={inputValue.trim() && !isTyping ? '#101010' : brandTokens.colors.mutedText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </div>
+              </div>
 
-          <HumanFooter isTeamConnected={isTeamConnected} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+              <HumanFooter isTeamConnected={isTeamConnected} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+            </>
+          )}
         </div>
       )}
 

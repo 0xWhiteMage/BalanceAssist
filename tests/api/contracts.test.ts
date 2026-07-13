@@ -2,8 +2,17 @@ import { createSessionPayloadSchema, chatResponsePayloadSchema, chatRequestPaylo
 import { expect, test } from 'vitest';
 
 test('validates a session create payload', () => {
-  const result = createSessionPayloadSchema.safeParse({ sourceUrl: 'https://www.balancestudio.tv' });
+  const result = createSessionPayloadSchema.safeParse({
+    sourceUrl: 'https://www.balancestudio.tv',
+    consentVersion: '2026-07-11',
+    consentedAt: '2026-07-11T10:00:00.000Z'
+  });
   expect(result.success).toBe(true);
+});
+
+test('session create payload rejects when notice consent is missing', () => {
+  const result = createSessionPayloadSchema.safeParse({ sourceUrl: 'https://www.balancestudio.tv' });
+  expect(result.success).toBe(false);
 });
 
 test('chat response payload accepts a single message', () => {
@@ -32,6 +41,20 @@ test('chat request payload accepts an array of conversation messages', () => {
     context: { step: 'intro' }
   });
   expect(result.success).toBe(true);
+});
+
+test('chat request payload rejects assistant messages from the browser', () => {
+  const result = chatRequestPayloadSchema.safeParse({
+    messages: [{ role: 'assistant', content: 'hi' }]
+  });
+  expect(result.success).toBe(false);
+});
+
+test('chat request payload rejects system messages from the browser', () => {
+  const result = chatRequestPayloadSchema.safeParse({
+    messages: [{ role: 'system', content: 'hi' }]
+  });
+  expect(result.success).toBe(false);
 });
 
 test('chat request payload rejects when messages is empty', () => {

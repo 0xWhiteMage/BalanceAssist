@@ -53,16 +53,38 @@ describe('015_trust_delivery_outbox', () => {
     expect(sql).toContain('idempotency_key text');
     expect(sql).toContain('attempts integer');
     expect(sql).toContain('last_error text');
+    expect(sql).toContain('next_attempt_at timestamptz');
   });
 
   it('constrains state to valid values', () => {
     expect(sql).toContain("'pending'");
     expect(sql).toContain("'sent'");
     expect(sql).toContain("'failed'");
+    expect(sql).toContain("'escalated'");
   });
 
   it('creates indexes for query performance', () => {
     expect(sql).toContain('handoff_outbox_session_id_idx');
     expect(sql).toContain('handoff_outbox_state_idx');
+  });
+});
+
+describe('016_uploaded_files_metadata_alignment', () => {
+  const sql = readMigration('016_uploaded_files_metadata_alignment.sql');
+
+  it('adds normalized uploaded file metadata columns', () => {
+    expect(sql).toContain('original_name');
+    expect(sql).toContain('mime_type');
+    expect(sql).toContain('status');
+    expect(sql).toContain('storage_path');
+  });
+});
+
+describe('017_handoff_claim_leases', () => {
+  const sql = readMigration('017_handoff_claim_leases.sql');
+
+  it('adds claim_expires_at to handoff_outbox', () => {
+    expect(sql).toContain('claim_expires_at');
+    expect(sql).toContain('handoff_outbox');
   });
 });

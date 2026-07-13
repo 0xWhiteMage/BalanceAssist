@@ -53,4 +53,17 @@ describe('CalendlyEmbed', () => {
     screen.getByRole('button', { name: /back to chat/i }).click();
     expect(onBack).toHaveBeenCalledOnce();
   });
+
+  test('ignores calendly scheduled events from an unexpected message source', () => {
+    const onScheduled = vi.fn();
+    render(<CalendlyEmbed url={TEST_URL} onBack={() => {}} onScheduled={onScheduled} />);
+
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: 'https://calendly.com',
+      data: { event: 'calendly.event_scheduled' },
+      source: window
+    }));
+
+    expect(onScheduled).not.toHaveBeenCalled();
+  });
 });

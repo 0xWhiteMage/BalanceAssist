@@ -1,12 +1,17 @@
 import { finalizeLeadPayloadSchema } from '@/lib/api/contracts';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
-import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
+import { requireSession } from '@/lib/api/require-session';
+import { getVisibleDraftValues, normalizeVersionedDraft, updateField } from '@/lib/conversation/draft-versioning';
+import { createLogger, extractRequestId } from '@/lib/logger';
+import { emitEvent } from '@/lib/observability/events';
 import { ensureTelegramTopic } from '@/lib/telegram';
-import { buildTopicName, TOPIC_STATUS_COLOR, topicStatusFromQualification } from '@/lib/conversation/topic-status';
 import { enqueueHandoff, type HandoffOutcome } from '@/lib/handoff/outbox';
+import { routeLead } from '@/lib/handoff/routing';
+import { buildHandoffPacket } from '@/lib/handoff/packet';
+import { getRecordedAttachmentConsent } from '@/lib/uploads/consent';
 
-export async function OPTIONS() {
-  return corsOptionsResponse();
+export async function OPTIONS(request: Request) {
+  return corsOptionsResponse(request);
 }
 
 function hasSubstance(
@@ -37,130 +42,230 @@ function hasSubstance(
 
 export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, finalizeLeadPayloadSchema);
+  const requestId = extractRequestId(request);
+  const logger = createLogger('leads-finalize', requestId);
 
   if (!parsed.ok) {
     return parsed.response;
   }
 
-  const { sessionId, qualificationStatus, score, recommendedNextStep, leadDraft } = parsed.data;
+  const { sessionId, qualificationStatus, score, recommendedNextStep } = parsed.data;
+  const authResult = await requireSession(request, sessionId);
 
-  if (!hasSubstance(leadDraft)) {
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
+  const { supabase } = authResult;
+
+  const { data: sessionRow, error: sessionError } = await supabase
+    .from('sessions')
+    .select('draft, draft_version, telegram_thread_id, contact_name, contact_company')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  if (sessionError) {
+    return jsonWithCors({ ok: false, error: sessionError.message }, { status: 500 }, request);
+  }
+
+  if (!sessionRow) {
+    return jsonWithCors({ ok: false, error: 'Session not found' }, { status: 404 }, request);
+  }
+
+  const row = sessionRow as {
+    draft?: unknown;
+    draft_version?: number | null;
+    telegram_thread_id?: number | null;
+    contact_name?: string | null;
+    contact_company?: string | null;
+  };
+
+  const versionedDraft = normalizeVersionedDraft(row.draft);
+  const visibleDraft = getVisibleDraftValues(versionedDraft);
+
+  if (!hasSubstance(visibleDraft)) {
+    emitEvent('lead_skipped', { sessionId, reason: 'no_substance' }, requestId);
     return jsonWithCors({
       ok: true,
       sessionId,
       qualificationStatus,
       persisted: false,
-      reason: 'No contact + project detail; skipped to keep the database clean.'
-    });
+      reason: 'No contact + project detail in canonical draft; skipped to keep the database clean.'
+    }, undefined, request);
   }
 
-  if (!hasSupabaseServerConfig()) {
+  const draftWithConsent = updateField(versionedDraft, 'consentToShare', 'true', 'confirmed');
+  const nextVersion = (row.draft_version ?? 0) + 1;
+  const attachmentConsent = getRecordedAttachmentConsent(draftWithConsent);
+
+  const { error: draftUpdateError } = await supabase
+    .from('sessions')
+    .update({ draft: draftWithConsent, draft_version: nextVersion })
+    .eq('id', sessionId);
+
+  if (draftUpdateError) {
     return jsonWithCors({
-      ok: true,
+      ok: false,
       sessionId,
       qualificationStatus,
       persisted: false,
-      reason: 'Supabase not configured.'
-    });
+      error: draftUpdateError.message
+    }, { status: 500 }, request);
   }
 
-  const supabase = createServerSupabaseClient();
-  if (!supabase) {
-    return jsonWithCors({
-      ok: true,
-      sessionId,
-      qualificationStatus,
-      persisted: false,
-      reason: 'Supabase client failed.'
-    });
-  }
+  const canonicalDraft = {
+    service: visibleDraft.service || undefined,
+    projectType: visibleDraft.projectType || undefined,
+    projectScope: visibleDraft.projectScope || undefined,
+    scopePolished: visibleDraft.scopePolished || undefined,
+    timelineBand: visibleDraft.timelineBand || undefined,
+    budgetBand: visibleDraft.budgetBand || undefined,
+    contactName: visibleDraft.contactName || undefined,
+    contactEmail: visibleDraft.contactEmail || undefined,
+    contactCompany: visibleDraft.contactCompany || undefined,
+  };
 
   const { error } = await supabase.from('leads').insert({
     session_id: sessionId,
     qualification_status: qualificationStatus,
     score: score ?? null,
     recommended_next_step: recommendedNextStep ?? null,
-    lead_draft: leadDraft ?? null,
-    contact_name: leadDraft?.contactName ?? null,
-    contact_email: leadDraft?.contactEmail ?? null
+    lead_draft: canonicalDraft,
+    contact_name: canonicalDraft.contactName ?? null,
+    contact_email: canonicalDraft.contactEmail ?? null
   });
 
   if (error) {
-    console.error('[leads-finalize] Failed to insert lead', { sessionId, error });
+    logger.error('Failed to insert lead', { sessionId, error: error.message });
     return jsonWithCors({
-      ok: true,
+      ok: false,
       sessionId,
       qualificationStatus,
       persisted: false,
-      reason: error.message
-    });
+      error: error.message
+    }, { status: 500 }, request);
   }
 
-  await supabase
+  emitEvent('lead_persisted', { sessionId, qualificationStatus, score: score ?? 0 }, requestId);
+
+  const { error: statusUpdateError } = await supabase
     .from('sessions')
     .update({ status: qualificationStatus === 'qualified' ? 'completed' : 'escalated' })
     .eq('id', sessionId);
 
+  if (statusUpdateError) {
+    return jsonWithCors({
+      ok: false,
+      sessionId,
+      qualificationStatus,
+      persisted: true,
+      error: statusUpdateError.message
+    }, { status: 500 }, request);
+  }
+
   let handoffOutcome: HandoffOutcome = { persisted: true, queued: false, delivered: false, retryable: false };
   const shortId = sessionId.slice(0, 8);
+  const snap = sessionRow as {
+    telegram_thread_id?: number | null;
+    contact_name?: string | null;
+    contact_company?: string | null;
+  };
 
   try {
-    const { data: sessionRow } = await supabase
-      .from('sessions')
-      .select('telegram_thread_id, contact_name, contact_company')
-      .eq('id', sessionId)
-      .maybeSingle();
+    const routing = routeLead(
+      {
+        service: canonicalDraft.service || '',
+        projectScope: canonicalDraft.projectScope || '',
+        timelineBand: canonicalDraft.timelineBand || '',
+        budgetBand: canonicalDraft.budgetBand || '',
+        contactName: canonicalDraft.contactName || '',
+        contactEmail: canonicalDraft.contactEmail || '',
+        qualificationStatus,
+        score: score ?? 0,
+      },
+      sessionId
+    );
 
-    const snap = sessionRow as {
-      telegram_thread_id?: number | null;
-      contact_name?: string | null;
-      contact_company?: string | null;
-    } | null;
+    const linkRows = attachmentConsent.producerShare
+      ? (await supabase
+          .from('reference_links')
+          .select('url, kind')
+          .eq('session_id', sessionId)).data
+      : [];
 
-    const threadId = snap?.telegram_thread_id
+    const fileRows = attachmentConsent.producerShare
+      ? (await supabase
+          .from('uploaded_files')
+          .select('name, original_name, status, mime, mime_type')
+          .eq('session_id', sessionId)).data
+      : [];
+
+    const packet = buildHandoffPacket({
+      sessionId,
+      caseId: routing.caseId,
+      routingDestination: routing.destination,
+      routingReasons: routing.reasons,
+      qualificationStatus,
+      score: score ?? 0,
+      draft: {
+        service: canonicalDraft.service,
+        projectType: canonicalDraft.projectType,
+        projectScope: canonicalDraft.projectScope,
+        timelineBand: canonicalDraft.timelineBand,
+        budgetBand: canonicalDraft.budgetBand,
+        contactName: canonicalDraft.contactName,
+        contactEmail: canonicalDraft.contactEmail,
+        contactCompany: canonicalDraft.contactCompany,
+      },
+      attachments: ((fileRows ?? []) as Array<{ name?: string; original_name?: string; status?: string; mime?: string; mime_type?: string }>).map(
+        (f) => ({
+          originalName: f.original_name ?? f.name ?? '',
+          status: f.status ?? 'unknown',
+          mimeType: f.mime_type ?? f.mime
+        })
+      ),
+      links: ((linkRows ?? []) as Array<{ url?: string; kind?: string }>).map(
+        (l) => ({ url: l.url ?? '', kind: l.kind })
+      ),
+      consentScope: {
+        aiAnalysis: attachmentConsent.aiAnalysis,
+        producerShare: draftWithConsent.consentToShare?.value === 'true'
+      },
+    });
+
+    const threadId = snap.telegram_thread_id
       ? snap.telegram_thread_id
       : await ensureTelegramTopic(
           supabase,
           sessionId,
-          snap?.contact_name ?? leadDraft?.contactName ?? null,
-          snap?.contact_company ?? leadDraft?.contactCompany ?? null,
-          shortId
+          snap.contact_name ?? canonicalDraft.contactName ?? null,
+          snap.contact_company ?? canonicalDraft.contactCompany ?? null,
+          shortId,
+          routing.caseId
         );
 
-    if (threadId && snap) {
-      const referenceLinks = Array.isArray(leadDraft?.referenceLinks) ? leadDraft.referenceLinks : [];
-      const referenceFiles = Array.isArray(leadDraft?.referenceFiles) ? leadDraft.referenceFiles : [];
-      const linkLines = referenceLinks
-        .filter((value): value is { kind?: string; url?: string } => Boolean(value) && typeof value === 'object')
-        .map((link) => `• Link (${link.kind ?? 'other'}): ${link.url ?? ''}`);
-      const fileLines = referenceFiles
-        .filter((value): value is { name?: string } => Boolean(value) && typeof value === 'object')
-        .map((file) => `• File: ${file.name ?? ''}`);
-
-      const summaryLines = [
-        `Project type: ${leadDraft?.projectType || leadDraft?.service || 'n/a'}`,
-        `Scope: ${leadDraft?.projectScope || 'n/a'}`,
-        `Timeline: ${leadDraft?.timelineBand || 'n/a'}`,
-        `Budget: ${leadDraft?.budgetBand || 'n/a'}`,
-        `Contact: ${leadDraft?.contactName || 'n/a'} <${leadDraft?.contactEmail || ''}>`
-      ];
-      const messageParts = ['✅ Brief approved', '', ...summaryLines];
-      if (linkLines.length) {
-        messageParts.push('', 'Reference links:', ...linkLines);
-      }
-      if (fileLines.length) {
-        messageParts.push('', 'Reference files:', ...fileLines);
-      }
-
+    if (threadId) {
       handoffOutcome = await enqueueHandoff(supabase, {
         sessionId,
         type: 'approval',
-        summary: messageParts.join('\n'),
+        summary: packet.summaryText,
         threadId
       });
+
+      if (handoffOutcome.handoffId) {
+        emitEvent('handoff_enqueued', {
+          sessionId,
+          handoffId: handoffOutcome.handoffId,
+          caseId: routing.caseId,
+          routingDestination: routing.destination
+        }, requestId);
+      }
     }
   } catch (error) {
-    console.error('[leads-finalize] Telegram topic update failed', { sessionId, error });
+    logger.error('Telegram topic update failed', {
+      sessionId,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 
   return jsonWithCors({
@@ -172,5 +277,5 @@ export async function POST(request: Request) {
     delivered: handoffOutcome.delivered,
     retryable: handoffOutcome.retryable,
     handoffId: handoffOutcome.handoffId
-  });
+  }, undefined, request);
 }

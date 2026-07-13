@@ -1,169 +1,312 @@
 // @vitest-environment node
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-vi.mock('@/lib/supabase/server', () => ({
-  hasSupabaseServerConfig: vi.fn(() => false),
-  createServerSupabaseClient: vi.fn()
+const { requireSessionMock } = vi.hoisted(() => ({
+  requireSessionMock: vi.fn()
 }));
 
-import { POST } from '@/app/api/projects/[sessionId]/delete/route';
+vi.mock('@/lib/api/require-session', () => ({
+  requireSession: requireSessionMock,
+  SESSION_CAPABILITY_COOKIE_NAME: 'session_capability'
+}));
+
+import { GET as getDraft, PUT as putDraft } from '@/app/api/projects/[sessionId]/draft/route';
+import { POST as postDelete } from '@/app/api/projects/[sessionId]/delete/route';
+import { POST as postReset } from '@/app/api/projects/[sessionId]/reset/route';
+
+type SessionRow = {
+  id: string;
+  draft: Record<string, unknown>;
+  draft_version: number;
+  status?: string;
+};
+
+function createRouteSupabase(session: SessionRow) {
+  const state = { ...session };
+  const sessionUpdates: Array<Record<string, unknown>> = [];
+  const events: Array<Record<string, unknown>> = [];
+
+  const supabase = {
+    from(table: string) {
+      if (table === 'sessions') {
+        return {
+          select() {
+            return {
+              eq(column: string, value: string) {
+                expect(column).toBe('id');
+                expect(value).toBe(state.id);
+                return {
+                  maybeSingle: async () => ({ data: structuredClone(state), error: null })
+                };
+              }
+            };
+          },
+          update(payload: Record<string, unknown>) {
+            return {
+              eq(column: string, value: string) {
+                expect(column).toBe('id');
+                expect(value).toBe(state.id);
+                sessionUpdates.push(payload);
+                Object.assign(state, payload);
+                return Promise.resolve({ error: null });
+              }
+            };
+          }
+        };
+      }
+
+      if (table === 'events') {
+        return {
+          insert: async (payload: Record<string, unknown>) => {
+            events.push(payload);
+            return { error: null };
+          }
+        };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    }
+  };
+
+  return { supabase, sessionUpdates, events, state };
+}
+
+function authorizedSession(sessionId: string, supabase: unknown) {
+  return {
+    ok: true as const,
+    auth: { sessionId, capability: `${sessionId}.secret` },
+    supabase
+  };
+}
+
+async function callDraftGet(sessionId: string) {
+  const req = new Request(`http://localhost/api/projects/${sessionId}/draft`);
+  return getDraft(req, { params: Promise.resolve({ sessionId }) });
+}
+
+async function callDraftPut(sessionId: string, body: unknown) {
+  const req = new Request(`http://localhost/api/projects/${sessionId}/draft`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return putDraft(req, { params: Promise.resolve({ sessionId }) });
+}
 
 async function callDeleteRoute(sessionId: string) {
   const req = new Request(`http://localhost/api/projects/${sessionId}/delete`, {
     method: 'POST'
   });
-  return POST(req, { params: Promise.resolve({ sessionId }) });
+  return postDelete(req, { params: Promise.resolve({ sessionId }) });
 }
 
-describe('POST /api/projects/[sessionId]/delete', () => {
-  test('returns success with honest limitations message', async () => {
-    const res = await callDeleteRoute('test-session-123');
+async function callResetRoute(sessionId: string) {
+  const req = new Request(`http://localhost/api/projects/${sessionId}/reset`, {
+    method: 'POST'
+  });
+  return postReset(req, { params: Promise.resolve({ sessionId }) });
+}
+
+describe('draft route', () => {
+  beforeEach(() => {
+    requireSessionMock.mockReset();
+  });
+
+  test('GET returns the persisted canonical draft from the session row', async () => {
+    const harness = createRouteSupabase({
+      id: 'session-1',
+      draft: {
+        service: {
+          value: 'production',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      draft_version: 4
+    });
+
+    requireSessionMock.mockResolvedValue(authorizedSession('session-1', harness.supabase));
+
+    const res = await callDraftGet('session-1');
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.sessionId).toBe('session-1');
+    expect(data.fieldCount).toBe(1);
+    expect(data.draftVersion).toBe(4);
+    expect(data.draft).toEqual(harness.state.draft);
+  });
+
+  test('PUT persists merged draft state into sessions.draft and increments draft_version', async () => {
+    const harness = createRouteSupabase({
+      id: 'session-2',
+      draft: {
+        service: {
+          value: 'production',
+          provenance: 'user-stated',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      draft_version: 2
+    });
+
+    requireSessionMock.mockResolvedValue(authorizedSession('session-2', harness.supabase));
+
+    const res = await callDraftPut('session-2', {
+      fields: [
+        { field: 'contactName', value: 'Jayden', provenance: 'confirmed' },
+        { field: 'service', value: '', provenance: 'cleared' }
+      ]
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(harness.sessionUpdates).toHaveLength(1);
+    expect(harness.sessionUpdates[0]).toMatchObject({
+      draft_version: 3,
+      draft: {
+        service: {
+          value: '',
+          provenance: 'cleared'
+        },
+        contactName: {
+          value: 'Jayden',
+          provenance: 'confirmed'
+        }
+      }
+    });
+    expect(data.draftVersion).toBe(3);
+    expect(data.draft.contactName.value).toBe('Jayden');
+    expect(data.draft.service.provenance).toBe('cleared');
+  });
+
+  test('PUT rejects stale draft updates when the expected version does not match', async () => {
+    const harness = createRouteSupabase({
+      id: 'session-stale',
+      draft: {
+        contactName: {
+          value: 'Current',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      draft_version: 4
+    });
+
+    requireSessionMock.mockResolvedValue(authorizedSession('session-stale', harness.supabase));
+
+    const res = await callDraftPut('session-stale', {
+      expectedDraftVersion: 3,
+      fields: [{ field: 'contactName', value: 'Stale write', provenance: 'confirmed' }]
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.error).toMatch(/stale|version/i);
+    expect(data.draftVersion).toBe(4);
+    expect(harness.sessionUpdates).toHaveLength(0);
+  });
+
+  test('rejects access to a different authenticated session', async () => {
+    const harness = createRouteSupabase({
+      id: 'session-3',
+      draft: {},
+      draft_version: 0
+    });
+
+    requireSessionMock.mockResolvedValue(authorizedSession('another-session', harness.supabase));
+
+    const res = await callDraftPut('session-3', {
+      fields: [{ field: 'service', value: 'production', provenance: 'user-stated' }]
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.error).toMatch(/session/i);
+    expect(harness.sessionUpdates).toHaveLength(0);
+  });
+});
+
+describe('delete route', () => {
+  beforeEach(() => {
+    requireSessionMock.mockReset();
+  });
+
+  test('records a durable deletion request and returns an honest status message', async () => {
+    const harness = createRouteSupabase({
+      id: 'session-4',
+      draft: {},
+      draft_version: 0,
+      status: 'open'
+    });
+
+    requireSessionMock.mockResolvedValue(authorizedSession('session-4', harness.supabase));
+
+    const res = await callDeleteRoute('session-4');
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
-    expect(data.sessionId).toBe('test-session-123');
-    expect(data.message).toBe(
-      'Your project data has been deleted from our active system. Note: Telegram messages and backup copies may be retained per our data retention policy.'
-    );
+    expect(data.sessionId).toBe('session-4');
+    expect(data.deleted).toBe(false);
+    expect(data.status).toBe('requested');
+    expect(data.message).toMatch(/recorded your deletion request/i);
+    expect(data.message).not.toMatch(/has been deleted/i);
     expect(data.requestedAt).toBeTruthy();
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]).toMatchObject({
+      session_id: 'session-4',
+      event_name: 'deletion_requested'
+    });
   });
 
-  test('returns 400 for invalid session ID', async () => {
-    const res = await callDeleteRoute('');
+  test('rejects deletion requests for a different authenticated session', async () => {
+    const harness = createRouteSupabase({
+      id: 'session-5',
+      draft: {},
+      draft_version: 0
+    });
+
+    requireSessionMock.mockResolvedValue(authorizedSession('other-session', harness.supabase));
+
+    const res = await callDeleteRoute('session-5');
     const data = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(data.error).toBe('Invalid session ID');
+    expect(res.status).toBe(403);
+    expect(data.error).toMatch(/session/i);
+    expect(harness.events).toHaveLength(0);
   });
 
-  test('includes requestedAt timestamp', async () => {
-    const before = Date.now();
-    const res = await callDeleteRoute('session-ts-test');
-    const data = await res.json();
-    const after = Date.now();
+  test('reset clears canonical draft state and revokes the session capability', async () => {
+    const harness = createRouteSupabase({
+      id: 'session-6',
+      draft: {
+        service: {
+          value: 'production',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      draft_version: 2,
+      status: 'completed'
+    });
 
-    expect(data.requestedAt).toBeTruthy();
-    const ts = new Date(data.requestedAt).getTime();
-    expect(ts).toBeGreaterThanOrEqual(before);
-    expect(ts).toBeLessThanOrEqual(after);
-  });
+    requireSessionMock.mockResolvedValue(authorizedSession('session-6', harness.supabase));
 
-  test('logs the deletion request', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    await callDeleteRoute('session-log-test');
-
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[project-delete] Deletion requested for session session-log-test')
-    );
-
-    logSpy.mockRestore();
-  });
-});
-
-describe('POST /api/projects/[sessionId]/draft', () => {
-  test('GET returns empty draft for new session', async () => {
-    const { GET } = await import('@/app/api/projects/[sessionId]/draft/route');
-    const req = new Request('http://localhost/api/projects/test-session/draft');
-    const res = await GET(req, { params: Promise.resolve({ sessionId: 'test-session' }) });
+    const res = await callResetRoute('session-6');
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(data.sessionId).toBe('test-session');
-    expect(data.draft).toEqual({});
-    expect(data.fieldCount).toBe(0);
-  });
-
-  test('PUT updates fields in the draft', async () => {
-    const { PUT, GET } = await import('@/app/api/projects/[sessionId]/draft/route');
-    const sessionId = 'draft-update-test';
-
-    const putReq = new Request('http://localhost/api/projects/draft-update-test/draft', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fields: [
-          { field: 'service', value: 'production', provenance: 'user-stated' },
-          { field: 'contactName', value: 'Jayden', provenance: 'inferred' }
-        ]
-      })
+    expect(data.ok).toBe(true);
+    expect(data.reset).toBe(true);
+    expect(harness.sessionUpdates).toHaveLength(1);
+    expect(harness.sessionUpdates[0]).toMatchObject({
+      draft: {},
+      draft_version: 3,
+      status: 'open',
+      capability_hash: null,
+      capability_expires_at: null
     });
-    const putRes = await PUT(putReq, { params: Promise.resolve({ sessionId }) });
-    const putData = await putRes.json();
-
-    expect(putRes.status).toBe(200);
-    expect(putData.fieldCount).toBe(2);
-    expect(putData.draft.service.value).toBe('production');
-    expect(putData.draft.service.provenance).toBe('user-stated');
-
-    const getReq = new Request('http://localhost/api/projects/draft-update-test/draft');
-    const getRes = await GET(getReq, { params: Promise.resolve({ sessionId }) });
-    const getData = await getRes.json();
-
-    expect(getData.fieldCount).toBe(2);
-  });
-
-  test('PUT clears a field', async () => {
-    const { PUT, GET } = await import('@/app/api/projects/[sessionId]/draft/route');
-    const sessionId = 'draft-clear-test';
-
-    await PUT(
-      new Request('http://localhost/api/projects/draft-clear-test/draft', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: [{ field: 'service', value: 'production', provenance: 'user-stated' }]
-        })
-      }),
-      { params: Promise.resolve({ sessionId }) }
-    );
-
-    const clearRes = await PUT(
-      new Request('http://localhost/api/projects/draft-clear-test/draft', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: [{ field: 'service', value: '', provenance: 'cleared' }]
-        })
-      }),
-      { params: Promise.resolve({ sessionId }) }
-    );
-    const clearData = await clearRes.json();
-
-    expect(clearData.draft.service.provenance).toBe('cleared');
-    expect(clearData.draft.service.value).toBe('');
-  });
-
-  test('PUT rejects invalid provenance', async () => {
-    const { PUT } = await import('@/app/api/projects/[sessionId]/draft/route');
-
-    const res = await PUT(
-      new Request('http://localhost/api/projects/bad-prov/draft', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: [{ field: 'service', value: 'production', provenance: 'invalid' }]
-        })
-      }),
-      { params: Promise.resolve({ sessionId: 'bad-prov' }) }
-    );
-
-    expect(res.status).toBe(400);
-  });
-
-  test('PUT rejects empty fields array', async () => {
-    const { PUT } = await import('@/app/api/projects/[sessionId]/draft/route');
-
-    const res = await PUT(
-      new Request('http://localhost/api/projects/empty-fields/draft', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: [] })
-      }),
-      { params: Promise.resolve({ sessionId: 'empty-fields' }) }
-    );
-
-    expect(res.status).toBe(400);
+    expect(res.headers.get('set-cookie')).toContain('session_capability=;');
   });
 });

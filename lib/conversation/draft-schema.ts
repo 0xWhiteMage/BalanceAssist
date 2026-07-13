@@ -7,8 +7,7 @@ const ALLOWED_KEYS = [
   'budgetBand',
   'contactName',
   'contactCompany',
-  'contactEmail',
-  'consentToShare'
+  'contactEmail'
 ] as const;
 
 const SERVICES = [
@@ -52,16 +51,10 @@ function normalizeCompany(value: string) {
 }
 
 export function sanitizeDraftUpdates(input: Record<string, unknown> | null | undefined) {
-  const result: Record<string, string | boolean> = {};
+  const result: Record<string, string> = {};
   if (!input || typeof input !== 'object') return result;
   for (const key of ALLOWED_KEYS) {
     const value = input[key];
-    if (key === 'consentToShare') {
-      if (value === true || value === 'true') {
-        result[key] = true;
-      }
-      continue;
-    }
     if (typeof value !== 'string') continue;
     const trimmed = value.trim();
     if (!trimmed) {

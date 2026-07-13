@@ -1,6 +1,14 @@
 import { eventPayloadSchema } from '@/lib/api/contracts';
+import { requireSession } from '@/lib/api/require-session';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
-import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
+
+const ALLOWED_EVENT_NAMES = new Set([
+  'widget_closed',
+  'human_handoff',
+  'step_advanced',
+  'llm_request',
+  'deletion_requested'
+]);
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -15,18 +23,23 @@ export async function POST(request: Request) {
 
   const { sessionId, eventName, properties } = parsed.data;
 
-  if (hasSupabaseServerConfig()) {
-    const supabase = createServerSupabaseClient();
+  if (!ALLOWED_EVENT_NAMES.has(eventName)) {
+    return jsonWithCors({ ok: false, error: 'Unknown event name' }, { status: 400 }, request);
+  }
 
-    if (supabase) {
-      const { error } = await supabase
-        .from('events')
-        .insert({ session_id: sessionId, event_name: eventName, properties: properties ?? null });
+  const authResult = await requireSession(request, sessionId);
+  if (!authResult.ok) {
+    return authResult.response;
+  }
 
-      if (!error) {
-        return jsonWithCors({ ok: true, eventName });
-      }
-    }
+  const { supabase } = authResult;
+
+  const { error } = await supabase
+    .from('events')
+    .insert({ session_id: sessionId, event_name: eventName, properties: properties ?? null });
+
+  if (error) {
+    return jsonWithCors({ ok: false, error: error.message }, { status: 500 }, request);
   }
 
   return jsonWithCors({ ok: true, eventName });

@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
-import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
+import { requireSession } from '@/lib/api/require-session';
 import { editForumTopic, ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
 import { buildTopicName, TOPIC_STATUS_COLOR } from '@/lib/conversation/topic-status';
+import { createLogger, extractRequestId } from '@/lib/logger';
+import { emitEvent } from '@/lib/observability/events';
 
 const relayPayloadSchema = z.object({
   sessionId: z.string().min(1),
@@ -51,11 +53,13 @@ function buildMessageHtml(text: string, contactName: string | null, contactCompa
   ].join('\n');
 }
 
-export async function OPTIONS() {
-  return corsOptionsResponse();
+export async function OPTIONS(request: Request) {
+  return corsOptionsResponse(request);
 }
 
 export async function POST(request: Request) {
+  const requestId = extractRequestId(request);
+  const logger = createLogger('telegram-relay', requestId);
   const parsed = await parseRequestBody(request, relayPayloadSchema);
 
   if (!parsed.ok) {
@@ -63,24 +67,18 @@ export async function POST(request: Request) {
   }
 
   const { sessionId, text } = parsed.data;
+  const authResult = await requireSession(request, sessionId);
+
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const shortId = sessionId.slice(0, 8);
 
   const detectedName = detectName(text);
   const detectedCompany = detectCompany(text);
 
-  if (!hasSupabaseServerConfig()) {
-    const messageHtml = buildMessageHtml(text, detectedName, detectedCompany, shortId);
-    const fallbackMessage = await sendTelegramMessage(messageHtml);
-    return jsonWithCors({ ok: true, sessionId, telegramSent: fallbackMessage !== null, persisted: false });
-  }
-
-  const supabase = createServerSupabaseClient();
-
-  if (!supabase) {
-    const messageHtml = buildMessageHtml(text, detectedName, detectedCompany, shortId);
-    const fallbackMessage = await sendTelegramMessage(messageHtml);
-    return jsonWithCors({ ok: true, sessionId, telegramSent: fallbackMessage !== null, persisted: false });
-  }
+  const { supabase } = authResult;
 
   const { data: existingRow, error: fetchError } = await supabase
     .from('sessions')
@@ -89,7 +87,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (fetchError) {
-    console.error('[telegram-relay] Failed to fetch session', {
+    logger.error('Failed to fetch session', {
       sessionId,
       fetchError: fetchError.message ?? fetchError
     });
@@ -125,25 +123,33 @@ export async function POST(request: Request) {
     const created = await ensureTelegramTopic(supabase, sessionId, contactName, contactCompany, shortId);
     if (created) {
       threadId = created;
-      console.log('[telegram-relay] Created topic', { sessionId, threadId, name: newTopicName });
+      logger.info('Created topic', { sessionId, threadId });
     } else {
-      console.warn('[telegram-relay] createForumTopic failed; falling back to flat message');
+      logger.warn('createForumTopic failed; falling back to flat message', { sessionId });
     }
   } else if (threadId && shouldRename) {
     const updated = await editForumTopic(threadId, newTopicName, { iconColor: TOPIC_STATUS_COLOR.new });
     if (updated) {
-      console.log('[telegram-relay] Renamed topic', { sessionId, threadId, name: newTopicName });
+      logger.info('Renamed topic', { sessionId, threadId });
     } else {
-      console.warn('[telegram-relay] editForumTopic failed', { sessionId, threadId });
+      logger.warn('editForumTopic failed', { sessionId, threadId });
     }
   } else if (!sessionSnap) {
-    console.warn('[telegram-relay] Session not in DB; sending flat message without topic', { sessionId });
+    logger.warn('Session not in DB; sending flat message without topic', { sessionId });
   }
 
   const messageHtml = buildMessageHtml(text, contactName, contactCompany, shortId);
   const telegramMessageId = await sendTelegramMessage(
     messageHtml,
     threadId ? { threadId } : undefined
+  );
+
+  emitEvent(
+    telegramMessageId ? 'handoff_delivered' : 'handoff_failed',
+    telegramMessageId
+      ? { handoffId: `relay:${sessionId}`, durationMs: 0 }
+      : { handoffId: `relay:${sessionId}`, reason: 'telegram_send_failed' },
+    requestId
   );
 
   const insertPayload: Record<string, unknown> = {
@@ -157,7 +163,7 @@ export async function POST(request: Request) {
   const { error: insertError } = await supabase.from('human_messages').insert(insertPayload);
 
   if (insertError) {
-    console.error('[telegram-relay] Failed to insert user message', {
+    logger.error('Failed to insert user message', {
       sessionId,
       threadId,
       telegramMessageId: telegramMessageId?.messageId,
@@ -168,6 +174,7 @@ export async function POST(request: Request) {
       .from('sessions')
       .update({ status: 'escalated' })
       .eq('id', sessionId);
+    emitEvent('session_status_changed', { sessionId, newStatus: 'escalated' }, requestId);
   }
 
   if (Object.keys(detectedUpdates).length > 0) {
@@ -177,19 +184,18 @@ export async function POST(request: Request) {
       .eq('id', sessionId);
 
     if (sessionUpdateError) {
-      console.error('[telegram-relay] Failed to update session detected fields', {
+      logger.error('Failed to update session detected fields', {
         sessionId,
-        detectedUpdates,
         sessionUpdateError: sessionUpdateError.message ?? sessionUpdateError
       });
     }
   }
 
   return jsonWithCors({
-    ok: true,
+    ok: telegramMessageId !== null,
     sessionId,
     telegramSent: telegramMessageId !== null,
     persisted: !insertError,
     threadId
-  });
+  }, undefined, request);
 }

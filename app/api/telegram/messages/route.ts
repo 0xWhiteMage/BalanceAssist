@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
-import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
+import { requireSession } from '@/lib/api/require-session';
 
 const querySchema = z.object({
   sessionId: z.string().min(1),
   sinceId: z.coerce.number().int().nonnegative().optional()
 });
 
-export async function OPTIONS() {
-  return corsOptionsResponse();
+export async function OPTIONS(request: Request) {
+  return corsOptionsResponse(request);
 }
 
 export async function GET(request: Request) {
@@ -19,20 +19,17 @@ export async function GET(request: Request) {
   });
 
   if (!parsed.success) {
-    return jsonWithCors({ error: 'Invalid query', issues: parsed.error.issues }, { status: 400 });
+    return jsonWithCors({ error: 'Invalid query', issues: parsed.error.issues }, { status: 400 }, request);
   }
 
   const { sessionId, sinceId } = parsed.data;
+  const authResult = await requireSession(request, sessionId);
 
-  if (!hasSupabaseServerConfig()) {
-    return jsonWithCors({ messages: [] });
+  if (!authResult.ok) {
+    return authResult.response;
   }
 
-  const supabase = createServerSupabaseClient();
-
-  if (!supabase) {
-    return jsonWithCors({ messages: [] });
-  }
+  const { supabase } = authResult;
 
   let query = supabase
     .from('human_messages')
@@ -49,7 +46,7 @@ export async function GET(request: Request) {
   const { data, error } = await query;
 
   if (error) {
-    return jsonWithCors({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+    return jsonWithCors({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }, undefined, request);
   }
 
   const { data: sessionRow } = await supabase
@@ -74,5 +71,5 @@ export async function GET(request: Request) {
       text: row.text,
       createdAt: row.created_at
     }))
-  });
+  }, undefined, request);
 }

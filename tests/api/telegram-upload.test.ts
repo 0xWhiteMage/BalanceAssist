@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 
-const { sendDocumentMock, ensureTelegramTopicMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
+const { sendDocumentMock, ensureTelegramTopicMock, createServerSupabaseClientMock, requireSessionMock } = vi.hoisted(() => ({
   sendDocumentMock: vi.fn(),
   ensureTelegramTopicMock: vi.fn(async (_supabase: unknown, _sessionId: string) => null),
-  createServerSupabaseClientMock: vi.fn()
+  createServerSupabaseClientMock: vi.fn(),
+  requireSessionMock: vi.fn()
 }));
 
 vi.mock('@/lib/telegram', () => ({
@@ -17,9 +18,17 @@ vi.mock('@/lib/supabase/server', () => ({
   createServerSupabaseClient: createServerSupabaseClientMock
 }));
 
-function buildMockSupabase(options?: { fileRequestOpen?: boolean }) {
+vi.mock('@/lib/api/require-session', () => ({
+  requireSession: requireSessionMock
+}));
+
+function buildMockSupabase(options?: { fileRequestOpen?: boolean; telegramThreadId?: number | null; status?: string; draft?: Record<string, unknown>; draftVersion?: number }) {
   const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
   const fileRequestOpen = options?.fileRequestOpen ?? true;
+  const telegramThreadId = options?.telegramThreadId ?? 42;
+  const sessionStatus = options?.status ?? 'open';
+  const draft = options?.draft ?? {};
+  const draftVersion = options?.draftVersion ?? 0;
 
   const client = {
     storage: {
@@ -35,7 +44,15 @@ function buildMockSupabase(options?: { fileRequestOpen?: boolean }) {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { telegram_thread_id: 42, file_request_open: fileRequestOpen, contact_name: null, contact_company: null },
+                data: {
+                  telegram_thread_id: telegramThreadId,
+                  file_request_open: fileRequestOpen,
+                  contact_name: null,
+                  contact_company: null,
+                  status: sessionStatus,
+                  draft,
+                  draft_version: draftVersion
+                },
                 error: null
               }))
             }))
@@ -59,21 +76,39 @@ function buildMockSupabase(options?: { fileRequestOpen?: boolean }) {
 }
 
 function makeFile(name: string, size: number, type: string): File {
-  return new File([new Uint8Array(size)], name, { type });
+  const content = new Uint8Array(Math.max(size, 4));
+  if (type === 'application/pdf' || name.endsWith('.pdf')) {
+    content[0] = 0x25; content[1] = 0x50; content[2] = 0x44; content[3] = 0x46;
+  } else if (type === 'image/png' || name.endsWith('.png')) {
+    content[0] = 0x89; content[1] = 0x50; content[2] = 0x4e; content[3] = 0x47;
+  } else if (type === 'image/jpeg' || name.endsWith('.jpg')) {
+    content[0] = 0xff; content[1] = 0xd8; content[2] = 0xff;
+  } else if (type === 'text/plain' || name.endsWith('.txt')) {
+    content[0] = 0x48; content[1] = 0x65; content[2] = 0x6c; content[3] = 0x6c;
+  }
+  return new File([content], name, { type });
 }
 
 function buildFakeFormData(
   fields: Record<string, string>,
   files: File[],
-  opts?: { includeConsent?: boolean }
+  opts?: {
+    includeConsent?: boolean;
+    consent?: { aiAnalysis: boolean; producerShare: boolean; consentedAt?: string };
+  }
 ): FormData {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.set(k, v);
   for (const file of files) form.append('files', file);
   if (opts?.includeConsent !== false) {
+    const consent = opts?.consent ?? { aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() };
     form.set(
       'consent',
-      JSON.stringify({ aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() })
+      JSON.stringify({
+        aiAnalysis: consent.aiAnalysis,
+        producerShare: consent.producerShare,
+        consentedAt: consent.consentedAt ?? new Date().toISOString()
+      })
     );
   }
   return form;
@@ -94,6 +129,17 @@ describe('POST /api/telegram/upload', () => {
   beforeEach(() => {
     sendDocumentMock.mockReset();
     createServerSupabaseClientMock.mockReset();
+    requireSessionMock.mockReset();
+    requireSessionMock.mockImplementation(async (_request: Request, expectedSessionId?: string) => ({
+      ok: true,
+      auth: {
+        sessionId: expectedSessionId && expectedSessionId.length > 0
+          ? expectedSessionId
+          : '11111111-2222-3333-4444-555555555555',
+        capability: 'session-capability'
+      },
+      supabase: createServerSupabaseClientMock()
+    }));
   });
 
   afterEach(() => {
@@ -101,7 +147,7 @@ describe('POST /api/telegram/upload', () => {
   });
 
   test('proxies file to sendDocument and persists metadata only', async () => {
-    const { client, inserts } = buildMockSupabase();
+    const { client, inserts } = buildMockSupabase({ status: 'completed' });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     sendDocumentMock.mockResolvedValue({
@@ -141,12 +187,14 @@ describe('POST /api/telegram/upload', () => {
       session_id: '11111111-2222-3333-4444-555555555555',
       telegram_file_id: 'mock-telegram-file-id',
       name: 'deck.pdf',
+      original_name: 'deck.pdf',
       size_bytes: 12_345,
       mime: 'application/pdf',
+      mime_type: 'application/pdf',
+      status: 'sent',
+      storage_path: null,
       kind: 'reference'
     });
-    expect(row).not.toHaveProperty('storage_path');
-    expect(row).not.toHaveProperty('original_name');
   });
 
   test('returns 400 when file exceeds 50 MB cap', async () => {
@@ -180,7 +228,7 @@ describe('POST /api/telegram/upload', () => {
   });
 
   test('returns 502 without inserting when sendDocument returns ok:false (no Supabase write)', async () => {
-    const { client, inserts } = buildMockSupabase();
+    const { client, inserts } = buildMockSupabase({ status: 'completed' });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     sendDocumentMock.mockResolvedValue({
@@ -225,8 +273,28 @@ describe('POST /api/telegram/upload', () => {
     expect(sendDocumentMock).not.toHaveBeenCalled();
   });
 
-  test('allows a reference upload in AI mode even when no team file request is open', async () => {
-    const { client, inserts } = buildMockSupabase({ fileRequestOpen: false });
+  test('rejects an unverifiable reference upload even in AI mode', async () => {
+    const { client, inserts } = buildMockSupabase({ fileRequestOpen: false, telegramThreadId: null });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pptx', 12_345, 'application/vnd.openxmlformats-officedocument.presentationml.presentation')],
+      { consent: { aiAnalysis: true, producerShare: false } }
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(415);
+    expect(data.ok).toBe(false);
+    expect(data.error).toMatch(/verify file type/i);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+  });
+
+  test('persists the detected MIME instead of the browser-provided MIME', async () => {
+    const { client, inserts } = buildMockSupabase({ status: 'completed' });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     sendDocumentMock.mockResolvedValue({
@@ -235,9 +303,16 @@ describe('POST /api/telegram/upload', () => {
       raw: { ok: true, result: { message_id: 1, document: { file_id: 'mock-telegram-file-id' } } }
     });
 
+    const pdfBytes = new Uint8Array(12_345);
+    pdfBytes[0] = 0x25;
+    pdfBytes[1] = 0x50;
+    pdfBytes[2] = 0x44;
+    pdfBytes[3] = 0x46;
+    const spoofedFile = new File([pdfBytes], 'deck.pdf', { type: 'text/plain' });
+
     const form = buildFakeFormData(
       { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
-      [makeFile('deck.pptx', 12_345, 'application/vnd.openxmlformats-officedocument.presentationml.presentation')]
+      [spoofedFile]
     );
 
     const res = await callUploadRoute(form);
@@ -245,20 +320,69 @@ describe('POST /api/telegram/upload', () => {
 
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
+
+    const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
+    expect(fileInserts).toHaveLength(1);
+    expect(fileInserts[0].row.mime).toBe('application/pdf');
+  });
+
+  test('returns 403 for a team-requested deliverable upload when producer-share consent is false', async () => {
+    const { client } = buildMockSupabase({ fileRequestOpen: true, telegramThreadId: 42 });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'deliverable' },
+      [makeFile('deliverable.pdf', 12_345, 'application/pdf')],
+      { consent: { aiAnalysis: true, producerShare: false } }
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.error).toMatch(/share|team/i);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
+  });
+
+  test('forwards a team-requested deliverable with producer-share consent even when aiAnalysis is false', async () => {
+    const { client, inserts } = buildMockSupabase({ fileRequestOpen: true, telegramThreadId: 42, status: 'completed' });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    sendDocumentMock.mockResolvedValue({
+      ok: true,
+      fileId: 'mock-telegram-file-id',
+      raw: { ok: true, result: { message_id: 1, document: { file_id: 'mock-telegram-file-id' } } }
+    });
+
+    const file = new File([Buffer.from('Producer-only handoff file', 'utf8')], 'deliverable.txt', {
+      type: 'text/plain'
+    });
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'deliverable' },
+      [file],
+      { consent: { aiAnalysis: false, producerShare: true } }
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.forwarded).toBe(true);
+    expect(data.extractedText).toBeUndefined();
     expect(sendDocumentMock).toHaveBeenCalledTimes(1);
-    expect(sendDocumentMock.mock.calls[0][3]).toBe('deck.pptx');
     expect(inserts).toContainEqual({
       table: 'uploaded_files',
       row: expect.objectContaining({
-        name: 'deck.pptx',
-        kind: 'reference',
-        mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        telegram_file_id: 'mock-telegram-file-id',
+        name: 'deliverable.txt',
+        kind: 'deliverable'
       })
     });
   });
 
   test('coerces unexpected kind values to "reference"', async () => {
-    const { client, inserts } = buildMockSupabase();
+    const { client, inserts } = buildMockSupabase({ status: 'completed' });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     sendDocumentMock.mockResolvedValue({
@@ -284,7 +408,7 @@ describe('POST /api/telegram/upload', () => {
   });
 
   test('returns extractedText for an uploaded text file (AI auto-fill payload)', async () => {
-    const { client } = buildMockSupabase();
+    const { client } = buildMockSupabase({ status: 'completed' });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     sendDocumentMock.mockResolvedValue({
@@ -328,5 +452,66 @@ describe('POST /api/telegram/upload', () => {
     expect(data.ok).toBe(false);
     expect(data.error).toMatch(/consent/i);
     expect(sendDocumentMock).not.toHaveBeenCalled();
+  });
+
+  test('allows an analysis-only upload when consent was already recorded server-side', async () => {
+    const { client, inserts } = buildMockSupabase({
+      status: 'open',
+      telegramThreadId: null,
+      draft: {
+        __attachment_ai_analysis_consented_at: {
+          value: '2026-07-11T10:00:00.000Z',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      draftVersion: 1
+    });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const file = new File([Buffer.from('Project scope from server-side consent.', 'utf8')], 'brief.txt', { type: 'text/plain' });
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [file],
+      { includeConsent: false }
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.forwarded).toBe(false);
+    expect(inserts).toContainEqual({
+      table: 'uploaded_files',
+      row: expect.objectContaining({
+        name: 'brief.txt',
+        kind: 'reference',
+        mime: 'text/plain'
+      })
+    });
+  });
+
+  test('quarantines file during intake without forwarding to Telegram', async () => {
+    const { client, inserts } = buildMockSupabase({ status: 'open', telegramThreadId: 42 });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const form = buildFakeFormData(
+      { sessionId: '11111111-2222-3333-4444-555555555555', kind: 'reference' },
+      [makeFile('deck.pdf', 12_345, 'application/pdf')],
+      { consent: { aiAnalysis: true, producerShare: true } }
+    );
+
+    const res = await callUploadRoute(form);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.forwarded).toBe(false);
+    expect(sendDocumentMock).not.toHaveBeenCalled();
+
+    const fileInserts = inserts.filter((i) => i.table === 'uploaded_files');
+    expect(fileInserts).toHaveLength(1);
+    expect(fileInserts[0].row.telegram_file_id).toMatch(/^quarantined-/);
   });
 });

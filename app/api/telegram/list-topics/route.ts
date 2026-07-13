@@ -1,19 +1,15 @@
 import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
+import { validateAdminRequest } from '@/lib/security/config';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
 }
 
 export async function GET(request: Request) {
-  const setupToken = process.env.SETUP_TOKEN;
-
-  if (setupToken) {
-    const auth = request.headers.get('authorization') ?? '';
-    const provided = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : auth;
-    if (provided !== setupToken) {
-      return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 });
-    }
+  const authResult = validateAdminRequest(request);
+  if (!authResult.ok) {
+    return jsonWithCors({ ok: false, error: authResult.error }, { status: authResult.status });
   }
 
   if (!hasSupabaseServerConfig()) {

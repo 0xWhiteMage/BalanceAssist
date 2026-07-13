@@ -1,10 +1,55 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   verifyWebhookSecret,
   verifyWebhookChatId,
   verifyWebhookSender,
   validateWebhookRequest
 } from '@/lib/telegram/webhook-auth';
+
+const originalEnv = { ...process.env };
+
+const { hasSupabaseServerConfigMock, createServerSupabaseClientMock } = vi.hoisted(() => ({
+  hasSupabaseServerConfigMock: vi.fn(() => true),
+  createServerSupabaseClientMock: vi.fn()
+}));
+
+vi.mock('@/lib/supabase/server', () => ({
+  hasSupabaseServerConfig: hasSupabaseServerConfigMock,
+  createServerSupabaseClient: createServerSupabaseClientMock
+}));
+
+function buildWebhookSupabase() {
+  return {
+    from: vi.fn((table: string) => {
+      if (table === 'processed_telegram_updates') {
+        return {
+          insert: vi.fn(async () => ({ error: null }))
+        };
+      }
+
+      return {
+        insert: vi.fn(async () => ({ error: null })),
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({ data: null, error: null }))
+          }))
+        }))
+      };
+    })
+  };
+}
+
+beforeEach(() => {
+  vi.resetModules();
+  process.env = { ...originalEnv };
+  hasSupabaseServerConfigMock.mockReturnValue(true);
+  createServerSupabaseClientMock.mockReset();
+});
+
+afterEach(() => {
+  process.env = { ...originalEnv };
+  vi.restoreAllMocks();
+});
 
 describe('verifyWebhookSecret', () => {
   it('returns true for matching secrets', () => {
@@ -47,8 +92,8 @@ describe('verifyWebhookChatId', () => {
 });
 
 describe('verifyWebhookSender', () => {
-  it('returns true when no allowlist is configured', () => {
-    expect(verifyWebhookSender('anyone', null)).toBe(true);
+  it('returns false when no allowlist is configured', () => {
+    expect(verifyWebhookSender('anyone', null)).toBe(false);
   });
 
   it('returns true for matching username', () => {
@@ -131,5 +176,138 @@ describe('validateWebhookRequest', () => {
       allowedUsernames: ['admin']
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('POST /api/telegram/webhook', () => {
+  it('fails closed on a missing secret header before parsing the body', async () => {
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const request = new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not-json'
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe('Unauthorized');
+  });
+
+  it('parses the update before validating configured chat and sender rules', async () => {
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    process.env.TELEGRAM_CHAT_ID = '123456';
+    process.env.TELEGRAM_ALLOWED_USERNAMES = 'admin';
+    createServerSupabaseClientMock.mockReturnValue(buildWebhookSupabase());
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const request = new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'secret'
+      },
+      body: JSON.stringify({
+        update_id: 7,
+        message: {
+          text: 'Hello from Telegram',
+          chat: { id: 123456 },
+          from: { username: 'admin', first_name: 'Admin' }
+        }
+      })
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, ignored: 'no-matching-session' });
+  });
+
+  it('fails closed with 503 when TELEGRAM_CHAT_ID is unset in production', async () => {
+    (process.env as Record<string, string>).NODE_ENV = 'production';
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    delete process.env.TELEGRAM_CHAT_ID;
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const request = new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'secret'
+      },
+      body: JSON.stringify({
+        update_id: 8,
+        message: {
+          text: 'Hello',
+          chat: { id: 123 },
+          from: { username: 'admin' }
+        }
+      })
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(503);
+  });
+
+  it('fails closed with 503 when TELEGRAM_ALLOWED_USERNAMES is unset in production', async () => {
+    (process.env as Record<string, string>).NODE_ENV = 'production';
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    process.env.TELEGRAM_CHAT_ID = '123';
+    delete process.env.TELEGRAM_ALLOWED_USERNAMES;
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const request = new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'secret'
+      },
+      body: JSON.stringify({
+        update_id: 8,
+        message: {
+          text: 'Hello',
+          chat: { id: 123 },
+          from: { username: 'admin' }
+        }
+      })
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+    expect(response.status).toBe(503);
+    expect(body.error).toMatch(/TELEGRAM_ALLOWED_USERNAMES/i);
+  });
+
+  it('ignores update from wrong chat ID', async () => {
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    process.env.TELEGRAM_CHAT_ID = '123456';
+    createServerSupabaseClientMock.mockReturnValue(buildWebhookSupabase());
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const request = new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'secret'
+      },
+      body: JSON.stringify({
+        update_id: 9,
+        message: {
+          text: 'Hello from wrong chat',
+          chat: { id: 999 },
+          from: { username: 'admin' }
+        }
+      })
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, ignored: 'wrong-chat' });
   });
 });

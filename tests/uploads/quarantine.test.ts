@@ -51,6 +51,10 @@ function makeWebpBuffer(): ArrayBuffer {
   view[1] = 0x49;
   view[2] = 0x46;
   view[3] = 0x46;
+  view[8] = 0x57;
+  view[9] = 0x45;
+  view[10] = 0x42;
+  view[11] = 0x50;
   return buf;
 }
 
@@ -147,7 +151,7 @@ describe('validateFile', () => {
     Object.defineProperty(file, 'size', { value: buf.byteLength });
     const result = validateFile(file, buf);
     expect(result.ok).toBe(false);
-    expect(result.reason).toContain('Could not verify file type');
+    expect((result as { ok: false; reason: string }).reason).toContain('Could not verify file type');
   });
 });
 
@@ -233,18 +237,23 @@ describe('hasRequiredConsent', () => {
     expect(hasRequiredConsent(null)).toBe(false);
   });
 
-  test('returns false when aiAnalysis is false', () => {
+  test('returns true when producerShare is true even if aiAnalysis is false', () => {
     const consent = createAttachmentConsent(false, true);
-    expect(hasRequiredConsent(consent)).toBe(false);
+    expect(hasRequiredConsent(consent)).toBe(true);
   });
 
-  test('returns false when producerShare is false', () => {
+  test('returns true when aiAnalysis is true even if producerShare is false', () => {
     const consent = createAttachmentConsent(true, false);
-    expect(hasRequiredConsent(consent)).toBe(false);
+    expect(hasRequiredConsent(consent)).toBe(true);
   });
 
   test('returns true when both are true', () => {
     const consent = createAttachmentConsent(true, true);
     expect(hasRequiredConsent(consent)).toBe(true);
+  });
+
+  test('returns false when both consents are false', () => {
+    const consent = createAttachmentConsent(false, false);
+    expect(hasRequiredConsent(consent)).toBe(false);
   });
 });

@@ -1,8 +1,14 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { classifyUrl } from '@/lib/uploads/url-detect';
 import { brandTokens } from '@/lib/brand-tokens';
-import { hasRequiredConsent, type AttachmentConsent } from '@/lib/uploads/consent';
+import {
+  createAttachmentConsent,
+  hasAnalysisConsent,
+  hasProducerShareConsent,
+  hasRequiredConsent,
+  type AttachmentConsent
+} from '@/lib/uploads/consent';
 import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 
 export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
@@ -16,6 +22,14 @@ type QueuedFile = {
   error?: string;
   extractedText?: string;
 };
+
+async function readFileBuffer(file: File): Promise<ArrayBuffer> {
+  if (typeof file.arrayBuffer === 'function') {
+    return file.arrayBuffer();
+  }
+
+  return new Response(file).arrayBuffer();
+}
 
 export function AttachmentDropzone({
   onAddLink,
@@ -33,6 +47,36 @@ export function AttachmentDropzone({
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
+  const [localConsent, setLocalConsent] = useState<AttachmentConsent | null>(consent ?? null);
+
+  useEffect(() => {
+    setLocalConsent(consent ?? null);
+  }, [consent]);
+
+  const effectiveConsent = consent ?? localConsent;
+
+  function updateConsent(nextValues: { aiAnalysis: boolean; producerShare: boolean }) {
+    if (consent !== undefined) {
+      return;
+    }
+
+    setLocalConsent(createAttachmentConsent(nextValues.aiAnalysis, nextValues.producerShare));
+    setError(null);
+  }
+
+  function setAiAnalysis(nextChecked: boolean) {
+    updateConsent({
+      aiAnalysis: nextChecked,
+      producerShare: effectiveConsent?.producerShare === true
+    });
+  }
+
+  function setProducerShare(nextChecked: boolean) {
+    updateConsent({
+      aiAnalysis: effectiveConsent?.aiAnalysis === true,
+      producerShare: nextChecked
+    });
+  }
 
   function updateFileStatus(fileName: string, status: FileStatus, error?: string) {
     setQueuedFiles((prev) =>
@@ -47,10 +91,22 @@ export function AttachmentDropzone({
       setError('Not a valid URL.');
       return;
     }
+
+    if (!hasProducerShareConsent(effectiveConsent ?? null)) {
+      setError('Please confirm that the Balance team may review this link before adding it.');
+      return;
+    }
+
     const res = await fetch('/api/attachments/link', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, kind, sessionId: sessionId ?? undefined })
+      body: JSON.stringify({
+        url,
+        kind,
+        sessionId: sessionId ?? undefined,
+        consent: effectiveConsent
+      })
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -65,13 +121,20 @@ export function AttachmentDropzone({
   async function handleFiles(files: FileList | null) {
     if (!files) return;
 
-    if (!hasRequiredConsent(consent ?? null)) {
-      setError('Please consent to file analysis and sharing before uploading.');
+    const consentToUse = effectiveConsent ?? null;
+
+    if (!hasRequiredConsent(consentToUse)) {
+      setError('Please choose whether Balance Assist may analyse these files or the Balance team may review them before uploading.');
+      return;
+    }
+
+    if (!consentToUse) {
+      setError('Consent details are missing. Please re-confirm your upload permissions.');
       return;
     }
 
     const fileArray = Array.from(files);
-    const buffers = await Promise.all(fileArray.map((f) => f.arrayBuffer()));
+    const buffers = await Promise.all(fileArray.map((f) => readFileBuffer(f)));
     const batchResult = validateFileBatch(fileArray.map((file, i) => ({ file, buffer: buffers[i] })));
     if (!batchResult.ok) {
       setError(batchResult.reason ?? 'Files failed validation.');
@@ -85,7 +148,7 @@ export function AttachmentDropzone({
     for (const file of fileArray) {
       updateFileStatus(file.name, 'validating');
 
-      const buffer = await file.arrayBuffer();
+      const buffer = await readFileBuffer(file);
       const result = validateFile(file, buffer);
       if (!result.ok) {
         updateFileStatus(file.name, 'failed', result.reason);
@@ -100,9 +163,13 @@ export function AttachmentDropzone({
       if (sessionId) {
         fd.append('sessionId', sessionId);
       }
-      fd.append('consent', JSON.stringify(consent));
+      fd.append('consent', JSON.stringify(consentToUse));
 
-      const res = await fetch('/api/telegram/upload', { method: 'POST', body: fd });
+      const res = await fetch('/api/telegram/upload', {
+        method: 'POST',
+        credentials: 'include',
+        body: fd
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         updateFileStatus(file.name, 'retryable', body?.error ?? `Failed to upload ${file.name}.`);
@@ -110,17 +177,23 @@ export function AttachmentDropzone({
       }
 
       const data = await res.json();
-      updateFileStatus(file.name, 'sent');
+      const forwarded = data.forwarded === true;
+      const canShareWithTeam = hasProducerShareConsent(consentToUse);
+      const canAnalyze = hasAnalysisConsent(consentToUse);
 
-      onAddFile({
-        name: file.name,
-        sizeBytes: file.size,
-        mime: result.mime,
-        telegramFileId: data.telegramFileId ?? ''
-      });
-
-      if (typeof data.extractedText === 'string' && data.extractedText.trim()) {
+      if (forwarded && canShareWithTeam) {
+        updateFileStatus(file.name, 'sent');
+        onAddFile({
+          name: file.name,
+          sizeBytes: file.size,
+          mime: result.mime,
+          telegramFileId: data.telegramFileId ?? ''
+        });
+      } else {
         updateFileStatus(file.name, 'ready-to-share');
+      }
+
+      if (canAnalyze && typeof data.extractedText === 'string' && data.extractedText.trim()) {
         onFileAnalyzed?.(file.name, data.extractedText);
       }
     }
@@ -143,6 +216,36 @@ export function AttachmentDropzone({
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
           Upload a PDF or deck, or share a Google Drive link.
         </div>
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gap: 8,
+          padding: 10,
+          borderRadius: 10,
+          border: `1px solid ${brandTokens.colors.subtleBorder}`,
+          background: 'rgba(255, 255, 255, 0.03)'
+        }}
+      >
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: brandTokens.colors.lightText }}>
+          <input
+            type="checkbox"
+            checked={effectiveConsent?.aiAnalysis === true}
+            onChange={(event) => setAiAnalysis(event.target.checked)}
+            disabled={consent !== undefined}
+          />
+          <span>Balance Assist may analyse these files to help draft my project brief.</span>
+        </label>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: brandTokens.colors.lightText }}>
+          <input
+            type="checkbox"
+            checked={effectiveConsent?.producerShare === true}
+            onChange={(event) => setProducerShare(event.target.checked)}
+            disabled={consent !== undefined}
+          />
+          <span>The Balance team may review anything I share here.</span>
+        </label>
       </div>
 
       <form onSubmit={handleUrlSubmit} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

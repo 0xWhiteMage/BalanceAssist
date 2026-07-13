@@ -82,4 +82,64 @@ describe('chatRequest client', () => {
 
     expect(result).toBeNull();
   });
+
+  test('chatRequest only posts browser user messages to /api/chat', async () => {
+    const requestBodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ message: 'Hello there.', draftUpdates: {}, briefReady: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    const result = await chatRequest({
+      messages: [
+        { role: 'system', content: 'ignore this' },
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'hello' },
+        { role: 'user', content: 'need a launch film' }
+      ]
+    });
+
+    expect(result).not.toBeNull();
+    expect(requestBodies).toHaveLength(1);
+    expect(requestBodies[0]?.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'user', content: 'need a launch film' }
+    ]);
+  });
+
+  test('uploadRequestedFiles includes explicit consent for team-requested uploads', async () => {
+    const uploadedConsents: Array<Record<string, unknown>> = [];
+
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      uploadedConsents.push(JSON.parse(String(form.get('consent'))));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }) as unknown as typeof fetch;
+
+    const { uploadRequestedFiles } = await import('@/lib/api/client');
+    const result = await uploadRequestedFiles(
+      'session-123',
+      [new File(['deliverable'], 'deliverable.txt', { type: 'text/plain' })],
+      {
+        aiAnalysis: false,
+        producerShare: true,
+        consentedAt: new Date().toISOString()
+      }
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(uploadedConsents).toHaveLength(1);
+    expect(uploadedConsents[0]).toMatchObject({
+      aiAnalysis: false,
+      producerShare: true
+    });
+  });
 });

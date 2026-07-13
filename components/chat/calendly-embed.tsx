@@ -19,6 +19,7 @@ declare global {
 
 export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const fallbackFrameRef = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [fallback, setFallback] = useState(false);
 
@@ -87,6 +88,11 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
 
     const listener = (event: MessageEvent) => {
       if (!ALLOWED_ORIGINS.includes(event.origin)) {
+        return;
+      }
+
+      const expectedSource = fallbackFrameRef.current?.contentWindow ?? null;
+      if (!expectedSource || event.source !== expectedSource) {
         return;
       }
 
@@ -170,6 +176,7 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
         )}
         {fallback ? (
           <iframe
+            ref={fallbackFrameRef}
             data-testid="calendly-fallback-iframe"
             src={url}
             title="Book a Discovery Call"

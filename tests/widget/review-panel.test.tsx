@@ -13,8 +13,7 @@ const readyDraft = {
   budgetBand: '20k-50k' as const,
   contactName: 'Jayden',
   contactCompany: 'Samsung',
-  contactEmail: 'jayden@example.com',
-  consentToShare: true
+  contactEmail: 'jayden@example.com'
 };
 
 describe('ReviewPanel', () => {
@@ -126,7 +125,7 @@ describe('ReviewPanel', () => {
     expect(onContinueRefining).toHaveBeenCalledOnce();
   });
 
-  test('renders the approved confirmation when approved=true', () => {
+  test('renders a truthful queued confirmation when approved=true but delivery is not verified', () => {
     render(
       <ReviewPanel
         draft={readyDraft}
@@ -134,9 +133,11 @@ describe('ReviewPanel', () => {
         mode="summary"
         onApprove={() => {}}
         onContinueRefining={() => {}}
+        telegramBroadcastStatus="queued"
       />
     );
-    expect(screen.getByText(/The Balance team has been notified/i)).toBeInTheDocument();
+    expect(screen.getByText(/Approval saved\. Team notification queued\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/The Balance team has been notified/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
   });
 
@@ -198,7 +199,7 @@ describe('ReviewPanel', () => {
     expect(approveButton.style.animation).not.toMatch(/approve-pulse/i);
   });
 
-  test('summary mode replaces the Approve button with a green confirmation pill when approved', () => {
+  test('summary mode only claims the team was notified after verified delivery', () => {
     render(
       <ReviewPanel
         draft={readyDraft}
@@ -206,12 +207,31 @@ describe('ReviewPanel', () => {
         mode="summary"
         onApprove={() => {}}
         onContinueRefining={() => {}}
+        telegramBroadcastStatus="sent"
       />
     );
     expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
     const confirmation = screen.getByTestId('approve-confirmation');
     expect(confirmation).toBeInTheDocument();
     expect(confirmation.textContent).toMatch(/Balance team has been notified/i);
+  });
+
+  test('approved confirmation stays truthful when notification could not be verified', () => {
+    render(
+      <ReviewPanel
+        draft={readyDraft}
+        approved={true}
+        mode="summary"
+        onApprove={() => {}}
+        onContinueRefining={() => {}}
+        telegramBroadcastStatus="unconfigured"
+      />
+    );
+
+    expect(screen.getByTestId('approve-confirmation-count')).toHaveTextContent(
+      /Approval saved\. Team notification still needs confirmation\./i
+    );
+    expect(screen.queryByText(/The Balance team has been notified/i)).not.toBeInTheDocument();
   });
 
   test('essentials mode always renders the Approve button, even when the brief is ready', () => {

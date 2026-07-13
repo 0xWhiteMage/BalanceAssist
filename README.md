@@ -70,6 +70,8 @@ git push -u origin main
 
 Vercel auto-deploys on every push to `main`.
 
+Set `CRON_SECRET` in Vercel to enable the authenticated `/api/internal/handoff-dispatch` cron configured in `vercel.json`.
+
 ### 3. Configure GitHub secrets
 
 In **Settings → Secrets and variables → Actions** add:
@@ -78,6 +80,7 @@ In **Settings → Secrets and variables → Actions** add:
 |---|---|
 | `PRODUCTION_URL` | Deployed domain, e.g. `https://balance-assist.vercel.app` |
 | `SETUP_TOKEN` | Same value as in Vercel env |
+| `CRON_SECRET` | Authenticates the scheduled `/api/internal/handoff-dispatch` cron |
 | `TELEGRAM_BOT_TOKEN` | Same as in Vercel env |
 
 ### 4. Verify the webhook

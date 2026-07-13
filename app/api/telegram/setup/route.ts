@@ -44,13 +44,13 @@ function verifyAdminAuth(request: Request): boolean {
   return timingSafeEqual(a, b);
 }
 
-export async function OPTIONS() {
-  return corsOptionsResponse();
+export async function OPTIONS(request: Request) {
+  return corsOptionsResponse(request);
 }
 
 export async function POST(request: Request) {
   if (!verifyAdminAuth(request)) {
-    return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 }, request);
   }
 
   const parsed = await parseRequestBody(request, setupPayloadSchema);
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       ok: false,
       step: 'verify_token',
       error: 'TELEGRAM_BOT_TOKEN is not set in the environment.'
-    }, { status: 400 });
+    }, { status: 400 }, request);
   }
 
   const summary: Record<string, unknown> = {};
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       ok: false,
       step: 'verify_token',
       error: me.description ?? 'Bot token is invalid.'
-    }, { status: 400 });
+    }, { status: 400 }, request);
   }
 
   summary.bot = {
@@ -114,17 +114,29 @@ export async function POST(request: Request) {
       step: 'detect_chat',
       bot: summary.bot,
       error: 'No TELEGRAM_CHAT_ID set and no recent chat found. Add the bot to a group and send a message, then re-run.'
-    }, { status: 400 });
+    }, { status: 400 }, request);
   }
 
   summary.chat_id = finalChatId;
   summary.chat_id_source = envChatId ? 'env' : 'detected';
 
   if (parsed.data.webhookUrl) {
+    const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+    if (!webhookSecret) {
+      return jsonWithCors({
+        ok: false,
+        step: 'set_webhook',
+        error: 'TELEGRAM_WEBHOOK_SECRET is not set in the environment.',
+        ...summary
+      }, { status: 400 }, request);
+    }
+
     const setWebhook = await callTelegram<true>(botToken, 'setWebhook', {
       url: parsed.data.webhookUrl,
       drop_pending_updates: parsed.data.dropPending ?? true,
-      allowed_updates: ['message', 'message_reaction']
+      allowed_updates: ['message', 'message_reaction'],
+      secret_token: webhookSecret
     });
 
     if (!setWebhook.ok) {
@@ -133,7 +145,7 @@ export async function POST(request: Request) {
         step: 'set_webhook',
         error: setWebhook.description ?? 'Telegram rejected the webhook URL.',
         ...summary
-      }, { status: 400 });
+      }, { status: 400 }, request);
     }
 
     summary.webhook = { url: parsed.data.webhookUrl, set: true };
@@ -159,18 +171,18 @@ export async function POST(request: Request) {
       service_role_key_set: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)
     },
     ...summary
-  });
+  }, undefined, request);
 }
 
 export async function PUT(request: Request) {
   if (!verifyAdminAuth(request)) {
-    return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    return jsonWithCors({ ok: false, error: 'Unauthorized' }, { status: 401 }, request);
   }
 
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!botToken) {
-    return jsonWithCors({ ok: false, error: 'TELEGRAM_BOT_TOKEN not set' }, { status: 400 });
+    return jsonWithCors({ ok: false, error: 'TELEGRAM_BOT_TOKEN not set' }, { status: 400 }, request);
   }
 
   const commandsResult = await callTelegram(botToken, 'setMyCommands', {
@@ -187,5 +199,5 @@ export async function PUT(request: Request) {
     message: commandsResult.ok
       ? 'Commands registered. Type / in the group to see them.'
       : `Failed: ${commandsResult.description ?? 'unknown'}`
-  });
+  }, undefined, request);
 }

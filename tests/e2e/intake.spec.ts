@@ -1,4 +1,15 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+async function enterAiIntake(page: Page) {
+  await page.getByTestId('consent-button').click();
+  await page.getByRole('button', { name: /start with balance assist/i }).click();
+
+  const input = page.getByPlaceholder(/Type your message|Message the team/i);
+  await expect(input).toBeVisible();
+  await expect(page.getByText(/What can I help you with today\?/i)).toBeVisible();
+
+  return input;
+}
 
 // Playwright E2E covering the tool-calling intake path against the
 // gated persistent-rail layout (reintroduced in fix/brief-rail-gating):
@@ -22,6 +33,14 @@ import { test, expect } from '@playwright/test';
 
 test.describe('balance assist intake via persistent rail', () => {
   test('short intake confirmations do not fall back to the scripted summary flow', async ({ page }) => {
+    await page.route('**/api/sessions/inspect', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, exists: false })
+      });
+    });
+
     await page.route('**/api/sessions', async (route) => {
       await route.fulfill({
         status: 200,
@@ -70,9 +89,7 @@ test.describe('balance assist intake via persistent rail', () => {
 
     await page.goto('/preview');
 
-    const input = page.getByPlaceholder(/Type your message|Message the team/i);
-    await expect(input).toBeVisible();
-    await expect(page.getByText(/What can I help you with today\?/i)).toBeVisible();
+    const input = await enterAiIntake(page);
 
     await input.fill('30s animation for social media');
     await input.press('Enter');
@@ -90,6 +107,14 @@ test.describe('balance assist intake via persistent rail', () => {
   });
 
   test('rail is gated on hasProjectIntent, then auto-switches to summary and triggers send', async ({ page }) => {
+    await page.route('**/api/sessions/inspect', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, exists: false })
+      });
+    });
+
     // Mock /api/sessions so ensureSession() inside the widget can resolve
     // when the user clicks "Approve & send to team".
     await page.route('**/api/sessions', async (route) => {
@@ -146,16 +171,7 @@ test.describe('balance assist intake via persistent rail', () => {
 
     await page.goto('/preview');
 
-    // The widget opens automatically on /preview. Wait for the chat
-    // input, which is the simplest signal that the widget has mounted.
-    const input = page.getByPlaceholder(/Type your message|Message the team/i);
-    await expect(input).toBeVisible();
-
-    // The intro step plays three scripted bot messages before the user
-    // can submit. handleSubmitText returns early while isTyping is true,
-    // so wait for the final intro prompt to be visible (i.e. isTyping
-    // is back to false) before driving the user input.
-    await expect(page.getByText(/What can I help you with today\?/i)).toBeVisible();
+    const input = await enterAiIntake(page);
 
     // The rail is gated on hasProjectIntent. Before the user has sent
     // any intake-bearing message, the rail must NOT be in the DOM.

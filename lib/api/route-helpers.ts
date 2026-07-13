@@ -1,33 +1,47 @@
 import { NextResponse } from 'next/server';
 import type { ZodSchema } from 'zod';
-import { isAllowedOrigin, getAllowedOrigins } from '@/lib/security/origin';
+import { isAllowedOrigin } from '@/lib/security/origin';
 
-function buildCorsHeaders(origin: string | null): Record<string, string> {
+type CorsSource = Request | string | null | undefined;
+
+function resolveOrigin(source: CorsSource): string | null {
+  if (typeof source === 'string' || source === null) {
+    return source;
+  }
+
+  if (!source) {
+    return null;
+  }
+
+  return source.headers.get('origin');
+}
+
+function buildCorsHeaders(source: CorsSource): Record<string, string> {
+  const origin = resolveOrigin(source);
   const headers: Record<string, string> = {
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, x-session-capability',
     'Vary': 'Origin'
   };
 
-  if (isAllowedOrigin(origin)) {
-    headers['Access-Control-Allow-Origin'] = origin!;
-  } else {
-    headers['Access-Control-Allow-Origin'] = getAllowedOrigins()[0];
+  if (origin && isAllowedOrigin(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
   }
 
   return headers;
 }
 
-export function corsOptionsResponse(origin: string | null = null) {
-  return new NextResponse(null, { status: 204, headers: buildCorsHeaders(origin) });
+export function corsOptionsResponse(source: CorsSource = null) {
+  return new NextResponse(null, { status: 204, headers: buildCorsHeaders(source) });
 }
 
-export function jsonWithCors(body: unknown, init?: ResponseInit, origin: string | null = null) {
+export function jsonWithCors(body: unknown, init?: ResponseInit, source: CorsSource = null) {
   return NextResponse.json(body, {
     ...init,
     headers: {
       ...(init?.headers ?? {}),
-      ...buildCorsHeaders(origin)
+      ...buildCorsHeaders(source)
     }
   });
 }
@@ -43,7 +57,7 @@ export async function parseRequestBody<T>(
   } catch {
     return {
       ok: false,
-      response: jsonWithCors({ error: 'Invalid JSON body' }, { status: 400 })
+      response: jsonWithCors({ error: 'Invalid JSON body' }, { status: 400 }, request)
     };
   }
 
@@ -54,7 +68,8 @@ export async function parseRequestBody<T>(
       ok: false,
       response: jsonWithCors(
         { error: 'Invalid request payload', issues: result.error.issues },
-        { status: 400 }
+        { status: 400 },
+        request
       )
     };
   }

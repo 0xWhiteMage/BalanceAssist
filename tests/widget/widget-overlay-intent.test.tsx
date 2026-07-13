@@ -45,17 +45,30 @@ function chatSessionResponse() {
   }) as unknown as typeof fetch;
 }
 
+async function startAiConversation() {
+  fireEvent.click(await screen.findByTestId('consent-button'));
+  fireEvent.click(await screen.findByRole('button', { name: /start with balance assist/i }));
+
+  const input = (await waitFor(() => {
+    const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
+    expect(el).toBeInTheDocument();
+    return el;
+  }, { timeout: 4000 })) as HTMLInputElement;
+
+  await waitFor(() => {
+    expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
+  }, { timeout: 7000 });
+
+  return input;
+}
+
 describe('WidgetOverlay brief rail gating (Fix 4)', () => {
   test('typing an out-of-scope "draft text for my homework" message does NOT open the brief rail', async () => {
     global.fetch = chatSessionResponse();
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
-      expect(el).toBeInTheDocument();
-      return el;
-    })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     // No rail at the start.
     expect(screen.queryByTestId('review-rail')).toBeNull();
@@ -108,11 +121,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
-      expect(el).toBeInTheDocument();
-      return el;
-    }, { timeout: 4000 })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     fireEvent.change(input, { target: { value: 'I want a 30s 3D animation' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -164,13 +173,9 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
-      expect(el).toBeInTheDocument();
-      return el;
-    }, { timeout: 4000 })) as HTMLInputElement;
+    const input = await startAiConversation();
 
-await waitFor(() => {
+    await waitFor(() => {
       expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
     }, { timeout: 7000 });
 
@@ -241,11 +246,7 @@ await waitFor(() => {
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
-      expect(el).toBeInTheDocument();
-      return el;
-    }, { timeout: 4000 })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     await waitFor(() => {
       expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
@@ -279,6 +280,64 @@ await waitFor(() => {
     expect(ctx2!.capturedFields).not.toContain('timelineBand');
     expect(ctx2!.capturedFields).not.toContain('budgetBand');
   }, 15000);
+
+  test('chat requests only include browser user messages even after assistant replies exist', async () => {
+    const chatBodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatBodies.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify({
+            message: 'Got it. Tell me more.',
+            draftUpdates: {},
+            briefReady: false,
+            reviewPrompt: null,
+            missingFields: []
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(
+          JSON.stringify({ sessionId: 'mock-session', persisted: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/events')) {
+        return new Response('{}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
+    }, { timeout: 7000 });
+
+    fireEvent.change(input, { target: { value: 'We need a launch film.' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Got it\. Tell me more\./i)).toBeInTheDocument();
+    }, { timeout: 4000 });
+
+    fireEvent.change(input, { target: { value: 'The audience is regional.' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(chatBodies.length).toBeGreaterThanOrEqual(2);
+    }, { timeout: 4000 });
+
+    expect(chatBodies[1]?.messages).toEqual([
+      { role: 'user', content: 'We need a launch film.' },
+      { role: 'user', content: 'The audience is regional.' }
+    ]);
+  }, 10000);
 });
 
 describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
@@ -313,11 +372,7 @@ describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
-      expect(el).toBeInTheDocument();
-      return el;
-    }, { timeout: 4000 })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     fireEvent.change(input, {
       target: {
@@ -403,11 +458,7 @@ describe('intake short replies stay on the LLM path', () => {
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
-      expect(el).toBeInTheDocument();
-      return el;
-    }, { timeout: 4000 })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     await waitFor(() => {
       expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);
@@ -489,11 +540,7 @@ describe('intake short replies stay on the LLM path', () => {
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
-      expect(el).toBeInTheDocument();
-      return el;
-    }, { timeout: 4000 })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     await waitFor(() => {
       expect(screen.getAllByText(/What can I help you with today\?/i).length).toBeGreaterThan(0);

@@ -1,83 +1,221 @@
 // @vitest-environment node
-import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-const originalFetch = global.fetch;
+const { requireSessionMock } = vi.hoisted(() => ({
+  requireSessionMock: vi.fn()
+}));
+
+vi.mock('@/lib/api/require-session', () => ({
+  requireSession: requireSessionMock
+}));
+
+function buildSupabase(options?: { draft?: Record<string, unknown>; draftVersion?: number }) {
+  const inserts: Array<Record<string, unknown>> = [];
+  const updates: Array<Record<string, unknown>> = [];
+  const draft = options?.draft ?? {};
+  const draftVersion = options?.draftVersion ?? 0;
+
+  return {
+    inserts,
+    updates,
+    client: {
+      from: vi.fn((table: string) => {
+        if (table === 'sessions') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({ data: { draft, draft_version: draftVersion }, error: null }))
+              }))
+            })),
+            update: vi.fn((row: Record<string, unknown>) => {
+              updates.push(row);
+              return { eq: vi.fn(async () => ({ error: null })) };
+            })
+          };
+        }
+
+        return {
+          insert: vi.fn((row: Record<string, unknown>) => {
+            inserts.push(row);
+            return Promise.resolve({ error: null });
+          })
+        };
+      })
+    }
+  };
+}
 
 describe('POST /api/attachments/link', () => {
   beforeEach(() => {
-    process.env.SUPABASE_URL = 'http://test';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'k';
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://test';
+    vi.resetModules();
+    requireSessionMock.mockReset();
   });
+
   afterEach(() => {
-    global.fetch = originalFetch;
-    delete process.env.SUPABASE_URL;
-    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    vi.restoreAllMocks();
   });
 
   test('persists a reference link for a session', async () => {
-    const insertCalls: unknown[] = [];
-    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/rest/v1/reference_links')) {
-        insertCalls.push('insert');
-        return new Response(JSON.stringify([{ id: 1 }]), {
-          status: 201,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      return new Response('{}', { status: 200 });
-    }) as unknown as typeof fetch;
-    const { POST } = await import('@/app/api/attachments/link/route');
-    const req = new Request('http://localhost/api/attachments/link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'sess-1', url: 'https://youtu.be/abc', kind: 'youtube' })
+    const { client, inserts } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-1', capability: 'sess-1.secret' },
+      supabase: client
     });
+
+    const { POST } = await import('@/app/api/attachments/link/route');
+      const req = new Request('http://localhost/api/attachments/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'sess-1',
+          url: 'https://youtu.be/abc',
+          kind: 'youtube',
+          consent: { aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() }
+        })
+      });
+
     const res = await POST(req);
     expect(res.status).toBe(200);
+
     const data = await res.json();
     expect(data.ok).toBe(true);
-    expect(insertCalls.length).toBe(1);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]).toMatchObject({
+      session_id: 'sess-1',
+      url: 'https://youtu.be/abc',
+      kind: 'youtube'
+    });
   });
 
-  test('persists a reference link without a sessionId (session_id=null)', async () => {
-    const insertPayloads: Array<Record<string, unknown>> = [];
-    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/rest/v1/reference_links')) {
-        const body = JSON.parse((init?.body as string) ?? '{}');
-        insertPayloads.push(body);
-        return new Response(JSON.stringify([{ id: 1 }]), {
-          status: 201,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      return new Response('{}', { status: 200 });
-    }) as unknown as typeof fetch;
-    const { POST } = await import('@/app/api/attachments/link/route');
-    const req = new Request('http://localhost/api/attachments/link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://youtu.be/abc', kind: 'youtube' })
+  test('uses the authenticated session when sessionId is omitted', async () => {
+    const { client, inserts } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-auth', capability: 'sess-auth.secret' },
+      supabase: client
     });
+
+    const { POST } = await import('@/app/api/attachments/link/route');
+      const req = new Request('http://localhost/api/attachments/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: 'https://youtu.be/abc',
+          kind: 'youtube',
+          consent: { aiAnalysis: false, producerShare: true, consentedAt: new Date().toISOString() }
+        })
+      });
+
     const res = await POST(req);
     expect(res.status).toBe(200);
+
     const data = await res.json();
     expect(data.ok).toBe(true);
-    expect(insertPayloads).toHaveLength(1);
-    expect(insertPayloads[0].session_id).toBeNull();
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].session_id).toBe('sess-auth');
   });
 
   test('rejects malformed URLs', async () => {
     const { POST } = await import('@/app/api/attachments/link/route');
+      const req = new Request('http://localhost/api/attachments/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'sess-1',
+          url: 'not a url',
+          kind: 'youtube',
+          consent: { aiAnalysis: true, producerShare: true, consentedAt: new Date().toISOString() }
+        })
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+  });
+
+  test('rejects links when producer-share consent is missing', async () => {
+    const { client } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-auth', capability: 'sess-auth.secret' },
+      supabase: client
+    });
+
+    const { POST } = await import('@/app/api/attachments/link/route');
     const req = new Request('http://localhost/api/attachments/link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'sess-1', url: 'not a url', kind: 'youtube' })
+      body: JSON.stringify({
+        url: 'https://youtu.be/abc',
+        kind: 'youtube',
+        consent: { aiAnalysis: true, producerShare: false, consentedAt: new Date().toISOString() }
+      })
     });
+
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.error).toMatch(/producer|team/i);
+  });
+
+  test('rejects links when consent is omitted', async () => {
+    const { client } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-auth', capability: 'sess-auth.secret' },
+      supabase: client
+    });
+
+    const { POST } = await import('@/app/api/attachments/link/route');
+    const req = new Request('http://localhost/api/attachments/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: 'https://youtu.be/abc',
+        kind: 'youtube'
+      })
+    });
+
+    const res = await POST(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.error).toMatch(/consent/i);
+  });
+
+  test('accepts links when producer-share consent was already recorded server-side', async () => {
+    const { client, inserts } = buildSupabase({
+      draft: {
+        __attachment_producer_share_consented_at: {
+          value: '2026-07-11T10:00:00.000Z',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      draftVersion: 1
+    });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-auth', capability: 'sess-auth.secret' },
+      supabase: client
+    });
+
+    const { POST } = await import('@/app/api/attachments/link/route');
+    const req = new Request('http://localhost/api/attachments/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: 'https://youtu.be/abc',
+        kind: 'youtube'
+      })
+    });
+
+    const res = await POST(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(inserts).toHaveLength(1);
   });
 });

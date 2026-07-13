@@ -35,13 +35,13 @@ describe('security/config', () => {
     });
 
     it('throws when TELEGRAM_WEBHOOK_SECRET is missing in production', () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as Record<string, string>).NODE_ENV = 'production';
       delete process.env.TELEGRAM_WEBHOOK_SECRET;
       expect(() => requireWebhookSecret()).toThrow('TELEGRAM_WEBHOOK_SECRET');
     });
 
     it('allows missing webhook secret in development', () => {
-      process.env.NODE_ENV = 'development';
+      (process.env as Record<string, string>).NODE_ENV = 'development';
       delete process.env.TELEGRAM_WEBHOOK_SECRET;
       const config = requireWebhookSecret();
       expect(config.webhookSecret).toBeNull();
@@ -87,7 +87,7 @@ describe('security/origin', () => {
     });
 
     it('allows localhost in development', () => {
-      process.env.NODE_ENV = 'development';
+      (process.env as Record<string, string>).NODE_ENV = 'development';
       expect(isAllowedOrigin('http://localhost:3000')).toBe(true);
     });
   });

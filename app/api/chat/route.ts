@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { z } from 'zod';
 import { getEnv } from '@/lib/env';
@@ -21,9 +20,13 @@ import { listAllWorks, searchWorks, type WorkEntry } from '@/lib/conversation/wo
 import type { ConversationStepId } from '@/lib/conversation/types';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
+import { clearField, getVisibleDraftValues, normalizeVersionedDraft, updateField, type VersionedDraft } from '@/lib/conversation/draft-versioning';
+import { requireSession } from '@/lib/api/require-session';
+import { createLogger, extractRequestId } from '@/lib/logger';
+import { emitEvent } from '@/lib/observability/events';
 
 const chatMessageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
+  role: z.literal('user'),
   content: z.string().max(8000)
 });
 
@@ -149,10 +152,12 @@ async function callOpenAICompatible(
   options?: {
     useTools?: boolean;
     sessionId?: string;
-    priorDraft?: Record<string, string>;
+    priorDraft?: Partial<LeadDraft>;
     userMessage?: string;
+    requestId?: string;
   }
 ): Promise<ProviderResult> {
+  const logger = createLogger('chat', options?.requestId);
   const useTools = options?.useTools ?? false;
   const body: Record<string, unknown> = {
     model,
@@ -202,7 +207,7 @@ async function callOpenAICompatible(
   const truncated = finishReason === 'length' && !hasToolCalls && (rawContent?.trim().length ?? 0) > 0;
 
   if (finishReason === 'length' && !hasToolCalls) {
-    console.warn('[chat] response truncated: finish_reason=length');
+    logger.warn('response truncated: finish_reason=length');
   }
 
   if (useTools && hasToolCalls) {
@@ -228,13 +233,13 @@ async function callOpenAICompatible(
             );
             toolArguments = guarded;
           } else {
-            console.warn('[chat] record_brief_updates tool arguments failed schema validation', {
+            logger.warn('record_brief_updates tool arguments failed schema validation', {
               sessionId: options?.sessionId,
               issues: result.error.issues
             });
           }
         } catch (error) {
-          console.warn('[chat] record_brief_updates tool arguments failed to parse as JSON', {
+          logger.warn('record_brief_updates tool arguments failed to parse as JSON', {
             sessionId: options?.sessionId,
             message: error instanceof Error ? error.message : 'unknown'
           });
@@ -247,7 +252,7 @@ async function callOpenAICompatible(
             sharedWork = buildSharedWorkFromEntries(cleaned.slugs, cleaned.category);
           }
         } catch (error) {
-          console.warn('[chat] share_work tool arguments failed to parse as JSON', {
+          logger.warn('share_work tool arguments failed to parse as JSON', {
             sessionId: options?.sessionId,
             message: error instanceof Error ? error.message : 'unknown'
           });
@@ -304,39 +309,13 @@ async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<s
 }
 
 async function logLlmEvent(
-  baseUrl: string,
   sessionId: string | undefined,
   category: 'reply' | 'refusal' | 'local_fallback',
-  hasDraft: boolean
+  hasDraft: boolean,
+  requestId?: string
 ) {
-  try {
-    await fetch(`${baseUrl}/api/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: sessionId ?? 'anonymous',
-        eventName: 'llm_request',
-        properties: { category, hasDraft }
-      })
-    });
-  } catch {
-    // best-effort
-  }
-}
-
-function parsePriorDraft(raw: string | undefined): Record<string, string> {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    const result: Record<string, string> = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === 'string') result[key] = value;
-    }
-    return result;
-  } catch {
-    return {};
-  }
+  if (!sessionId) return;
+  emitEvent('llm_request', { sessionId, category, hasDraft }, requestId);
 }
 
 type ChatContext = {
@@ -369,16 +348,167 @@ function computeCapturedFieldsFromDraft(draft: Record<string, string>): string[]
   return captured;
 }
 
-function buildLlmContext(context: ChatContext) {
-  const priorDraft = parsePriorDraft(context?.draft);
+function toLeadDraftState(draft: Record<string, string>): Partial<LeadDraft> {
+  const leadDraft: Partial<LeadDraft> = {};
+  const target = leadDraft as Record<string, unknown>;
+
+  for (const [key, value] of Object.entries(draft)) {
+    target[key] = value;
+  }
+
+  return leadDraft;
+}
+
+async function loadAuthenticatedDraftState(request: Request, sessionId: string | undefined) {
+  const emptyDraft = {} as VersionedDraft;
+  const emptyPromptDraft: Record<string, string> = {};
+  const emptyPriorDraft: Partial<LeadDraft> = {};
+
+  if (!sessionId) {
+    return {
+      authenticated: false,
+      sessionId: undefined,
+      supabase: null,
+      versionedDraft: emptyDraft,
+      draftVersion: 0,
+      promptDraft: emptyPromptDraft,
+      priorDraft: emptyPriorDraft,
+      response: null as Response | null
+    };
+  }
+
+  const session = await requireSession(request);
+  if (!session.ok) {
+    return {
+      authenticated: false,
+      sessionId,
+      supabase: null,
+      versionedDraft: emptyDraft,
+      draftVersion: 0,
+      promptDraft: emptyPromptDraft,
+      priorDraft: emptyPriorDraft,
+      response: session.response
+    };
+  }
+
+  if (session.auth.sessionId !== sessionId) {
+    return {
+      authenticated: false,
+      sessionId,
+      supabase: null,
+      versionedDraft: emptyDraft,
+      draftVersion: 0,
+      promptDraft: emptyPromptDraft,
+      priorDraft: emptyPriorDraft,
+      response: jsonWithCors({ error: 'Session mismatch' }, { status: 403 })
+    };
+  }
+
+  const { data, error } = await session.supabase
+    .from('sessions')
+    .select('draft, draft_version')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      authenticated: false,
+      sessionId,
+      supabase: null,
+      versionedDraft: emptyDraft,
+      draftVersion: 0,
+      promptDraft: emptyPromptDraft,
+      priorDraft: emptyPriorDraft,
+      response: jsonWithCors({ error: error.message }, { status: 500 })
+    };
+  }
+
+  if (!data) {
+    return {
+      authenticated: false,
+      sessionId,
+      supabase: null,
+      versionedDraft: emptyDraft,
+      draftVersion: 0,
+      promptDraft: emptyPromptDraft,
+      priorDraft: emptyPriorDraft,
+      response: jsonWithCors({ error: 'Session not found' }, { status: 404 })
+    };
+  }
+
+  const row = data as { draft?: unknown; draft_version?: number | null };
+  const versionedDraft = normalizeVersionedDraft(row.draft);
+  const promptDraft = getVisibleDraftValues(versionedDraft);
+
+  return {
+    authenticated: true,
+    sessionId,
+    supabase: session.supabase,
+    versionedDraft,
+    draftVersion: typeof row.draft_version === 'number' ? row.draft_version : 0,
+    promptDraft,
+    priorDraft: toLeadDraftState(promptDraft),
+    response: null as Response | null
+  };
+}
+
+async function persistAuthenticatedDraftState(
+  state: Awaited<ReturnType<typeof loadAuthenticatedDraftState>>,
+  draftUpdates: Record<string, string | boolean>
+) {
+  if (!state.authenticated || !state.supabase || !state.sessionId || Object.keys(draftUpdates).length === 0) {
+    return;
+  }
+
+  let nextDraft = { ...state.versionedDraft };
+  let changed = false;
+
+  for (const [field, value] of Object.entries(draftUpdates)) {
+    const existing = state.versionedDraft[field];
+
+    if (typeof value === 'boolean') {
+      if (existing?.provenance !== 'cleared' && existing?.value === String(value)) {
+        continue;
+      }
+      nextDraft = updateField(nextDraft, field, String(value), 'user-stated');
+      changed = true;
+      continue;
+    }
+
+    if (value.length === 0) {
+      if (!existing || existing.provenance === 'cleared' || existing.value.length === 0) {
+        continue;
+      }
+      nextDraft = clearField(nextDraft, field);
+      changed = true;
+      continue;
+    }
+
+    if (existing?.provenance !== 'cleared' && existing?.value === value) {
+      continue;
+    }
+
+    nextDraft = updateField(nextDraft, field, value, 'user-stated');
+    changed = true;
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  await state.supabase
+    .from('sessions')
+    .update({ draft: nextDraft, draft_version: state.draftVersion + 1 })
+    .eq('id', state.sessionId);
+}
+
+function buildLlmContext(context: ChatContext, promptDraft: Record<string, string>, priorDraft: Partial<LeadDraft>) {
   const briefReady = isBriefReadyForApproval(priorDraft);
-  const derived = computeCapturedFieldsFromDraft(priorDraft);
-  const explicit = context?.capturedFields ?? [];
-  const capturedFields = Array.from(new Set([...derived, ...explicit]));
+  const capturedFields = computeCapturedFieldsFromDraft(promptDraft);
   const systemPrompt = buildSystemPrompt({
     isTeamConnected: context?.isTeamConnected,
     step: context?.step,
-    draft: context?.draft,
+    draft: Object.keys(promptDraft).length > 0 ? JSON.stringify(promptDraft) : undefined,
     briefReady,
     capturedFields
   });
@@ -387,6 +517,7 @@ function buildLlmContext(context: ChatContext) {
 
 export async function POST(request: Request) {
   const parsed = await parseRequestBody(request, chatRequestSchema);
+  const requestId = extractRequestId(request);
 
   if (!parsed.ok) {
     return parsed.response;
@@ -396,7 +527,6 @@ export async function POST(request: Request) {
   const env = getEnv();
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const sessionId = context?.sessionId;
-  const baseUrl = new URL(request.url).origin;
   const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
 
   if (sessionId) {
@@ -431,6 +561,13 @@ export async function POST(request: Request) {
     });
   }
 
+  const draftState = await loadAuthenticatedDraftState(request, sessionId);
+  if (draftState.response) {
+    return draftState.response;
+  }
+
+  const llmContext = buildLlmContext(context, draftState.promptDraft, draftState.priorDraft);
+
   let visibleContent: string;
   let toolArguments: Record<string, unknown> | null = null;
   let sharedWork: SharedWork | null = null;
@@ -439,30 +576,24 @@ export async function POST(request: Request) {
 
   try {
     if (env.DEEPSEEK_API_KEY) {
-      const ctx = buildLlmContext(context);
-      const systemPrompt = ctx.systemPrompt;
-      const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
+      const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
       const model = env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
       const providerResult = await callOpenAICompatible(
         'https://api.deepseek.com/v1/chat/completions',
         env.DEEPSEEK_API_KEY,
         model,
         llmMessages,
-        { useTools: true, sessionId, priorDraft: ctx.priorDraft, userMessage: lastUserMessage }
+        { useTools: true, sessionId, priorDraft: llmContext.priorDraft, userMessage: lastUserMessage, requestId }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
       sharedWork = providerResult.sharedWork;
       truncated = providerResult.truncated;
     } else if (env.MINIMAX_API_KEY) {
-      const ctx = buildLlmContext(context);
-      const systemPrompt = ctx.systemPrompt;
-      const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
+      const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
       visibleContent = await callMinimax(env.MINIMAX_API_KEY, llmMessages);
     } else if (env.OPENAI_API_KEY) {
-      const ctx = buildLlmContext(context);
-      const systemPrompt = ctx.systemPrompt;
-      const llmMessages = [{ role: 'system' as const, content: systemPrompt }, ...messages];
+      const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
       const endpoint = env.OPENAI_API_ENDPOINT ?? 'https://api.openai.com/v1/chat/completions';
       const model = env.OPENAI_MODEL ?? 'gpt-4o-mini';
       const providerResult = await callOpenAICompatible(
@@ -470,7 +601,7 @@ export async function POST(request: Request) {
         env.OPENAI_API_KEY,
         model,
         llmMessages,
-        { useTools: true, sessionId, priorDraft: ctx.priorDraft, userMessage: lastUserMessage }
+        { useTools: true, sessionId, priorDraft: llmContext.priorDraft, userMessage: lastUserMessage, requestId }
       );
       visibleContent = providerResult.content;
       toolArguments = providerResult.toolArguments;
@@ -479,7 +610,7 @@ export async function POST(request: Request) {
     } else {
       category = 'local_fallback';
       const localResponse = getLocalResponse(lastUserMessage, {
-        draft: {} as never,
+        draft: llmContext.priorDraft as never,
         step: (context?.step as ConversationStepId) ?? 'free-chat',
         isTeamConnected: context?.isTeamConnected ?? false
       });
@@ -506,14 +637,13 @@ export async function POST(request: Request) {
     }
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
-    const priorDraft = parsePriorDraft(context?.draft);
-    const mergedDraft = { ...priorDraft, ...draftUpdates };
+    const mergedDraft = { ...llmContext.priorDraft, ...draftUpdates };
     const briefReady = isBriefReadyForApproval(mergedDraft);
     const missingFields = missingReviewFields(mergedDraft);
 
-    if (sessionId) {
-      void logLlmEvent(baseUrl, sessionId, category, Object.keys(draftUpdates).length > 0);
-    }
+    await persistAuthenticatedDraftState(draftState, draftUpdates);
+
+    void logLlmEvent(sessionId, category, Object.keys(draftUpdates).length > 0, requestId);
 
     const replyChunks = splitReplyIntoMessages(replyText);
     if (replyChunks.length > 1) {

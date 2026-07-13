@@ -1,8 +1,12 @@
+import type { AttachmentConsent } from '@/lib/uploads/consent';
+
 export type SessionResponse = {
   sessionId: string;
   status: string;
   sourceUrl: string;
   createdAt?: string;
+  capability?: string;
+  expiresAt?: string;
   persisted?: boolean;
 };
 
@@ -16,7 +20,10 @@ export type FinalizeLeadResponse = {
   sessionId: string;
   qualificationStatus: string;
   persisted?: boolean;
-  telegramSent?: boolean;
+  queued?: boolean;
+  delivered?: boolean;
+  retryable?: boolean;
+  handoffId?: string;
 };
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -27,6 +34,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
 
   try {
     return await fetch(input, {
+      credentials: 'include',
       ...init,
       signal: controller.signal
     });
@@ -54,29 +62,69 @@ async function postJson<T>(url: string, body: unknown): Promise<T | null> {
   }
 }
 
+function sanitizeSourceUrl(sourceUrl: string): string {
+  try {
+    const url = new URL(sourceUrl);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return sourceUrl;
+  }
+}
+
+function sanitizeReferrer(referrer?: string): string | undefined {
+  if (!referrer) return undefined;
+
+  try {
+    return new URL(referrer).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function createSession(payload: {
   sourceUrl: string;
   referrer?: string;
   utm?: Record<string, string>;
+  consentVersion?: string;
+  consentedAt?: string;
 }): Promise<SessionResponse | null> {
-  return postJson<SessionResponse>('/api/sessions', payload);
+  return postJson<SessionResponse>('/api/sessions', {
+    ...payload,
+    sourceUrl: sanitizeSourceUrl(payload.sourceUrl),
+    referrer: sanitizeReferrer(payload.referrer)
+  });
 }
 
-export async function verifySession(sessionId: string): Promise<boolean> {
+export async function getCurrentSession(): Promise<SessionResponse | null> {
   try {
-    const response = await fetchWithTimeout(
-      `/api/sessions/inspect?id=${encodeURIComponent(sessionId)}`,
-      { cache: 'no-store' }
-    );
+    const response = await fetchWithTimeout('/api/sessions/inspect', { cache: 'no-store' });
 
     if (!response.ok) {
-      return false;
+      return null;
     }
 
-    const data = (await response.json()) as { exists?: boolean };
-    return data.exists === true;
+    const data = (await response.json()) as {
+      exists?: boolean;
+      session?: {
+        id?: string;
+        status?: string;
+        source_url?: string;
+        created_at?: string;
+      };
+    };
+
+    if (data.exists !== true || !data.session?.id || !data.session.status || !data.session.source_url) {
+      return null;
+    }
+
+    return {
+      sessionId: data.session.id,
+      status: data.session.status,
+      sourceUrl: data.session.source_url,
+      createdAt: data.session.created_at
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -147,10 +195,15 @@ export async function fetchTeamMessages(
   }
 }
 
-export async function uploadRequestedFiles(sessionId: string, files: File[]): Promise<{ ok: boolean; error?: string }> {
+export async function uploadRequestedFiles(
+  sessionId: string,
+  files: File[],
+  consent: AttachmentConsent
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const form = new FormData();
     form.set('sessionId', sessionId);
+    form.set('consent', JSON.stringify(consent));
     for (const file of files) {
       form.append('files', file, file.name);
     }
@@ -202,6 +255,129 @@ export async function addReferenceLink(payload: ReferenceLinkPayload): Promise<b
   return Boolean(result?.ok);
 }
 
+export async function resetProject(sessionId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${sessionId}/reset`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = (await response.json()) as { ok?: boolean; reset?: boolean };
+    return data.ok === true && data.reset === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function requestProjectDeletion(sessionId: string): Promise<{ ok: boolean; message?: string }> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${sessionId}/delete`, {
+      method: 'POST'
+    });
+
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+    if (!response.ok || !data) {
+      return { ok: false };
+    }
+
+    return { ok: data.ok === true, message: data.message };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export type ProjectDraftResponse = {
+  draft: Record<string, string>;
+  draftVersion: number;
+  fieldCount: number;
+};
+
+function flattenDraftValues(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const values: Record<string, string> = {};
+  for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+    if (!field || typeof field !== 'object') {
+      continue;
+    }
+
+    const row = field as { value?: unknown };
+    if (typeof row.value === 'string') {
+      values[key] = row.value;
+    }
+  }
+
+  return values;
+}
+
+export async function fetchProjectDraft(sessionId: string): Promise<ProjectDraftResponse | null> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${sessionId}/draft`, { cache: 'no-store' });
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as { draft?: unknown; draftVersion?: number; fieldCount?: number };
+    return {
+      draft: flattenDraftValues(data.draft),
+      draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
+      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function updateProjectDraft(
+  sessionId: string,
+  fields: Array<{ field: string; value: string; provenance: 'user-stated' | 'inferred' | 'confirmed' | 'cleared' }>,
+  expectedDraftVersion?: number
+): Promise<
+  | ({ ok: true } & ProjectDraftResponse)
+  | ({ ok: false; conflict: true } & ProjectDraftResponse)
+  | { ok: false; conflict: false }
+> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${sessionId}/draft`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedDraftVersion, fields })
+    });
+
+    const data = (await response.json().catch(() => null)) as
+      | { draft?: unknown; draftVersion?: number; fieldCount?: number }
+      | null;
+
+    if (response.status === 409 && data) {
+      return {
+        ok: false,
+        conflict: true,
+        draft: flattenDraftValues(data.draft),
+        draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
+        fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length
+      };
+    }
+
+    if (!response.ok || !data) {
+      return { ok: false, conflict: false };
+    }
+
+    return {
+      ok: true,
+      draft: flattenDraftValues(data.draft),
+      draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
+      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length
+    };
+  } catch {
+    return { ok: false, conflict: false };
+  }
+}
+
 export type ChatSharedWorkEntry = {
   title: string;
   url: string;
@@ -239,13 +415,20 @@ export type ChatResponse = {
 };
 
 export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResponse | null> {
+  const sanitizedPayload = {
+    ...payload,
+    messages: payload.messages.filter(
+      (message): message is { role: 'user'; content: string } => message.role === 'user'
+    )
+  };
+
   const data = await postJson<{
     message?: string;
     messages?: string[];
     draftUpdates?: Record<string, string>;
     briefReady?: boolean;
     sharedWork?: ChatSharedWork;
-  }>('/api/chat', payload);
+  }>('/api/chat', sanitizedPayload);
   if (!data) return null;
 
   const textChunks: string[] = (() => {

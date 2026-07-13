@@ -23,8 +23,7 @@ const positiveFixture = {
   budgetBand: '50k-150k',
   contactName: 'Alex Tan',
   contactCompany: 'Acme Co',
-  contactEmail: 'alex@acme.com',
-  consentToShare: true
+  contactEmail: 'alex@acme.com'
 };
 
 const negativeFixture = {
@@ -56,6 +55,27 @@ test('referenceLinks and referenceFiles are no longer part of the Zod schema', (
   const shape = (recordBriefUpdatesSchema as unknown as { shape: Record<string, unknown> }).shape;
   expect(shape).not.toHaveProperty('referenceLinks');
   expect(shape).not.toHaveProperty('referenceFiles');
+});
+
+test('consentToShare is NOT part of the LLM-controlled tool schema', () => {
+  const shape = (recordBriefUpdatesSchema as unknown as { shape: Record<string, unknown> }).shape;
+  expect(shape).not.toHaveProperty('consentToShare');
+});
+
+test('rejects consentToShare from LLM tool call', () => {
+  const result = recordBriefUpdatesSchema.safeParse({
+    service: 'production',
+    projectType: 'Video',
+    projectScope: '30s animation',
+    scopePolished: '',
+    timelineBand: '1-2-months',
+    budgetBand: '20k-50k',
+    contactName: 'Tool',
+    contactCompany: 'Acme',
+    contactEmail: 'tool@example.com',
+    consentToShare: true
+  });
+  expect(result.success).toBe(false);
 });
 
 test('rejects unknown keys', () => {

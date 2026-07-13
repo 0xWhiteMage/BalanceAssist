@@ -1,13 +1,22 @@
 // @vitest-environment node
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 
-const { sendTelegramMessageMock, editForumTopicMock, ensureTelegramTopicMock, hasSupabaseServerConfigMock, createServerSupabaseClientMock, enqueueHandoffMock } = vi.hoisted(() => ({
+const {
+  sendTelegramMessageMock,
+  editForumTopicMock,
+  ensureTelegramTopicMock,
+  hasSupabaseServerConfigMock,
+  createServerSupabaseClientMock,
+  enqueueHandoffMock,
+  requireSessionMock
+} = vi.hoisted(() => ({
   sendTelegramMessageMock: vi.fn(async () => ({ messageId: 1 })),
   editForumTopicMock: vi.fn(async () => true),
   ensureTelegramTopicMock: vi.fn(async () => null),
   hasSupabaseServerConfigMock: vi.fn(() => true),
   createServerSupabaseClientMock: vi.fn(),
-  enqueueHandoffMock: vi.fn(async () => ({ persisted: true, queued: true, delivered: false, retryable: false, handoffId: 'ho-test-123' }))
+  enqueueHandoffMock: vi.fn(async () => ({ persisted: true, queued: true, delivered: false, retryable: false, handoffId: 'ho-test-123' })),
+  requireSessionMock: vi.fn()
 }));
 
 vi.mock('@/lib/telegram', () => ({
@@ -25,10 +34,32 @@ vi.mock('@/lib/handoff/outbox', () => ({
   enqueueHandoff: enqueueHandoffMock
 }));
 
+vi.mock('@/lib/api/require-session', () => ({
+  requireSession: requireSessionMock
+}));
+
 function buildMockSupabase({
-  telegramThreadId = 42
+  telegramThreadId = 42,
+  draft = {
+    service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+    projectType: { value: 'Video', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+    projectScope: { value: '30s spot', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+    timelineBand: { value: '1-2-months', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+    budgetBand: { value: '20k-50k', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+    contactName: { value: 'Sam', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+    contactEmail: { value: 'sam@example.com', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' }
+  },
+  draftVersion = 3,
+  referenceLinks = [],
+  referenceFiles = [],
+  leadInsertError = null
 }: {
   telegramThreadId?: number | null;
+  draft?: Record<string, unknown>;
+  draftVersion?: number;
+  referenceLinks?: Array<{ url: string; kind?: string }>;
+  referenceFiles?: Array<{ original_name: string }>;
+  leadInsertError?: { message: string } | null;
 } = {}) {
   const client = {
     from: vi.fn((table: string) => {
@@ -37,9 +68,13 @@ function buildMockSupabase({
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: telegramThreadId
-                  ? { telegram_thread_id: telegramThreadId, contact_name: null, contact_company: null }
-                  : { telegram_thread_id: null, contact_name: null, contact_company: null },
+                data: {
+                  telegram_thread_id: telegramThreadId,
+                  contact_name: null,
+                  contact_company: null,
+                  draft,
+                  draft_version: draftVersion
+                },
                 error: null
               }))
             }))
@@ -50,7 +85,21 @@ function buildMockSupabase({
       }
       if (table === 'leads') {
         return {
-          insert: vi.fn(async () => ({ error: null }))
+          insert: vi.fn(async () => ({ error: leadInsertError }))
+        };
+      }
+      if (table === 'reference_links') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: referenceLinks, error: null }))
+          }))
+        };
+      }
+      if (table === 'uploaded_files') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: referenceFiles, error: null }))
+          }))
         };
       }
       return {
@@ -64,11 +113,11 @@ function buildMockSupabase({
   return { client };
 }
 
-async function callFinalizeRoute(body: Record<string, unknown>) {
+async function callFinalizeRoute(body: Record<string, unknown>, headers: Record<string, string> = {}) {
   const { POST } = await import('@/app/api/leads/finalize/route');
   const req = new Request('http://localhost/api/leads/finalize', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', origin: 'https://www.balancestudio.tv', ...headers },
     body: JSON.stringify(body)
   });
   return POST(req);
@@ -79,12 +128,23 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     hasSupabaseServerConfigMock.mockReturnValue(true);
     enqueueHandoffMock.mockReset();
     enqueueHandoffMock.mockImplementation(async () => ({ persisted: true, queued: true, delivered: false, retryable: false, handoffId: 'ho-test-123' }));
+    requireSessionMock.mockReset();
+    requireSessionMock.mockImplementation(async (_request: Request, expectedSessionId?: string) => ({
+      ok: true,
+      auth: {
+        sessionId: expectedSessionId && expectedSessionId.length > 0
+          ? expectedSessionId
+          : '11111111-2222-3333-4444-555555555555',
+        capability: 'session-capability'
+      },
+      supabase: createServerSupabaseClientMock()
+    }));
   });
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  test('enqueues a handoff with project summary on approve', async () => {
+  test('enqueues a handoff with project summary on approve using canonical draft, not browser leadDraft', async () => {
     const { client } = buildMockSupabase({ telegramThreadId: 42 });
     createServerSupabaseClientMock.mockReturnValue(client);
 
@@ -95,12 +155,12 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
       recommendedNextStep: 'production',
       leadDraft: {
         service: 'production',
-        projectType: 'Video',
-        projectScope: '30s animation for social media',
-        timelineBand: '1-2-months',
-        budgetBand: '20k-50k',
-        contactName: 'Jayden',
-        contactEmail: 'jayden@example.com'
+        projectType: 'ATTACKER-VALUE',
+        projectScope: 'ATTACKER SCOPE',
+        timelineBand: 'attacker',
+        budgetBand: 'attacker',
+        contactName: 'Attacker',
+        contactEmail: 'attacker@evil.com'
       }
     });
 
@@ -111,44 +171,65 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     expect(data.queued).toBe(true);
 
     expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
-    const handoffPayload = enqueueHandoffMock.mock.calls[0][1];
+    const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { type: string; sessionId: string; threadId: number; summary: string };
     expect(handoffPayload.type).toBe('approval');
     expect(handoffPayload.sessionId).toBe('11111111-2222-3333-4444-555555555555');
     expect(handoffPayload.threadId).toBe(42);
-    expect(handoffPayload.summary).toContain('Brief approved');
+    expect(handoffPayload.summary).toContain('Service: production');
     expect(handoffPayload.summary).toContain('Video');
-    expect(handoffPayload.summary).toContain('30s animation for social media');
-    expect(handoffPayload.summary).toContain('Jayden');
+    expect(handoffPayload.summary).toContain('30s spot');
+    expect(handoffPayload.summary).toContain('Sam');
+    expect(handoffPayload.summary).not.toContain('ATTACKER');
   });
 
   test('still enqueues when there are no attachments', async () => {
-    const { client } = buildMockSupabase({ telegramThreadId: 99 });
+    const { client } = buildMockSupabase({
+      telegramThreadId: 99,
+      draft: {
+        service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        projectType: { value: 'Animation', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        projectScope: { value: 'event with 3 led screens', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        timelineBand: { value: 'flexible', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        budgetBand: { value: 'under-20k', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactName: { value: 'Mei', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactEmail: { value: 'mei@example.com', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' }
+      }
+    });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     const res = await callFinalizeRoute({
       sessionId: '22222222-3333-4444-5555-666666666666',
       qualificationStatus: 'needs_review',
-      leadDraft: {
-        service: 'production',
-        projectType: 'Animation',
-        projectScope: 'event with 3 led screens',
-        timelineBand: 'flexible',
-        budgetBand: 'under-20k',
-        contactName: 'Mei',
-        contactEmail: 'mei@example.com'
-      }
+      leadDraft: {}
     });
 
     expect(res.status).toBe(200);
     expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
-    const handoffPayload = enqueueHandoffMock.mock.calls[0][1];
+    const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { summary: string };
     expect(handoffPayload.summary).toContain('event with 3 led screens');
     expect(handoffPayload.summary).not.toContain('Reference links:');
     expect(handoffPayload.summary).not.toContain('Reference files:');
   });
 
-  test('includes reference links in handoff summary', async () => {
-    const { client } = buildMockSupabase({ telegramThreadId: 7 });
+  test('includes reference links from the database, not the browser payload', async () => {
+    const { client } = buildMockSupabase({
+      telegramThreadId: 7,
+      draft: {
+        service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        projectType: { value: 'Video', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        projectScope: { value: '30s spot', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        timelineBand: { value: '1-2-months', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        budgetBand: { value: '20k-50k', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactName: { value: 'Sam', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactEmail: { value: 'sam@example.com', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        __attachment_producer_share_consented_at: {
+          value: '2026-07-11T10:00:00.000Z',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      referenceLinks: [{ url: 'https://youtu.be/canonical', kind: 'youtube' }]
+    });
     createServerSupabaseClientMock.mockReturnValue(client);
 
     const res = await callFinalizeRoute({
@@ -162,15 +243,59 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
         budgetBand: '20k-50k',
         contactName: 'Alex',
         contactEmail: 'alex@example.com',
-        referenceLinks: [{ kind: 'youtube', url: 'https://youtu.be/abc' }]
+        referenceLinks: [{ kind: 'youtube', url: 'https://attacker.com/bad' }]
       }
     });
 
     expect(res.status).toBe(200);
     expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
-    const handoffPayload = enqueueHandoffMock.mock.calls[0][1];
-    expect(handoffPayload.summary).toContain('Reference links:');
-    expect(handoffPayload.summary).toContain('https://youtu.be/abc');
+    const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { summary: string };
+    expect(handoffPayload.summary).toContain('Links:');
+    expect(handoffPayload.summary).toContain('https://youtu.be/canonical');
+    expect(handoffPayload.summary).not.toContain('attacker.com');
+  });
+
+  test('does not include links or files in the handoff packet when producer-share was not recorded server-side', async () => {
+    const { client } = buildMockSupabase({
+      telegramThreadId: 7,
+      draft: {
+        service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        projectType: { value: 'Video', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        projectScope: { value: '30s spot', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        timelineBand: { value: '1-2-months', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        budgetBand: { value: '20k-50k', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactName: { value: 'Sam', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        contactEmail: { value: 'sam@example.com', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+        __attachment_ai_analysis_consented_at: {
+          value: '2026-07-11T10:00:00.000Z',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        }
+      },
+      referenceLinks: [{ url: 'https://youtu.be/private-analysis-only', kind: 'youtube' }],
+      referenceFiles: [{ original_name: 'analysis-only.pdf' }]
+    });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const res = await callFinalizeRoute({
+      sessionId: '39333333-4444-5555-6666-777777777777',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s spot',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: 'Alex',
+        contactEmail: 'alex@example.com'
+      }
+    });
+
+    expect(res.status).toBe(200);
+    expect(enqueueHandoffMock).toHaveBeenCalledTimes(1);
+    const handoffPayload = (enqueueHandoffMock.mock.calls as unknown[][])[0]![1] as { summary: string };
+    expect(handoffPayload.summary).not.toContain('private-analysis-only');
+    expect(handoffPayload.summary).not.toContain('analysis-only.pdf');
   });
 
   test('does NOT enqueue when there is no telegram thread', async () => {
@@ -246,5 +371,237 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     expect(data.queued).toBe(false);
     expect(data.retryable).toBe(true);
     expect(data.handoffId).toBe('ho-failed');
+  });
+
+  test('returns a non-2xx failure and does not enqueue when lead persistence fails', async () => {
+    const { client } = buildMockSupabase({
+      telegramThreadId: 11,
+      leadInsertError: { message: 'insert failed' }
+    });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const res = await callFinalizeRoute({
+      sessionId: '77777777-8888-9999-aaaa-bbbbbbbbbbbb',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s spot',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: 'Sam',
+        contactEmail: 'sam@example.com'
+      }
+    });
+
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.ok).toBe(false);
+    expect(data.persisted).toBe(false);
+    expect(data.error).toContain('insert failed');
+    expect(enqueueHandoffMock).not.toHaveBeenCalled();
+  });
+
+  test('records consentToShare on the canonical draft during finalize', async () => {
+    const updateCalls: Array<{ table: string; args: unknown[] }> = [];
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === 'sessions') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: {
+                    telegram_thread_id: 42,
+                    contact_name: null,
+                    contact_company: null,
+                    draft: {
+                      service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      projectType: { value: 'Video', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      projectScope: { value: '30s spot', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      timelineBand: { value: '1-2-months', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      budgetBand: { value: '20k-50k', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      contactName: { value: 'Sam', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      contactEmail: { value: 'sam@example.com', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' }
+                    },
+                    draft_version: 3
+                  },
+                  error: null
+                }))
+              }))
+            })),
+            update: vi.fn((row: Record<string, unknown>) => {
+              updateCalls.push({ table, args: [row] });
+              return { eq: vi.fn(async () => ({ error: null })) };
+            }),
+            insert: vi.fn(async () => ({ error: null }))
+          };
+        }
+        if (table === 'leads') {
+          return {
+            insert: vi.fn((row: Record<string, unknown>) => {
+              inserts.push({ table, row });
+              return Promise.resolve({ error: null });
+            })
+          };
+        }
+        if (table === 'reference_links') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(async () => ({ data: [], error: null }))
+            }))
+          };
+        }
+        if (table === 'uploaded_files') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(async () => ({ data: [], error: null }))
+            }))
+          };
+        }
+        return {};
+      })
+    };
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const res = await callFinalizeRoute({
+      sessionId: '11111111-2222-3333-4444-555555555555',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: '30s spot',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: 'Sam',
+        contactEmail: 'sam@example.com'
+      }
+    });
+
+    expect(res.status).toBe(200);
+
+    const draftUpdate = updateCalls.find(
+      (c) => c.table === 'sessions' && c.args[0] && typeof c.args[0] === 'object' && 'draft' in (c.args[0] as Record<string, unknown>)
+    );
+    expect(draftUpdate).toBeDefined();
+
+    const updateArg = draftUpdate!.args[0] as { draft: Record<string, { value: string; provenance: string }>; draft_version: number };
+    expect(updateArg.draft.consentToShare).toBeDefined();
+    expect(updateArg.draft.consentToShare.value).toBe('true');
+    expect(updateArg.draft.consentToShare.provenance).toBe('confirmed');
+    expect(updateArg.draft_version).toBe(4);
+  });
+
+  test('skips persistence when canonical draft has no substance', async () => {
+    const { client } = buildMockSupabase({
+      telegramThreadId: 42,
+      draft: {}
+    });
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    const res = await callFinalizeRoute({
+      sessionId: '11111111-2222-3333-4444-555555555555',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'Video',
+        projectScope: 'browser-only data',
+        timelineBand: '1-2-months',
+        budgetBand: '20k-50k',
+        contactName: 'Attacker',
+        contactEmail: 'attacker@evil.com'
+      }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.persisted).toBe(false);
+    expect(enqueueHandoffMock).not.toHaveBeenCalled();
+  });
+
+  test('uses database lead record from canonical draft values, ignoring browser leadDraft', async () => {
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === 'sessions') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: {
+                    telegram_thread_id: 42,
+                    contact_name: null,
+                    contact_company: null,
+                    draft: {
+                      service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      projectType: { value: 'Video', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      projectScope: { value: '30s spot', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      timelineBand: { value: '1-2-months', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      budgetBand: { value: '20k-50k', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      contactName: { value: 'Sam', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' },
+                      contactEmail: { value: 'sam@example.com', provenance: 'confirmed', updatedAt: '2026-07-11T10:00:00.000Z' }
+                    },
+                    draft_version: 3
+                  },
+                  error: null
+                }))
+              }))
+            })),
+            update: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
+            insert: vi.fn(async () => ({ error: null }))
+          };
+        }
+        if (table === 'leads') {
+          return {
+            insert: vi.fn((row: Record<string, unknown>) => {
+              inserts.push({ table, row });
+              return Promise.resolve({ error: null });
+            })
+          };
+        }
+        if (table === 'reference_links') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(async () => ({ data: [], error: null }))
+            }))
+          };
+        }
+        if (table === 'uploaded_files') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(async () => ({ data: [], error: null }))
+            }))
+          };
+        }
+        return {};
+      })
+    };
+    createServerSupabaseClientMock.mockReturnValue(client);
+
+    await callFinalizeRoute({
+      sessionId: '11111111-2222-3333-4444-555555555555',
+      qualificationStatus: 'qualified',
+      leadDraft: {
+        service: 'production',
+        projectType: 'PWN',
+        projectScope: 'PWN SCOPE',
+        timelineBand: 'pwn',
+        budgetBand: 'pwn',
+        contactName: 'Pwn',
+        contactEmail: 'pwn@evil.com'
+      }
+    });
+
+    const leadInsert = inserts.find((i) => i.table === 'leads');
+    expect(leadInsert).toBeDefined();
+
+    const insertArg = leadInsert!.row;
+    const draft = insertArg.lead_draft as Record<string, string | undefined>;
+    expect(draft.contactName).toBe('Sam');
+    expect(draft.contactEmail).toBe('sam@example.com');
+    expect(draft.projectScope).toBe('30s spot');
+    expect(insertArg.contact_name).toBe('Sam');
+    expect(insertArg.contact_email).toBe('sam@example.com');
   });
 });

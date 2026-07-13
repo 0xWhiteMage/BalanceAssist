@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const { finalizeLeadMock } = vi.hoisted(() => ({
   finalizeLeadMock: vi.fn(async () => ({
@@ -14,6 +14,10 @@ const { finalizeLeadMock } = vi.hoisted(() => ({
   }))
 }));
 
+const { notifyScheduleCompletedMock } = vi.hoisted(() => ({
+  notifyScheduleCompletedMock: vi.fn(async () => true)
+}));
+
 vi.mock('@/lib/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api/client')>('@/lib/api/client');
   return {
@@ -25,11 +29,21 @@ vi.mock('@/lib/api/client', async () => {
       fileRequestNote: null,
       scheduleRequestOpen: false
     })),
+    notifyScheduleCompleted: notifyScheduleCompletedMock,
     logEvent: vi.fn(async () => ({ ok: true, eventName: 'mock-event' })),
     createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '' })),
-    verifySession: vi.fn(async () => false)
+    getCurrentSession: vi.fn(async () => null)
   };
 });
+
+vi.mock('@/components/chat/calendly-embed', () => ({
+  CalendlyEmbed: ({ onBack, onScheduled }: { onBack: () => void; onScheduled?: () => void | Promise<void> }) => (
+    <div data-testid="mock-calendly-embed">
+      <button type="button" onClick={onBack}>Back to chat</button>
+      <button type="button" onClick={() => void onScheduled?.()}>Complete booking</button>
+    </div>
+  )
+}));
 
 import { WidgetOverlay } from '@/components/widget/widget-overlay';
 
@@ -52,6 +66,8 @@ afterEach(() => {
     delivered: false,
     retryable: false
   });
+  notifyScheduleCompletedMock.mockReset();
+  notifyScheduleCompletedMock.mockResolvedValue(true);
 });
 
 const originalFetch = global.fetch;
@@ -83,8 +99,7 @@ function mockWidgetFetch() {
           budgetBand: '20k-50k',
           contactName: 'Jayden',
           contactCompany: 'Acme',
-          contactEmail: 'jayden@example.com',
-          consentToShare: true
+          contactEmail: 'jayden@example.com'
         },
         briefReady: true,
         reviewPrompt: 'Your brief is ready. Tap the tab on the right to review.',
@@ -106,18 +121,30 @@ function mockWidgetFetch() {
   }) as unknown as typeof fetch;
 }
 
+async function startAiConversation() {
+  fireEvent.click(await screen.findByTestId('consent-button'));
+  fireEvent.click(await screen.findByRole('button', { name: /start with balance assist/i }));
+
+  const input = (await waitFor(() => {
+    const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;
+    if (!el) throw new Error('input not yet rendered');
+    return el;
+  })) as HTMLInputElement;
+
+  await waitFor(() => {
+    expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
+  }, { timeout: 7000 });
+
+  return input;
+}
+
 describe('WidgetOverlay approved confirmation (Fix 5)', () => {
   test('after a successful approve, the rail renders a "Book a catch-up" CTA inside the green approved confirmation', async () => {
     mockWidgetFetch();
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    // Wait for chat input to mount.
-    const input = (await waitFor(() => {
-      const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;
-      if (!el) throw new Error('input not yet rendered');
-      return el;
-    })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     // Drive a brief through the chat — the mocked /api/chat returns a complete draft.
     fireEvent.change(input, { target: { value: '30s animation for social media' } });
@@ -147,10 +174,10 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       expect(bookCta?.textContent).toMatch(/book a catch-up/i);
     });
 
-    // Brief summary count line is rendered with the expected "X of 8 fields captured" format.
+    // The confirmation copy stays truthful when delivery is queued but not verified.
     const countLine = document.querySelector('[data-testid="approve-confirmation-count"]') as HTMLElement | null;
     expect(countLine).not.toBeNull();
-    expect(countLine?.textContent).toMatch(/\d+ of 8 fields captured/i);
+    expect(countLine?.textContent).toMatch(/Approval saved\. Team notification queued\./i);
 
     // Telegram status line shows "Telegram notification queued" since queued was true in finalize response.
     const telegramStatus = document.querySelector('[data-testid="approve-confirmation-telegram"]') as HTMLElement | null;
@@ -172,11 +199,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
 
     render(<WidgetOverlay autoOpen={true} />);
 
-    const input = (await waitFor(() => {
-      const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;
-      if (!el) throw new Error('input not yet rendered');
-      return el;
-    })) as HTMLInputElement;
+    const input = await startAiConversation();
 
     fireEvent.change(input, { target: { value: '30s animation for social media' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
@@ -199,4 +222,85 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       expect(telegramStatus?.textContent).toMatch(/Telegram connection pending/i);
     });
   });
+
+  test('does not mark the brief approved when finalize reports persisted=false', async () => {
+    mockWidgetFetch();
+    finalizeLeadMock.mockResolvedValueOnce({
+      ok: true,
+      sessionId: 'mock-session-id',
+      qualificationStatus: 'qualified',
+      persisted: false,
+      queued: false,
+      delivered: false,
+      retryable: false
+    });
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      const rail = document.querySelector('[data-testid="review-rail"]');
+      expect(rail).not.toBeNull();
+    });
+
+    const approveButton = (await waitFor(() => {
+      const btn = document.querySelector('[data-testid="approve-button"]') as HTMLButtonElement | null;
+      if (!btn) throw new Error('approve-button not yet rendered');
+      return btn;
+    })) as HTMLButtonElement;
+    fireEvent.click(approveButton);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="approve-confirmation"]')).toBeNull();
+      expect(screen.getByText(/brief could not be saved/i)).toBeInTheDocument();
+    });
+  }, 10000);
+
+  test('after Calendly completes without verified server confirmation, the widget stays truthful about team notification', async () => {
+    mockWidgetFetch();
+    notifyScheduleCompletedMock.mockResolvedValueOnce(false);
+
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      const rail = document.querySelector('[data-testid="review-rail"]');
+      expect(rail).not.toBeNull();
+    });
+
+    const approveButton = (await waitFor(() => {
+      const btn = document.querySelector('[data-testid="approve-button"]') as HTMLButtonElement | null;
+      if (!btn) throw new Error('approve-button not yet rendered');
+      return btn;
+    })) as HTMLButtonElement;
+    fireEvent.click(approveButton);
+
+    await waitFor(() => {
+      const bookCta = document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement | null;
+      expect(bookCta).not.toBeNull();
+    });
+
+    fireEvent.click(document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement);
+
+    await waitFor(() => {
+      const embed = document.querySelector('[data-testid="mock-calendly-embed"]');
+      expect(embed).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /complete booking/i }));
+
+    await waitFor(() => {
+      expect(document.body.textContent).toMatch(/still verifying that the balance team received it/i);
+    });
+    expect(notifyScheduleCompletedMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toMatch(/notified automatically/i);
+  }, 10000);
 });

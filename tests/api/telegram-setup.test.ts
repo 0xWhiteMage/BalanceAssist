@@ -1,9 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 
 const originalEnv = { ...process.env };
+const originalFetch = global.fetch;
 
 afterEach(() => {
   process.env = { ...originalEnv };
+  global.fetch = originalFetch;
 });
 
 describe('telegram/setup route security', () => {
@@ -70,5 +72,62 @@ describe('telegram/setup route security', () => {
     expect(bodyStr).not.toContain('sb-service-key');
     expect(bodyStr).not.toContain('secret_key_prefix');
     expect(bodyStr).not.toContain('service_role_key_prefix');
+  });
+
+  it('POST sends secret_token when configuring the Telegram webhook', async () => {
+    process.env.SETUP_TOKEN = 'admin-secret';
+    process.env.TELEGRAM_BOT_TOKEN = 'bot-token';
+    process.env.TELEGRAM_CHAT_ID = '-1001234567890';
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'webhook-secret';
+
+    const telegramCalls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+
+    global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
+      telegramCalls.push({ url, body });
+
+      if (url.endsWith('/getMe')) {
+        return new Response(JSON.stringify({ ok: true, result: { id: 1, first_name: 'Balance', username: 'balance_bot' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      if (url.endsWith('/getUpdates')) {
+        return new Response(JSON.stringify({ ok: true, result: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      if (url.endsWith('/setWebhook')) {
+        return new Response(JSON.stringify({ ok: true, result: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }) as typeof fetch;
+
+    const { POST } = await import('@/app/api/telegram/setup/route');
+    const request = new Request('http://localhost:3000/api/telegram/setup', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer admin-secret',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ webhookUrl: 'https://www.balancestudio.tv/api/telegram/webhook' })
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    const setWebhookCall = telegramCalls.find((call) => call.url.endsWith('/setWebhook'));
+    expect(setWebhookCall?.body?.secret_token).toBe('webhook-secret');
   });
 });

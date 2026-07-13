@@ -33,3 +33,24 @@ test('budget passes through verbatim (no band normalization)', () => {
   const result = sanitizeDraftUpdates({ budgetBand: '$5,000 SGD' });
   expect(result.budgetBand).toBe('$5,000 SGD');
 });
+
+test('consentToShare is stripped from sanitized draft updates', () => {
+  const result = sanitizeDraftUpdates({
+    service: 'production',
+    projectScope: '30s spot',
+    consentToShare: true,
+    consentToShareString: 'true'
+  });
+  expect(result).not.toHaveProperty('consentToShare');
+  expect(result).toEqual({ service: 'production', projectScope: '30s spot' });
+});
+
+test('result type is Record<string, string> with no boolean values', () => {
+  const result = sanitizeDraftUpdates({
+    service: 'production',
+    consentToShare: true
+  });
+  for (const value of Object.values(result)) {
+    expect(typeof value).toBe('string');
+  }
+});

@@ -45,6 +45,20 @@ export function DataUseNotice({ onConsent }: { onConsent: (record: ConsentRecord
       >
         {DATA_USE_NOTICE_COPY.body}
       </p>
+      <a
+        href={DATA_USE_NOTICE_COPY.privacyLink}
+        style={{
+          display: 'inline-block',
+          marginBottom: '12px',
+          fontSize: '12px',
+          color: brandTokens.colors.warmGold,
+          fontFamily: brandTokens.typography.ui,
+          textDecoration: 'underline',
+          textUnderlineOffset: '2px'
+        }}
+      >
+        {DATA_USE_NOTICE_COPY.privacyLinkLabel}
+      </a>
       {!agreed && (
         <button
           type="button"

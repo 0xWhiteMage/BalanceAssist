@@ -1,24 +1,20 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { validateWebhookRequest } from '@/lib/telegram/webhook-auth';
+import { createLogger, extractRequestId } from '@/lib/logger';
+import { verifyWebhookChatId, verifyWebhookSecret, verifyWebhookSender } from '@/lib/telegram/webhook-auth';
 import type { TelegramUpdate } from '@/lib/telegram';
 
 export async function POST(request: Request) {
+  const logger = createLogger('telegram-webhook', extractRequestId(request));
   const secretToken = request.headers.get('x-telegram-bot-api-secret-token');
 
-  const authResult = validateWebhookRequest({
-    headerSecret: secretToken,
-    configuredSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? null,
-    incomingChatId: 0,
-    configuredChatId: process.env.TELEGRAM_CHAT_ID ?? null,
-    senderUsername: null,
-    allowedUsernames: null
-  });
+  const configuredSecret = process.env.TELEGRAM_WEBHOOK_SECRET ?? null;
 
-  if (!authResult.ok) {
-    if (authResult.reason === 'missing-secret') {
-      return NextResponse.json({ ok: false, error: 'Webhook secret not configured' }, { status: 503 });
-    }
+  if (!configuredSecret) {
+    return NextResponse.json({ ok: false, error: 'Webhook secret not configured' }, { status: 503 });
+  }
+
+  if (!verifyWebhookSecret(secretToken, configuredSecret)) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -28,6 +24,20 @@ export async function POST(request: Request) {
     update = (await request.json()) as TelegramUpdate;
   } catch {
     return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const configuredChatId = process.env.TELEGRAM_CHAT_ID ?? null;
+  if (!configuredChatId && process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ ok: false, error: 'TELEGRAM_CHAT_ID not configured' }, { status: 503 });
+  }
+
+  const allowedUsernames = process.env.TELEGRAM_ALLOWED_USERNAMES
+    ?.split(',')
+    .map(u => u.trim().toLowerCase())
+    .filter(Boolean) ?? [];
+
+  if (allowedUsernames.length === 0 && process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ ok: false, error: 'TELEGRAM_ALLOWED_USERNAMES not configured' }, { status: 503 });
   }
 
   if (!hasSupabaseServerConfig()) {
@@ -50,7 +60,7 @@ export async function POST(request: Request) {
       if (dupeError.code === '23505') {
         return NextResponse.json({ ok: true, ignored: 'duplicate-update' });
       }
-      console.error('[telegram-webhook] Failed to persist update_id', {
+      logger.error('Failed to persist update_id', {
         updateId: update.update_id,
         error: dupeError.message
       });
@@ -60,33 +70,27 @@ export async function POST(request: Request) {
 
   const message = update.message;
 
-  if (!message?.text) {
-    return NextResponse.json({ ok: true, ignored: 'no-text' });
-  }
-
-  // Validate chat ID if configured
-  if (process.env.TELEGRAM_CHAT_ID && message.chat?.id) {
-    const expectedChatId = process.env.TELEGRAM_CHAT_ID;
-    if (String(message.chat.id) !== expectedChatId) {
-      console.warn('[telegram-webhook] Wrong chat ID', {
-        incoming: message.chat.id,
-        expected: expectedChatId
+  if (configuredChatId) {
+    const incomingChatId = message?.chat?.id;
+    if (typeof incomingChatId !== 'number' || !verifyWebhookChatId(incomingChatId, configuredChatId)) {
+      logger.warn('Wrong chat ID', {
+        incoming: incomingChatId ?? null,
+        expected: configuredChatId
       });
       return NextResponse.json({ ok: true, ignored: 'wrong-chat' });
     }
   }
 
-  // Validate sender if allowed usernames are configured
-  const allowedUsernames = process.env.TELEGRAM_ALLOWED_USERNAMES?.split(',').map(u => u.trim().toLowerCase()).filter(Boolean);
-  if (allowedUsernames && allowedUsernames.length > 0) {
-    const senderUsername = message.from?.username?.toLowerCase();
-    if (!senderUsername || !allowedUsernames.includes(senderUsername)) {
-      console.warn('[telegram-webhook] Unauthorized sender', {
-        username: message.from?.username,
-        first_name: message.from?.first_name
-      });
+  if (allowedUsernames.length > 0) {
+    const senderUsername = message?.from?.username ?? null;
+    if (!verifyWebhookSender(senderUsername, allowedUsernames)) {
+      logger.warn('Unauthorized sender', { hasSenderUsername: Boolean(senderUsername) });
       return NextResponse.json({ ok: true, ignored: 'unauthorized-sender' });
     }
+  }
+
+  if (!message?.text) {
+    return NextResponse.json({ ok: true, ignored: 'no-text' });
   }
 
   let sessionId: string | null = null;
@@ -118,11 +122,10 @@ export async function POST(request: Request) {
   // Removed: latest-session fallback (was fail-open, could attach to wrong session)
 
   if (!sessionId) {
-    console.warn('[telegram-webhook] No matching session for update', {
+    logger.warn('No matching session for update', {
       thread_id: message.message_thread_id,
       reply_to_message_id: message.reply_to_message?.message_id,
-      chat_id: message.chat?.id,
-      from: message.from?.username ?? message.from?.first_name
+      chat_id: message.chat?.id
     });
     return NextResponse.json({ ok: true, ignored: 'no-matching-session' });
   }
@@ -138,10 +141,9 @@ export async function POST(request: Request) {
   if (scheduleMatch) {
     const note = scheduleMatch[1]?.trim() || null;
 
-    console.log('[telegram-webhook] /schedule received', {
+    logger.info('/schedule received', {
       sessionId,
-      threadId: message.message_thread_id,
-      note
+      threadId: message.message_thread_id
     });
 
     const { error: scheduleUpdateError } = await supabase
@@ -150,7 +152,7 @@ export async function POST(request: Request) {
       .eq('id', sessionId);
 
     if (scheduleUpdateError) {
-      console.error('[telegram-webhook] Failed to update schedule request state', {
+      logger.error('Failed to update schedule request state', {
         sessionId,
         error: scheduleUpdateError.message,
         code: scheduleUpdateError.code
@@ -158,7 +160,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: scheduleUpdateError.message }, { status: 500 });
     }
 
-    console.log('[telegram-webhook] Schedule request state updated', { sessionId });
+    logger.info('Schedule request state updated', { sessionId });
 
     const { error: scheduleMessageError } = await supabase.from('human_messages').insert({
       session_id: sessionId,
@@ -170,7 +172,7 @@ export async function POST(request: Request) {
     });
 
     if (scheduleMessageError) {
-      console.error('[telegram-webhook] Failed to insert schedule message', {
+      logger.error('Failed to insert schedule message', {
         sessionId,
         error: scheduleMessageError.message
       });
@@ -184,10 +186,9 @@ export async function POST(request: Request) {
   if (requestFilesMatch) {
     const note = requestFilesMatch[1]?.trim() || null;
 
-    console.log('[telegram-webhook] /request_files received', {
+    logger.info('/request_files received', {
       sessionId,
-      threadId: message.message_thread_id,
-      note
+      threadId: message.message_thread_id
     });
 
     const { error: sessionUpdateError } = await supabase
@@ -196,7 +197,7 @@ export async function POST(request: Request) {
       .eq('id', sessionId);
 
     if (sessionUpdateError) {
-      console.error('[telegram-webhook] Failed to update file request state', {
+      logger.error('Failed to update file request state', {
         sessionId,
         error: sessionUpdateError.message,
         code: sessionUpdateError.code
@@ -204,7 +205,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: sessionUpdateError.message }, { status: 500 });
     }
 
-    console.log('[telegram-webhook] File request state updated', { sessionId });
+    logger.info('File request state updated', { sessionId });
 
     const { error: requestMessageError } = await supabase.from('human_messages').insert({
       session_id: sessionId,
@@ -216,7 +217,7 @@ export async function POST(request: Request) {
     });
 
     if (requestMessageError) {
-      console.error('[telegram-webhook] Failed to insert file request message', {
+      logger.error('Failed to insert file request message', {
         sessionId,
         error: requestMessageError.message,
         code: requestMessageError.code
@@ -224,7 +225,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: requestMessageError.message }, { status: 500 });
     }
 
-    console.log('[telegram-webhook] File request message inserted', { sessionId });
+    logger.info('File request message inserted', { sessionId });
 
     return NextResponse.json({ ok: true, sessionId, fileRequestOpen: true });
   }
@@ -237,7 +238,7 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    console.error('[telegram-webhook] Failed to insert team message', error);
+    logger.error('Failed to insert team message', { error: error.message });
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 

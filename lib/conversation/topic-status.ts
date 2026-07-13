@@ -39,10 +39,13 @@ export function buildTopicName(
   name: string | null | undefined,
   company: string | null | undefined,
   shortId: string,
-  status: TopicStatus = 'new'
+  status: TopicStatus = 'new',
+  caseId?: string
 ): string {
   const parts: string[] = [TOPIC_STATUS_EMOJI[status]];
-  if (name?.trim() && company?.trim()) {
+  if (caseId) {
+    parts.push(caseId);
+  } else if (name?.trim() && company?.trim()) {
     parts.push(`${name.trim()} / ${company.trim()}`);
   } else if (name?.trim()) {
     parts.push(name.trim());
