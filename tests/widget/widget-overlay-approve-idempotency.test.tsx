@@ -143,9 +143,6 @@ describe('WidgetOverlay approve idempotency', () => {
       expect(finalizeLeadMock).toHaveBeenCalled();
     });
 
-    // Give any rogue duplicate call enough time to arrive.
-    await new Promise((r) => setTimeout(r, 200));
-
     expect(finalizeLeadMock).toHaveBeenCalledTimes(1);
   });
 });

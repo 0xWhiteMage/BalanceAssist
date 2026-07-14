@@ -417,12 +417,13 @@ export type ChatRequestPayload = {
     isTeamConnected?: boolean;
     draft?: string;
     sessionId?: string;
+    capturedFields?: string[];
   };
 };
 
 export type ChatResponse = {
   replies: ChatReplyItem[];
-  draftUpdates: Record<string, string>;
+  draftUpdates: Record<string, string | boolean>;
   briefReady: boolean;
   sharedWork: ChatSharedWork | null;
 };
@@ -438,7 +439,7 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
   const data = await postJson<{
     message?: string;
     messages?: string[];
-    draftUpdates?: Record<string, string>;
+    draftUpdates?: Record<string, string | boolean>;
     briefReady?: boolean;
     sharedWork?: ChatSharedWork;
   }>('/api/chat', sanitizedPayload);

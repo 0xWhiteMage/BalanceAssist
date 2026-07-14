@@ -23,7 +23,9 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
-import { createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
+import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { scoreLead } from '@/lib/qualification/score';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
@@ -149,23 +151,25 @@ export function WidgetOverlay({
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
-  const [draft, setDraft] = useState<LeadDraft>(createDefaultLeadDraft());
-  const [noticeConsent, setNoticeConsent] = useState<ConsentRecord | null>(null);
-  const [hasProjectIntent, setHasProjectIntent] = useState(false);
-  const [briefApproved, setBriefApproved] = useState(false);
+  const sessionDraft = useWidgetSessionDraft({ createSession, getCurrentSession, fetchProjectDraft, updateProjectDraft, resetProject, requestProjectDeletion });
+  const {
+    draft, setDraft, noticeConsent, setNoticeConsent, hasProjectIntent, setHasProjectIntent,
+    briefApproved, setBriefApproved, sessionId, setSessionId, sessionUnavailable,
+    draftVersion, setDraftVersion
+  } = sessionDraft;
   const [isTyping, setIsTyping] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
-  const [isTeamConnected, setIsTeamConnected] = useState(false);
-  const [sessionUnavailable, setSessionUnavailable] = useState(false);
-  const [humanStatus, setHumanStatus] = useState<'idle' | 'requested' | 'sending' | 'delivered' | 'pending' | 'awaiting' | 'replied'>('idle');
-  const [humanRequested, setHumanRequested] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [teamWaitingForReply, setTeamWaitingForReply] = useState(false);
-  const [humanFileRequestOpen, setHumanFileRequestOpen] = useState(false);
-  const [humanFileRequestNote, setHumanFileRequestNote] = useState<string | null>(null);
-  const [humanScheduleRequestOpen, setHumanScheduleRequestOpen] = useState(false);
+  const teamRelay = useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage });
+  const {
+    isTeamConnected, setIsTeamConnected, requested: humanRequested, setRequested: setHumanRequested,
+    status: humanStatus, setStatus: setHumanStatus, waitingForReply: teamWaitingForReply,
+    setWaitingForReply: setTeamWaitingForReply, fileRequestOpen: humanFileRequestOpen,
+    setFileRequestOpen: setHumanFileRequestOpen, fileRequestNote: humanFileRequestNote,
+    setFileRequestNote: setHumanFileRequestNote, scheduleRequestOpen: humanScheduleRequestOpen,
+    setScheduleRequestOpen: setHumanScheduleRequestOpen
+  } = teamRelay;
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
   const [railMode, setRailMode] = useState<'essentials' | 'summary'>('essentials');
   const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
@@ -174,14 +178,12 @@ export function WidgetOverlay({
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
-  const [draftVersion, setDraftVersion] = useState(0);
   const sessionIdRef = useRef<string | null>(null);
   const lastTeamMessageIdRef = useRef<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingRef = useRef<boolean>(false);
   const seenTeamMessageIdsRef = useRef<Set<number>>(new Set());
   const submitInFlightRef = useRef<boolean>(false);
-  const approveInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollImmediateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -208,136 +210,22 @@ export function WidgetOverlay({
   humanFileRequestNoteRef.current = humanFileRequestNote;
   humanScheduleRequestOpenRef.current = humanScheduleRequestOpen;
 
-  const applyCanonicalDraftState = useCallback((draftValues: Record<string, string>, nextDraftVersion: number) => {
-    const mergedDraft = {
-      ...createDefaultLeadDraft(),
-      ...draftValues
-    } as LeadDraft;
+  const applyCanonicalDraftState = sessionDraft.applyCanonicalDraft;
+  const hydrateCanonicalDraft = sessionDraft.hydrateDraft;
 
-    setDraft(mergedDraft);
-    setDraftVersion(nextDraftVersion);
-    setHasProjectIntent(detectProjectIntent(mergedDraft));
-    setBriefApproved(false);
-  }, []);
-
-  const hydrateCanonicalDraft = useCallback(async (activeSessionId: string) => {
-    const projectDraft = await fetchProjectDraft(activeSessionId);
-    if (!projectDraft) {
-      return;
-    }
-
-    applyCanonicalDraftState(projectDraft.draft, projectDraft.draftVersion);
-  }, [applyCanonicalDraftState]);
-
-  const pollTeamMessages = useCallback(async () => {
-    if (isPollingRef.current) return;
-    isPollingRef.current = true;
-
-    try {
-      const id = sessionIdRef.current;
-      if (!id) return;
-
-      const pollState = await fetchTeamMessages(id, lastTeamMessageIdRef.current);
-      if (pollState.fileRequestOpen !== humanFileRequestOpenRef.current) {
-        setHumanFileRequestOpen(pollState.fileRequestOpen);
-      }
-      if (pollState.fileRequestNote !== humanFileRequestNoteRef.current) {
-        setHumanFileRequestNote(pollState.fileRequestNote);
-      }
-      if (pollState.scheduleRequestOpen !== humanScheduleRequestOpenRef.current) {
-        setHumanScheduleRequestOpen(pollState.scheduleRequestOpen);
-      }
-
-      const messages = pollState.messages;
-      if (messages.length === 0) return;
-
-      const existingDbIds = new Set<number>();
-      for (const m of messagesRef.current) {
-        if (m.isTeamMessage && m.teamDbId !== undefined) {
-          existingDbIds.add(m.teamDbId);
-        }
-      }
-
-      const freshMessages = messages.filter(
-        (m) => !seenTeamMessageIdsRef.current.has(m.id) && !existingDbIds.has(m.id)
-      );
-      if (freshMessages.length === 0) {
-        lastTeamMessageIdRef.current = Math.max(lastTeamMessageIdRef.current, ...messages.map((m) => m.id));
-        return;
-      }
-
-      for (const msg of freshMessages) {
-        seenTeamMessageIdsRef.current.add(msg.id);
-      }
-      lastTeamMessageIdRef.current = Math.max(lastTeamMessageIdRef.current, ...messages.map((m) => m.id));
-      setTeamWaitingForReply(false);
-      setIsTeamConnected(true);
-      setHumanStatus('replied');
-
-      const next = [...messagesRef.current];
-      for (const msg of freshMessages) {
-        next.push({
-          id: nextId(),
-          sender: 'bot',
-          text: msg.text,
-          timestamp: Date.now(),
-          isTeamMessage: true,
-          teamDbId: msg.id
-        });
-      }
-      messagesRef.current = next;
-      setMessages(next);
-    } finally {
-      isPollingRef.current = false;
-    }
-  }, []);
-
-  const hasInitializedTeamPollingRef = useRef(false);
-  const pollRateMsRef = useRef(2000);
+  const pollTeamMessages = teamRelay.poll;
 
   useEffect(() => {
-    pollRateMsRef.current = teamWaitingForReply ? 1000 : 2000;
-  }, [teamWaitingForReply]);
-
-  useEffect(() => {
-    if ((!isTeamConnected && !humanRequested) || !sessionId) {
-      return undefined;
-    }
-
-    if (!hasInitializedTeamPollingRef.current) {
-      lastTeamMessageIdRef.current = 0;
-      setTeamWaitingForReply(false);
-      hasInitializedTeamPollingRef.current = true;
-    }
-
-    pollTeamMessages().catch(() => undefined);
-
-    const scheduleNextPoll = () => {
-      pollIntervalRef.current = setTimeout(async () => {
-        await pollTeamMessages().catch(() => undefined);
-        if (!cancelRef.current && sessionIdRef.current) {
-          scheduleNextPoll();
-        }
-      }, pollRateMsRef.current);
-    };
-
-    scheduleNextPoll();
-
-    return () => {
-      if (pollIntervalRef.current) {
-        clearTimeout(pollIntervalRef.current);
-      }
-      pollIntervalRef.current = null;
-    };
-  }, [humanRequested, isTeamConnected, sessionId, pollTeamMessages]);
-
-  useEffect(() => {
-    if (!isTeamConnected) {
-      hasInitializedTeamPollingRef.current = false;
-      seenTeamMessageIdsRef.current = new Set();
-      lastTeamMessageIdRef.current = 0;
-    }
-  }, [isTeamConnected]);
+    const delivered = teamRelay.messages.filter(
+      (message) => !messagesRef.current.some((existing) => existing.teamDbId === message.id)
+    );
+    if (delivered.length === 0) return;
+    const next = [...messagesRef.current, ...delivered.map((message) => ({
+      id: nextId(), sender: 'bot' as const, text: message.text, timestamp: Date.now(), isTeamMessage: true, teamDbId: message.id
+    }))];
+    messagesRef.current = next;
+    setMessages(next);
+  }, [teamRelay.messages]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -510,59 +398,8 @@ export function WidgetOverlay({
     [botSay]
   );
 
-  const ensureSession = useCallback(async (): Promise<string | null> => {
-    if (sessionIdRef.current) return sessionIdRef.current;
-    if (typeof window === 'undefined' || !noticeConsent) return null;
-
-    const sourceUrl = window.location.href;
-    const referrer = document.referrer || undefined;
-
-    try {
-      const session = await createSession({
-        sourceUrl,
-        referrer,
-        consentVersion: noticeConsent.consentVersion,
-        consentedAt: noticeConsent.consentedAt
-      });
-
-      if (session?.sessionId && session.persisted === true) {
-        setSessionUnavailable(false);
-        setSessionId(session.sessionId);
-        setDraftVersion(0);
-        sessionIdRef.current = session.sessionId;
-        return session.sessionId;
-      }
-    } catch (error) {
-      console.error('[widget] Failed to create session', error);
-    }
-
-    setSessionUnavailable(true);
-    return null;
-  }, [noticeConsent]);
-
-  const loadOrCreateSession = useCallback((): Promise<string | null> => {
-    if (sessionIdRef.current) return Promise.resolve(sessionIdRef.current);
-    if (typeof window === 'undefined' || !noticeConsent) return Promise.resolve(null);
-    if (sessionBootstrapPromiseRef.current) return sessionBootstrapPromiseRef.current;
-
-    const bootstrap = (async () => {
-      try {
-        const currentSession = await getCurrentSession();
-        if (currentSession?.sessionId) {
-          setSessionId(currentSession.sessionId);
-          sessionIdRef.current = currentSession.sessionId;
-          await hydrateCanonicalDraft(currentSession.sessionId);
-          return currentSession.sessionId;
-        }
-
-        return ensureSession();
-      } finally {
-        sessionBootstrapPromiseRef.current = null;
-      }
-    })();
-    sessionBootstrapPromiseRef.current = bootstrap;
-    return bootstrap;
-  }, [ensureSession, hydrateCanonicalDraft, noticeConsent]);
+  const ensureSession = sessionDraft.ensureSession;
+  const loadOrCreateSession = sessionDraft.loadOrCreateSession;
 
   const startConversation = useCallback(async () => {
     if (hasStarted || isTeamConnected || !noticeConsent) return;
@@ -609,6 +446,7 @@ export function WidgetOverlay({
   }
 
   function handleReset() {
+    sessionDraft.reset();
     setSessionId(null);
     sessionIdRef.current = null;
     cancelRef.current = true;
@@ -645,7 +483,6 @@ export function WidgetOverlay({
     setView('chat');
     setCalendlyUrl(null);
     setAllowAttachment(false);
-    approveInFlightRef.current = false;
     cancelRef.current = false;
   }
 
@@ -663,22 +500,16 @@ export function WidgetOverlay({
 
       const capturedFields = computeCapturedFieldsFromDraft(draftRef.current);
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: llmMessages,
-          context: {
-            step: stepRef.current,
-            isTeamConnected: teamRef.current,
-            sessionId: sessionIdRef.current ?? undefined,
-            capturedFields
-          }
-        })
+      const data = await chatRequest({
+        messages: llmMessages,
+        context: {
+          step: stepRef.current,
+          isTeamConnected: teamRef.current,
+          sessionId: sessionIdRef.current ?? undefined,
+          capturedFields
+        }
       });
-
-      const data = await response.json();
-      if (!response.ok) {
+      if (!data) {
         const localFallback = getLocalResponse(latestUserText, {
           draft: draftRef.current,
           step: stepRef.current,
@@ -689,17 +520,20 @@ export function WidgetOverlay({
       }
 
       const replyChunks: string[] = (() => {
-        if (Array.isArray(data.messages) && data.messages.length > 0) {
-          return data.messages.filter((chunk: unknown) => typeof chunk === 'string' && chunk.trim().length > 0);
-        }
-        if (typeof data.message === 'string' && data.message.trim().length > 0) {
-          return [data.message];
-        }
+        if (data.replies.length > 0) return data.replies.map((reply) => reply.text);
         return [getNextMissingFieldPrompt(draftRef.current)];
       })();
       const draftUpdates: Record<string, string | boolean> = data.draftUpdates ?? {};
-      const briefReady: boolean = Boolean(data.briefReady);
-      const sharedWork = data.sharedWork;
+      const sharedWork = data.sharedWork
+        ? {
+            entries: data.sharedWork.entries.map((entry) => ({
+              ...entry,
+              description: entry.description ?? '',
+              image_url: entry.image_url ?? '',
+              category: entry.category ?? 'reference'
+            }))
+          }
+        : null;
 
       if (Object.keys(draftUpdates).length > 0) {
         const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
@@ -717,6 +551,10 @@ export function WidgetOverlay({
         const nextStep = getNextConversationStep(merged);
         if (nextStep !== stepRef.current) {
           setCurrentStep(nextStep);
+        }
+        // The chat route persists authenticated updates. Replace optimistic values with its canonical version.
+        if (sessionIdRef.current) {
+          await hydrateCanonicalDraft(sessionIdRef.current);
         }
       }
 
@@ -748,8 +586,7 @@ export function WidgetOverlay({
       await botSay('Sorry — we could not confirm consent to share messages with the Balance team. Please try again.');
       return;
     }
-    setHumanRequested(true);
-    setHumanStatus('requested');
+    if (!teamRelay.requestHandoff()) return;
     setCurrentStep('free-chat');
 
     void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
@@ -842,20 +679,19 @@ export function WidgetOverlay({
   }
 
   async function handleApproveBrief() {
-    if (approveInFlightRef.current || briefApproved) return;
-    approveInFlightRef.current = true;
+    if (!sessionDraft.beginApproval()) return;
     setTelegramBroadcastStatus('pending');
 
     try {
       await ensureSession();
       if (!sessionIdRef.current) {
-        approveInFlightRef.current = false;
+        sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
         return;
       }
 
       if (!await recordProducerTransferConsent(sessionIdRef.current)) {
-        approveInFlightRef.current = false;
+        sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
         await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
         return;
@@ -876,13 +712,13 @@ export function WidgetOverlay({
 
       const finalizeResponse = await finalizeLead(payload);
       if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
-        approveInFlightRef.current = false;
+        sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
         await botSay('Sorry — the brief could not be saved. Please try again or contact the team directly.');
         return;
       }
 
-      setBriefApproved(true);
+      sessionDraft.finishApproval(true);
       if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
       } else if (finalizeResponse.queued === true) {
@@ -894,11 +730,9 @@ export function WidgetOverlay({
       await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
       await advanceStep('handoff', draftRef.current);
     } catch {
-      approveInFlightRef.current = false;
+      sessionDraft.finishApproval(false);
       setTelegramBroadcastStatus('unconfigured');
       await botSay('Sorry — something went wrong saving your brief. Please try again.');
-    } finally {
-      // keep approveInFlightRef true once approved, so future calls remain no-ops.
     }
   }
 
@@ -1058,24 +892,16 @@ export function WidgetOverlay({
         await ensureSession();
         const id = sessionIdRef.current;
         appendUserMessage(trimmed);
-        setTeamWaitingForReply(true);
-        setHumanStatus('sending');
-
         if (!id) {
-          setTeamWaitingForReply(false);
-          setHumanStatus('requested');
           return;
         }
 
-        const ok = await relayUserMessage(id, trimmed);
+        const ok = await teamRelay.send(trimmed);
         if (!ok) {
-          setTeamWaitingForReply(false);
-          setHumanStatus('requested');
           await botSay('Sorry, I could not reach the team right now. Please email hello@balancestudio.tv.');
           return;
         }
 
-        setHumanStatus('pending');
         if (pollImmediateTimerRef.current) {
           clearTimeout(pollImmediateTimerRef.current);
         }
