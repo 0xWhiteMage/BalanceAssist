@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { classifyUrl } from '@/lib/uploads/url-detect';
 import { brandTokens } from '@/lib/brand-tokens';
 import {
@@ -48,6 +48,7 @@ export function AttachmentDropzone({
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [localConsent, setLocalConsent] = useState<AttachmentConsent | null>(consent ?? null);
   const [privateStorageAvailable, setPrivateStorageAvailable] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalConsent(consent ?? null);
@@ -250,7 +251,7 @@ export function AttachmentDropzone({
             border: `1px solid ${brandTokens.colors.border}`,
             background: 'transparent',
             color: brandTokens.colors.lightText,
-            fontSize: 12
+            fontSize: 16
           }}
         />
         <button
@@ -282,9 +283,13 @@ export function AttachmentDropzone({
         <span>The Balance team may review links I add here.</span>
       </label>
 
-      <label
-        htmlFor="attachment-drop"
+      <button
+        type="button"
+        aria-describedby="attachment-private-note"
+        disabled={!privateStorageAvailable}
+        onClick={() => fileInputRef.current?.click()}
         style={{
+          width: '100%',
           padding: 14,
           borderRadius: 10,
           border: `1px dashed ${brandTokens.colors.border}`,
@@ -310,21 +315,24 @@ export function AttachmentDropzone({
         >
           {privateStorageAvailable ? 'Store file privately' : 'File sharing unavailable'}
         </span>
-        <span style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
+        <span id="attachment-private-note" style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
           {privateStorageAvailable ? 'Temporarily retained only to analyse this draft. Never sent to the team.' : 'Add a reference link above instead.'}
         </span>
-        <input
-          id="attachment-drop"
-          type="file"
-          multiple
-          disabled={!privateStorageAvailable}
-          onChange={(event) => { void handleFiles(event.target.files); }}
-          style={{ display: 'none' }}
-        />
-      </label>
+      </button>
+      <input
+        id="attachment-drop"
+        ref={fileInputRef}
+        type="file"
+        multiple
+        disabled={!privateStorageAvailable}
+        onChange={(event) => { void handleFiles(event.target.files); }}
+        tabIndex={-1}
+        aria-hidden="true"
+        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+      />
 
       {queuedFiles.length > 0 && (
-        <div style={{ display: 'grid', gap: 4, fontSize: 11, color: brandTokens.colors.mutedText }}>
+        <div role="status" aria-live="polite" style={{ display: 'grid', gap: 4, fontSize: 11, color: brandTokens.colors.mutedText }}>
           {queuedFiles.map((qf) => (
             <div key={qf.file.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: qf.status === 'failed' ? 'tomato' : brandTokens.colors.lightText }}>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
+import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 
 type CalendlyEmbedProps = {
   url: string;
@@ -18,10 +19,12 @@ declare global {
 }
 
 export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fallbackFrameRef = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [fallback, setFallback] = useState(false);
+  useDialogFocus({ active: true, dialogRef, onDismiss: onBack });
 
   useEffect(() => {
     setLoaded(false);
@@ -111,6 +114,11 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
 
   return (
     <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="calendly-dialog-title"
+      tabIndex={-1}
       style={{
         position: 'absolute',
         inset: 0,
@@ -149,7 +157,7 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
           &#8249;
         </button>
         <div>
-          <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: brandTokens.colors.lightText }}>
+          <p id="calendly-dialog-title" style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: brandTokens.colors.lightText }}>
             Book a Discovery Call
           </p>
           <p style={{ margin: 0, fontSize: '11px', color: brandTokens.colors.mutedText }}>
@@ -158,7 +166,7 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
         </div>
       </header>
 
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: 1, position: 'relative', overflow: 'auto', minWidth: 0 }}>
         {!loaded && (
           <div
             style={{
@@ -180,13 +188,13 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
             data-testid="calendly-fallback-iframe"
             src={url}
             title="Book a Discovery Call"
-            style={{ minWidth: '320px', height: '100%', width: '100%', border: 'none' }}
+            style={{ minWidth: 0, height: '100%', width: '100%', border: 'none' }}
           />
         ) : (
           <div
             ref={containerRef}
             className="calendly-inline-widget"
-            style={{ minWidth: '320px', height: '100%', width: '100%' }}
+            style={{ minWidth: 0, height: '100%', width: '100%' }}
           />
         )}
       </div>

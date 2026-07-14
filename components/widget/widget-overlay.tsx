@@ -31,6 +31,7 @@ import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import type { ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
+import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 
 let messageCounter = 0;
 function nextId() {
@@ -190,6 +191,7 @@ export function WidgetOverlay({
   const humanFileRequestOpenRef = useRef(humanFileRequestOpen);
   const humanFileRequestNoteRef = useRef(humanFileRequestNote);
   const humanScheduleRequestOpenRef = useRef(humanScheduleRequestOpen);
+  const attachmentDialogRef = useRef<HTMLDivElement>(null);
 
   messagesRef.current = messages;
   draftRef.current = draft;
@@ -257,17 +259,6 @@ export function WidgetOverlay({
   }, [attachmentOpen]);
 
   useEffect(() => {
-    if (!attachmentOpen) return undefined;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setAttachmentOpen(false);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [attachmentOpen]);
-
-  useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
     const mq = window.matchMedia('(max-width: 639px)');
     setIsMobile(mq.matches);
@@ -277,50 +268,6 @@ export function WidgetOverlay({
   }, []);
 
   const widgetContainerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (isMobile) return;
-
-    const container = widgetContainerRef.current;
-    if (!container) return;
-
-    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-    const firstFocusable = container.querySelector<HTMLElement>(focusableSelector);
-    if (firstFocusable) {
-      firstFocusable.focus();
-    }
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        handleClose();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-
-      const focusables = Array.from(container!.querySelectorAll<HTMLElement>(focusableSelector));
-      if (focusables.length === 0) return;
-
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isMobile]);
 
   useEffect(() => {
     return () => {
@@ -428,6 +375,9 @@ export function WidgetOverlay({
     cancelRef.current = false;
     setIsOpen(true);
   }
+
+  useDialogFocus({ active: isOpen, dialogRef: widgetContainerRef, onDismiss: handleClose });
+  useDialogFocus({ active: attachmentOpen, dialogRef: attachmentDialogRef, onDismiss: () => setAttachmentOpen(false) });
 
   function handleReset() {
     sessionDraft.reset();
@@ -964,6 +914,14 @@ export function WidgetOverlay({
     }
   }
 
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, nextTab: 'chat' | 'brief') {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const selected = event.key === 'Home' ? 'chat' : event.key === 'End' ? 'brief' : nextTab;
+    setTabMode(selected);
+    document.getElementById(`widget-${selected}-tab`)?.focus();
+  }
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
@@ -1059,8 +1017,8 @@ export function WidgetOverlay({
     <div
       style={{
         position: 'fixed',
-        bottom: '24px',
-        right: '24px',
+        bottom: 'max(24px, env(safe-area-inset-bottom))',
+        right: 'max(24px, env(safe-area-inset-right))',
         zIndex: 2147483647,
         fontFamily: brandTokens.typography.ui
       }}
@@ -1069,13 +1027,16 @@ export function WidgetOverlay({
         <div
           ref={widgetContainerRef}
           role="dialog"
+          aria-modal="true"
           aria-label="Balance Assist"
+          aria-labelledby="balance-assist-dialog-title"
+          tabIndex={-1}
           style={{
             position: 'absolute',
             bottom: '72px',
             right: '0px',
-            width: isMobile ? 'min(380px, calc(100vw - 24px))' : getWidgetWidth({ isTeamConnected, hasProjectIntent }),
-            height: 'min(580px, calc(100vh - 120px))',
+            width: isMobile ? 'min(380px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)))' : getWidgetWidth({ isTeamConnected, hasProjectIntent }),
+            height: 'min(580px, calc(100dvh - 120px - env(safe-area-inset-bottom)))',
             display: 'flex',
             flexDirection: 'column',
             borderRadius: '16px',
@@ -1093,11 +1054,17 @@ export function WidgetOverlay({
               url={calendlyUrl}
               onBack={() => setView('chat')}
               onScheduled={async () => {
-                teamRelay.markRequested();
                 setView('chat');
-                await botSay(
-                  "Your booking looks complete. We're still verifying that the Balance team received it."
-                );
+                const message: ChatMessage = {
+                  id: nextId(),
+                  sender: 'bot',
+                  text: "Calendly reported that you completed a booking. We're still verifying that the Balance team received it.",
+                  timestamp: Date.now(),
+                  isSystem: true
+                };
+                const nextMessages = [...messagesRef.current, message];
+                messagesRef.current = nextMessages;
+                setMessages(nextMessages);
               }}
             />
           )}
@@ -1122,7 +1089,9 @@ export function WidgetOverlay({
                 aria-selected={tabMode === 'chat'}
                 aria-controls="widget-chat-panel"
                 id="widget-chat-tab"
+                tabIndex={tabMode === 'chat' ? 0 : -1}
                 onClick={() => setTabMode('chat')}
+                onKeyDown={(event) => handleTabKeyDown(event, 'brief')}
                 style={{
                   flex: 1,
                   padding: '10px 0',
@@ -1144,7 +1113,9 @@ export function WidgetOverlay({
                 aria-selected={tabMode === 'brief'}
                 aria-controls="widget-brief-panel"
                 id="widget-brief-tab"
+                tabIndex={tabMode === 'brief' ? 0 : -1}
                 onClick={() => setTabMode('brief')}
+                onKeyDown={(event) => handleTabKeyDown(event, 'chat')}
                 style={{
                   flex: 1,
                   padding: '10px 0',
@@ -1212,6 +1183,8 @@ export function WidgetOverlay({
                 id={isMobile ? 'widget-chat-panel' : undefined}
                 role={isMobile ? 'tabpanel' : undefined}
                 aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
+                aria-live="polite"
+                aria-relevant="additions text"
                 style={{
                   flex: 1,
                   overflowY: 'auto',
@@ -1294,22 +1267,22 @@ export function WidgetOverlay({
                     </button>
                   </div>
                 ) : (
-                  <>
+                  <div role="log" aria-live="polite" aria-relevant="additions text" style={{ display: 'contents' }}>
                     {messages.map((msg) => (
                       <MessageBubble key={msg.id} message={msg} onInlineCardClick={handleInlineCardClick} />
                     ))}
 
                     {isTyping && (
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                      <div role="status" aria-label="Balance Assist is typing" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                         <BotAvatarSmall />
                         <TypingDots />
                       </div>
                     )}
 
-                    {!isTyping && isTeamConnected && teamWaitingForReply && <TeamTypingIndicator />}
+                    {!isTyping && isTeamConnected && teamWaitingForReply && <div role="status" aria-label="Balance team is preparing a reply"><TeamTypingIndicator /></div>}
 
                     {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
-                  </>
+                  </div>
                 )}
 
                 <div ref={messagesEndRef} />
@@ -1356,7 +1329,8 @@ export function WidgetOverlay({
                   alignItems: 'center',
                   gap: '8px',
                   background: 'rgba(16, 16, 16, 0.4)',
-                  position: 'relative'
+                  position: 'relative',
+                  paddingBottom: 'max(10px, env(safe-area-inset-bottom))'
                 }}
               >
                 {!isTeamConnected && (
@@ -1368,7 +1342,7 @@ export function WidgetOverlay({
                       onClick={() => setAttachmentOpen((o) => !o)}
                       style={{
                         width: '36px',
-                        height: '36px',
+                        height: '44px',
                         borderRadius: '50%',
                         border: `1px solid ${brandTokens.colors.border}`,
                         background: attachmentOpen ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
@@ -1385,7 +1359,12 @@ export function WidgetOverlay({
                     </button>
                     {attachmentOpen && (
                       <div
+                        ref={attachmentDialogRef}
                         data-testid="attachment-popover"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Add private references"
+                        tabIndex={-1}
                         style={{
                           position: 'absolute',
                           left: 12,
@@ -1396,7 +1375,9 @@ export function WidgetOverlay({
                           border: `1px solid ${brandTokens.colors.border}`,
                           background: brandTokens.gradients.panel,
                           boxShadow: '0 -10px 30px rgba(0,0,0,0.45)',
-                          zIndex: 100
+                          zIndex: 100,
+                          maxHeight: 'min(420px, calc(100dvh - 180px))',
+                          overflowY: 'auto'
                         }}
                       >
                         <AttachmentDropzone
@@ -1443,7 +1424,7 @@ export function WidgetOverlay({
                     backgroundColor: 'rgba(255, 255, 255, 0.04)',
                     color: brandTokens.colors.lightText,
                     fontFamily: brandTokens.typography.ui,
-                    fontSize: '13px',
+                    fontSize: isMobile ? '16px' : '13px',
                     outline: 'none'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = brandTokens.colors.warmGold)}
@@ -1453,8 +1434,8 @@ export function WidgetOverlay({
                   onClick={handleSubmitText}
                   disabled={!inputValue.trim() || isTyping}
                   style={{
-                    width: '36px',
-                    height: '36px',
+                    width: '44px',
+                    height: '44px',
                     borderRadius: '50%',
                     border: 'none',
                     background:

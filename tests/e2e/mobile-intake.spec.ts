@@ -76,5 +76,10 @@ test.describe('mobile intake', () => {
     await chatTab.click();
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
     await expect(input).toBeVisible();
+
+    await chatTab.focus();
+    await chatTab.press('ArrowRight');
+    await expect(briefTab).toBeFocused();
+    await expect(briefTab).toHaveAttribute('aria-selected', 'true');
   });
 });

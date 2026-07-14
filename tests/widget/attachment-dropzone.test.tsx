@@ -94,6 +94,7 @@ test('dropzone states that file sharing is unavailable and disables selection', 
   render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
   expect(screen.getByText(/file sharing unavailable/i)).toBeInTheDocument();
   expect(screen.getByText(/add a reference link above instead/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /file sharing unavailable/i })).toBeDisabled();
   expect(document.querySelector('input[type="file"]')).toBeDisabled();
 });
 

@@ -63,6 +63,14 @@ describe('WidgetOverlay accessibility', () => {
     expect(dialog).toHaveAttribute('aria-label', 'Balance Assist');
   });
 
+  test('widget is a labelled modal dialog at mobile and desktop widths', () => {
+    stubFetch();
+    const { container } = render(<WidgetOverlay autoOpen={true} />);
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveAttribute('aria-labelledby', 'balance-assist-dialog-title');
+  });
+
   test('pressing Escape closes the widget', async () => {
     stubFetch();
     const { container } = render(<WidgetOverlay autoOpen={true} />);

@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { TypingDots } from '@/components/chat/typing-dots';
 import { brandTokens } from '@/lib/brand-tokens';
 import {
@@ -7,6 +7,7 @@ import {
 } from '@/lib/onboarding/service-options';
 import type { BudgetBandId, ServiceOptionId, TimelineBandId } from '@/lib/onboarding/types';
 import { HUMAN_UPLOAD_GUIDANCE } from '@/lib/uploads/file-policy';
+import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 
 export const balanceLogoUrl =
   'https://images.squarespace-cdn.com/content/v1/5c81167bab1a62362b828e3f/d5e257d2-800b-4f0b-82e4-edfabe552823/gold.png?format=2500w';
@@ -53,7 +54,7 @@ export function WidgetOverlayHeader({
           />
         </div>
         <div>
-          <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: brandTokens.colors.lightText, letterSpacing: '0.02em' }}>
+          <p id="balance-assist-dialog-title" style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: brandTokens.colors.lightText, letterSpacing: '0.02em' }}>
             {isTeamConnected ? 'Balance Studio Team' : 'Balance Assist'}
           </p>
           <p
@@ -201,6 +202,8 @@ export function FileRequestInputHint() {
 }
 
 export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus({ active: true, dialogRef, onDismiss: onClose });
   const groups = [
     ['Documents', 'pdf, ppt, pptx, key, doc, docx, pages, xls, xlsx, txt, csv'],
     ['Images', 'jpg, png, gif, svg, tif, webp, heic, psd, ai, eps, indd'],
@@ -223,6 +226,11 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
       }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upload-policy-title"
+        tabIndex={-1}
         style={{
           width: '100%',
           maxWidth: '340px',
@@ -240,7 +248,7 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
             <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', color: brandTokens.colors.warmGold }}>
               Accepted files
             </div>
-            <div style={{ marginTop: '4px', fontSize: '14px', fontWeight: 600 }}>Upload guidelines</div>
+            <div id="upload-policy-title" style={{ marginTop: '4px', fontSize: '14px', fontWeight: 600 }}>Upload guidelines</div>
           </div>
           <button
             onClick={onClose}
@@ -331,6 +339,8 @@ export function HumanFooter({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
           <div
+            role="status"
+            aria-live="polite"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -791,7 +801,7 @@ export function ProjectBriefCard({
       )}
 
       {approved && (
-        <div style={{ fontSize: '11px', color: '#4ade80', lineHeight: 1.5 }}>
+        <div role="status" aria-live="polite" style={{ fontSize: '11px', color: '#4ade80', lineHeight: 1.5 }}>
           Brief approved. You can now continue refining it or speak to the team.
         </div>
       )}
