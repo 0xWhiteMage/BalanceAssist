@@ -94,15 +94,33 @@ describe('production recovery runner', () => {
     }
 
     const trackerInsert = /INSERT INTO public\.schema_migrations \(version, filename\)\r?\nVALUES\r?\n([\s\S]*?);/.exec(artifact);
-    expect(trackerInsert?.[1].match(/\('0(?:19|2[0-9]|3[0-7])', '[^']+'\)/g)).toHaveLength(19);
+    const trackerMappings = [...(trackerInsert?.[1].matchAll(/\('([^']+)', '([^']+)'\)/g) ?? [])]
+      .map(([, version, filename]) => ({ version, filename }));
+    expect(trackerMappings).toEqual(recoveryMigrations.map(({ version, filename }) => ({ version, filename })));
     expect(trackerInsert?.[0]).not.toContain('ON CONFLICT');
-    expect(artifact).toContain("RAISE EXCEPTION 'schema_migrations verification failed for 019-037'");
+    const postconditionStart = artifact.indexOf('DO $$', (trackerInsert?.index ?? 0) + (trackerInsert?.[0].length ?? 0));
+    const postconditionFailure = artifact.indexOf("RAISE EXCEPTION 'schema_migrations verification failed for 019-037'", postconditionStart);
+    const commit = artifact.lastIndexOf('COMMIT;');
+    expect(postconditionStart).toBeGreaterThan((trackerInsert?.index ?? 0) + (trackerInsert?.[0].length ?? 0));
+    expect(postconditionFailure).toBeGreaterThan(postconditionStart);
+    expect(postconditionFailure).toBeLessThan(commit);
     expect(artifact.lastIndexOf('COMMIT;')).toBe(artifact.trimEnd().length - 'COMMIT;'.length);
     expect(artifact.match(/COMMIT;/g)).toHaveLength(1);
     expect(artifact).not.toMatch(/(?:INSERT INTO|UPDATE|DELETE FROM|CREATE|ALTER|DROP)\s+storage\./i);
 
-    expect(documentation).toContain('After the SQL Editor script succeeds, create `temporary-attachments` as a private bucket in the Supabase Storage dashboard.');
+    const runArtifact = documentation.indexOf('1. Run `supabase/production-recovery-019-037.sql` in the Supabase SQL Editor.');
+    const successfulCommit = documentation.indexOf('2. Continue only after it commits successfully with no errors.');
+    const createBucket = documentation.indexOf('3. Create `temporary-attachments` in the Supabase Storage dashboard with public access disabled.');
+    const verification = documentation.indexOf('4. Run the read-only verification query below.');
+    expect(runArtifact).toBeGreaterThan(-1);
+    expect(successfulCommit).toBeGreaterThan(runArtifact);
+    expect(createBucket).toBeGreaterThan(successfulCommit);
+    expect(verification).toBeGreaterThan(createBucket);
     expect(documentation).toContain('Do not add browser Storage policies.');
+    expect(documentation).toContain('Pass only when the tracker query returns exactly 19 rows for 019-037 and every filename matches the expected migration filename.');
+    expect(documentation).toContain('Pass only when the bucket query returns exactly one row with `public = false`.');
+    expect(documentation).toContain('Pass only when the policy query returns zero rows and the readiness query returns `true`.');
+    expect(documentation).toContain('On any failure, stop. Do not retry blindly and do not apply migrations 038-043.');
     expect(documentation).toContain("SELECT version, filename\nFROM public.schema_migrations\nWHERE version BETWEEN '019' AND '037'\nORDER BY version;");
     expect(documentation).toContain("SELECT id, name, public\nFROM storage.buckets\nWHERE id = 'temporary-attachments';");
     expect(documentation).toContain('WITH RECURSIVE memberships(browser_role, role_oid) AS');

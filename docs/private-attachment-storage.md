@@ -1,10 +1,21 @@
 # Private Attachment Storage Setup
 
-Database migrations and the SQL Editor recovery fallback do not create or manage the `temporary-attachments` Storage bucket. After the SQL Editor script succeeds, create `temporary-attachments` as a private bucket in the Supabase Storage dashboard. Then set `SUPABASE_PRIVATE_UPLOAD_BUCKET=temporary-attachments` in the server environment.
+Database migrations and the SQL Editor recovery fallback do not create or manage the `temporary-attachments` Storage bucket. Use this ordered recovery sequence:
+
+1. Run `supabase/production-recovery-019-037.sql` in the Supabase SQL Editor.
+2. Continue only after it commits successfully with no errors.
+3. Create `temporary-attachments` in the Supabase Storage dashboard with public access disabled.
+4. Run the read-only verification query below.
+
+After the checks pass, set `SUPABASE_PRIVATE_UPLOAD_BUCKET=temporary-attachments` in the server environment.
 
 Do not use SQL to create, alter, delete, grant access to, or add policies for `storage` relations. Do not add browser Storage policies. Service-role server code is the only writer, and the bucket must never expose public URLs.
 
 Readiness is a read-only attestation: `private_attachment_storage_is_ready('temporary-attachments')` confirms that the expected bucket exists, is non-public, has Storage object RLS enabled, and has no browser-role policy. Any failed attestation disables uploads. Files are temporarily retained for up to 24 hours solely to analyse the current same-browser draft and are never sent to the Balance team or Telegram.
+
+Pass only when the tracker query returns exactly 19 rows for 019-037 and every filename matches the expected migration filename. Pass only when the bucket query returns exactly one row with `public = false`. Pass only when the policy query returns zero rows and the readiness query returns `true`.
+
+On any failure, stop. Do not retry blindly and do not apply migrations 038-043.
 
 Run these read-only checks after the SQL Editor script and bucket creation:
 
