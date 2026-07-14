@@ -149,7 +149,7 @@ describe('session-scoped API routes', () => {
     expect(requireSessionMock).toHaveBeenCalledWith(request, 'sess-relay');
   });
 
-  test('POST /api/telegram/upload requires session auth and forwards the form sessionId', async () => {
+  test('POST /api/telegram/upload requires session auth and forwards the session header', async () => {
     mockUnauthorizedSession();
 
     const form = new FormData();
@@ -165,7 +165,10 @@ describe('session-scoped API routes', () => {
 
     try {
       const { POST } = await import('@/app/api/telegram/upload/route');
-      const request = new Request('http://localhost/api/telegram/upload', { method: 'POST' });
+      const request = new Request('http://localhost/api/telegram/upload', {
+        method: 'POST',
+        headers: { 'x-session-id': 'sess-upload' }
+      });
       const response = await POST(request);
 
       expect(response.status).toBe(401);

@@ -121,7 +121,7 @@ describe('chatRequest client', () => {
     ]);
   });
 
-  test('uploadRequestedFiles sends files without producer-transfer consent data', async () => {
+  test('uploadRequestedFiles sends session scope in the header without producer-transfer consent data', async () => {
 
     global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(JSON.stringify({ ok: true }), {
@@ -139,6 +139,8 @@ describe('chatRequest client', () => {
     expect(result).toEqual({ ok: true });
     const form = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body as FormData;
     expect(form.get('consent')).toBeNull();
+    expect(form.get('sessionId')).toBeNull();
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.headers).toEqual({ 'x-session-id': 'session-123' });
   });
 
   test('records producer-transfer consent before a producer action', async () => {

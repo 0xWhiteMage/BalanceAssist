@@ -37,7 +37,10 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 
     const { POST } = await import('@/app/api/telegram/upload/route');
-    const response = await POST(new Request('http://localhost/api/telegram/upload', { method: 'POST' }));
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555' }
+    }));
     formDataSpy.mockRestore();
 
     expect(response.status).toBe(200);

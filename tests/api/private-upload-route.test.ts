@@ -21,11 +21,21 @@ function formWith(file: File) {
   return form;
 }
 
-async function post(form: FormData) {
+const sessionId = '11111111-2222-3333-4444-555555555555';
+
+async function post(form: FormData, headers: HeadersInit = {}) {
   const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
   try {
     const { POST } = await import('@/app/api/telegram/upload/route');
-    return await POST(new Request('http://localhost/api/telegram/upload', { method: 'POST' }));
+    return await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: {
+        origin: 'https://www.balancestudio.tv',
+        'x-session-capability': 'capability',
+        'x-session-id': sessionId,
+        ...headers
+      }
+    }));
   } finally {
     formDataSpy.mockRestore();
   }
@@ -34,14 +44,24 @@ async function post(form: FormData) {
 describe('POST /api/telegram/upload private storage', () => {
   beforeEach(() => {
     process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
-    requireSessionMock.mockResolvedValue({
-      ok: true,
-      auth: { sessionId: '11111111-2222-3333-4444-555555555555', capability: 'capability' },
-      supabase: {
-        from: vi.fn(() => ({
-          select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true }], error: null })) })) }))
-        }))
+    requireSessionMock.mockImplementation(async (request: Request, expectedSessionId?: string) => {
+      if (
+        request.headers.get('origin') !== 'https://www.balancestudio.tv'
+      ) {
+        return { ok: false, response: new Response(JSON.stringify({ error: 'Untrusted origin' }), { status: 403 }) };
       }
+      if (request.headers.get('x-session-capability') !== 'capability' || expectedSessionId !== sessionId) {
+        return { ok: false, response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }) };
+      }
+      return {
+        ok: true,
+        auth: { sessionId, capability: 'capability' },
+        supabase: {
+          from: vi.fn(() => ({
+            select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true }], error: null })) })) }))
+          }))
+        }
+      };
     });
     storePrivateUploadMock.mockResolvedValue({ status: 'stored', objectKey: 'opaque', mimeType: 'application/pdf', extractedText: 'Launch film scope', retentionExpiresAt: '2026-07-15T00:00:00.000Z' });
     deletePrivateUploadMock.mockResolvedValue(true);
@@ -50,6 +70,83 @@ describe('POST /api/telegram/upload private storage', () => {
   afterEach(() => {
     delete process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET;
     vi.restoreAllMocks();
+  });
+
+  test('rejects a missing capability before parsing multipart data', async () => {
+    const formDataSpy = vi.spyOn(Request.prototype, 'formData');
+    const { POST } = await import('@/app/api/telegram/upload/route');
+
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: { origin: 'https://www.balancestudio.tv', 'x-session-id': sessionId }
+    }));
+
+    expect(response.status).toBe(401);
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  test('rejects an invalid capability before parsing multipart data', async () => {
+    const formDataSpy = vi.spyOn(Request.prototype, 'formData');
+    const { POST } = await import('@/app/api/telegram/upload/route');
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: {
+        origin: 'https://www.balancestudio.tv',
+        'x-session-capability': 'invalid-capability',
+        'x-session-id': sessionId
+      }
+    }));
+
+    expect(response.status).toBe(401);
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  test('rejects an untrusted origin before parsing multipart data', async () => {
+    const formDataSpy = vi.spyOn(Request.prototype, 'formData');
+    const { POST } = await import('@/app/api/telegram/upload/route');
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: {
+        origin: 'https://attacker.example',
+        'x-session-capability': 'capability',
+        'x-session-id': sessionId
+      }
+    }));
+
+    expect(response.status).toBe(403);
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  test('rejects an oversized declared multipart body before parsing', async () => {
+    const response = await post(formWith(new File(['brief'], 'brief.txt', { type: 'text/plain' })), {
+      'content-length': String(27 * 1024 * 1024)
+    });
+
+    expect(response.status).toBe(413);
+  });
+
+  test('rejects an oversized chunked multipart body', async () => {
+    const { POST } = await import('@/app/api/telegram/upload/route');
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(27 * 1024 * 1024));
+        controller.close();
+      }
+    });
+
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: {
+        origin: 'https://www.balancestudio.tv',
+        'x-session-capability': 'capability',
+        'x-session-id': sessionId,
+        'content-type': 'multipart/form-data; boundary=bound'
+      },
+      body,
+      duplex: 'half'
+    } as RequestInit));
+
+    expect(response.status).toBe(413);
   });
 
   test('stores an analysis-consented file without producer delivery', async () => {

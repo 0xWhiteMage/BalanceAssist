@@ -180,8 +180,12 @@ export function AttachmentDropzone({
       updateFileStatus(file.name, 'validating');
       fd.append('files', file, file.name);
     }
-    if (sessionId) fd.append('sessionId', sessionId);
-    const res = await fetch('/api/telegram/upload', { method: 'POST', credentials: 'include', body: fd });
+    const res = await fetch('/api/telegram/upload', {
+      method: 'POST',
+      credentials: 'include',
+      headers: sessionId ? { 'x-session-id': sessionId } : undefined,
+      body: fd
+    });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       for (const file of fileArray) updateFileStatus(file.name, 'retryable', body?.error ?? `Failed to upload ${file.name}.`);

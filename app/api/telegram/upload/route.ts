@@ -3,6 +3,39 @@ import { requireSession } from '@/lib/api/require-session';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
 
+const MAX_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
+
+class MultipartBodyTooLargeError extends Error {}
+
+function boundedBodyStream(body: ReadableStream<Uint8Array>, maxBytes: number) {
+  const reader = body.getReader();
+  let bytesRead = 0;
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        bytesRead += value.byteLength;
+        if (bytesRead > maxBytes) {
+          await reader.cancel();
+          controller.error(new MultipartBodyTooLargeError());
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    }
+  });
+}
+
 export async function OPTIONS(request: Request) {
   return corsOptionsResponse(request);
 }
@@ -15,14 +48,34 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const requestedSessionId = request.headers.get('x-session-id')?.trim();
+  if (!requestedSessionId) {
+    return jsonWithCors({ ok: false, error: 'Session ID required' }, { status: 400 }, request);
+  }
+
+  const authResult = await requireSession(request, requestedSessionId);
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
+  const contentLength = request.headers.get('content-length');
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_MULTIPART_BODY_BYTES) {
+    return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
+  }
+
   let form: FormData;
   try {
-    form = await request.formData();
-  } catch {
+    const multipartRequest = request.body
+      ? new Request(request, { body: boundedBodyStream(request.body, MAX_MULTIPART_BODY_BYTES), duplex: 'half' } as RequestInit)
+      : request;
+    form = await multipartRequest.formData();
+  } catch (error) {
+    if (error instanceof MultipartBodyTooLargeError) {
+      return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
+    }
     return jsonWithCors({ ok: false, error: 'Invalid form data' }, { status: 400 }, request);
   }
 
-  const requestedSessionId = String(form.get('sessionId') ?? '').trim();
   const files = form
     .getAll('files')
     .concat(form.getAll('file'))
@@ -35,13 +88,7 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
   }
 
-  const authResult = await requireSession(request, requestedSessionId || undefined);
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const sessionId = requestedSessionId || authResult.auth.sessionId;
+  const sessionId = authResult.auth.sessionId;
 
   const bucket = privateUploadBucketFromEnv();
   if (!bucket) {

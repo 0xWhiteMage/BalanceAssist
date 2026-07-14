@@ -224,13 +224,13 @@ export async function uploadRequestedFiles(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const form = new FormData();
-    form.set('sessionId', sessionId);
     for (const file of files) {
       form.append('files', file, file.name);
     }
 
     const response = await fetchWithTimeout('/api/telegram/upload', {
       method: 'POST',
+      headers: { 'x-session-id': sessionId },
       body: form
     });
 
