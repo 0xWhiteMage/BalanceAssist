@@ -29,12 +29,21 @@ describe('production release workflows', () => {
     const vercelAudit = jobs.gates?.steps?.find((step) => step.name === 'Verify Vercel dashboard release control');
     expect(vercelAudit?.env?.VERCEL_GIT_DEPLOYMENTS_DISABLED_AT).toBe('${{ vars.VERCEL_GIT_DEPLOYMENTS_DISABLED_AT }}');
     expect(vercelAudit?.run).toContain('test -n "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT"');
-    expect(jobs.deploy?.needs).toEqual(['gates']);
-    expect(jobs.smoke?.needs).toEqual(['deploy']);
-    expect(jobs.migration?.needs).toEqual(['smoke']);
+    expect(vercelAudit?.run).toContain('^[0-9]{4}-[0-9]{2}-[0-9]{2}T');
+    expect(vercelAudit?.run).toContain('90 * 24 * 60 * 60');
+    expect(jobs.deploy?.needs).toEqual(['gates', 'validate']);
+    expect(jobs.smoke?.needs).toEqual(['deploy', 'validate']);
+    expect(jobs.migration?.needs).toEqual(['smoke', 'validate']);
     expect(jobs.migration?.environment).toBe('production-migrations');
-    expect(jobs.promote?.needs).toEqual(['deploy', 'migration']);
-    expect(jobs.telegram?.needs).toEqual(['promote']);
+    expect(jobs.promote?.needs).toEqual(['deploy', 'migration', 'validate']);
+    expect(jobs.telegram?.needs).toEqual(['promote', 'validate']);
+    for (const [name, job] of Object.entries(jobs)) {
+      const hasCredentials = JSON.stringify(job).includes('secrets.') || job.environment !== undefined;
+      if (hasCredentials) {
+        expect(job.needs, name).toContain('validate');
+        expect(JSON.stringify(job), name).toContain('needs.validate.outputs.sha');
+      }
+    }
     const validate = jobs.validate?.steps?.find((step) => step.name === 'Validate release commit');
     expect(validate?.env?.RELEASE_REF).toBe('${{ inputs.ref }}');
     expect(validate?.run).toContain('^[0-9a-f]{40}$');
@@ -50,7 +59,16 @@ describe('production release workflows', () => {
     expect(jobs.deploy?.steps?.find((step) => step.name === 'Deploy immutable Vercel preview')?.run).toContain('vercel deploy --prebuilt');
     expect(jobs.deploy?.steps?.find((step) => step.name === 'Deploy immutable Vercel preview')?.run).toContain('--meta githubCommitSha="$GITHUB_SHA"');
     expect(jobs.smoke?.steps?.find((step) => step.name === 'Smoke immutable deployment')?.run).toContain('/api/health');
+    const immutableSmoke = jobs.smoke?.steps?.find((step) => step.name === 'Smoke immutable deployment');
+    expect(immutableSmoke?.env?.SUPABASE_URL).toBe('${{ secrets.SUPABASE_URL }}');
+    expect(immutableSmoke?.env?.SUPABASE_SERVICE_ROLE_KEY).toBe('${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}');
+    expect(immutableSmoke?.run).toContain('/rest/v1/schema_migrations?select=version&limit=1');
+    expect(immutableSmoke?.run).toContain('--output /dev/null');
+    expect(immutableSmoke?.run).toContain('--connect-timeout 5');
     expect(jobs.promote?.steps?.find((step) => step.name === 'Promote immutable deployment')?.run).toContain('vercel alias set');
+    const aliasSmoke = jobs.promote?.steps?.find((step) => step.name === 'Smoke promoted production alias');
+    expect(aliasSmoke?.run).toContain('$PRODUCTION_URL/api/health');
+    expect(aliasSmoke?.run).toContain('/rest/v1/schema_migrations?select=version&limit=1');
     const telegram = jobs.telegram?.steps?.find((step) => step.name === 'Configure Telegram webhook');
     expect(telegram?.run).toContain('test -n "$PRODUCTION_URL"');
     expect(telegram?.run).toContain('test -n "$SETUP_TOKEN"');

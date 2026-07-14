@@ -54,6 +54,11 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT"
+          [[ "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]]
+          audited_at="$(date -u -d "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT" +%s)"
+          now="$(date -u +%s)"
+          test "$audited_at" -le "$now"
+          test $((now - audited_at)) -le $((90 * 24 * 60 * 60))
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -74,7 +79,7 @@ jobs:
         run: supabase stop --no-backup
 
   deploy:
-    needs: [gates]
+    needs: [gates, validate]
     environment: production
     runs-on: ubuntu-latest
     outputs:
@@ -110,20 +115,30 @@ jobs:
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
 
   smoke:
-    needs: [deploy]
+    needs: [deploy, validate]
     environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Smoke immutable deployment
         env:
           DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
           test -n "$DEPLOYMENT_URL"
-          curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 30 "$DEPLOYMENT_URL/api/health"
+          test -n "$RELEASE_SHA"
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null "$DEPLOYMENT_URL/api/health"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$SUPABASE_URL/rest/v1/schema_migrations?select=version&limit=1"
 
   migration:
-    needs: [smoke]
+    needs: [smoke, validate]
     environment: production-migrations
     runs-on: ubuntu-latest
     steps:
@@ -148,13 +163,14 @@ jobs:
           node scripts/apply-production-migrations.mjs
 
   promote:
-    needs: [deploy, migration]
+    needs: [deploy, migration, validate]
     environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Promote immutable deployment
         env:
           DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
           PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -162,22 +178,42 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$DEPLOYMENT_URL"
+          test -n "$RELEASE_SHA"
           test -n "$PRODUCTION_URL"
           test -n "$VERCEL_TOKEN"
           npm exec vercel alias set -- "$DEPLOYMENT_URL" "$PRODUCTION_URL" --token="$VERCEL_TOKEN"
+      - name: Smoke promoted production alias
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_SHA"
+          test -n "$PRODUCTION_URL"
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null "$PRODUCTION_URL/api/health"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$SUPABASE_URL/rest/v1/schema_migrations?select=version&limit=1"
 
   telegram:
-    needs: [promote]
+    needs: [promote, validate]
     environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Configure Telegram webhook
         env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
           PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
           SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "$RELEASE_SHA"
           test -n "$PRODUCTION_URL"
           test -n "$SETUP_TOKEN"
           test -n "$TELEGRAM_BOT_TOKEN"
