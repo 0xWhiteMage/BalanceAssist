@@ -98,14 +98,18 @@ describe('useWidgetSessionDraft', () => {
 
 describe('useTeamRelay', () => {
   test('returns a rejected relay send to the requested retryable state', async () => {
+    const relay = vi.fn<(sessionId: string, text: string, requestId: string) => Promise<boolean>>(async () => false);
     const { result } = renderHook(() => useTeamRelay({
-      sessionId: 'session-1', fetchTeamMessages: vi.fn(), relayUserMessage: vi.fn(async () => false)
+      sessionId: 'session-1', fetchTeamMessages: vi.fn(), relayUserMessage: relay
     }));
     act(() => result.current.requestHandoff());
+    await act(async () => { await result.current.send('Hello'); });
     await act(async () => { await result.current.send('Hello'); });
 
     expect(result.current.status).toBe('requested');
     expect(result.current.waitingForReply).toBe(false);
+    expect(relay.mock.calls[0]?.[2]).toEqual(expect.any(String));
+    expect(relay.mock.calls[1]?.[2]).toBe(relay.mock.calls[0]?.[2]);
   });
 
   test('stops controller polling when closed', async () => {

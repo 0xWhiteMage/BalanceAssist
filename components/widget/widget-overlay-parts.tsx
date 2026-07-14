@@ -154,13 +154,13 @@ export function FileRequestBanner({ note }: { note: string | null }) {
       }}
     >
       <div style={{ fontSize: '10px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em', marginBottom: '4px' }}>
-        File request from team
+        Files requested by team
       </div>
       <div style={{ marginBottom: '6px' }}>
-        {note ?? 'The team asked you to upload files for this project.'}
+        {note ?? 'The team asked for files for this project.'}
       </div>
       <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText }}>
-        Tap the paperclip icon on the left of the message box below to attach your files.
+        File delivery through this chat is currently unavailable. Reply to coordinate a supported transfer method.
       </div>
       <div style={{ marginTop: '6px', fontSize: '10px', color: brandTokens.colors.mutedText }}>
         {HUMAN_UPLOAD_GUIDANCE}
@@ -196,7 +196,7 @@ export function FileRequestInputHint() {
           display: 'inline-block'
         }}
       />
-      File upload ready · use the paperclip icon
+      File delivery through this chat is currently unavailable
     </div>
   );
 }

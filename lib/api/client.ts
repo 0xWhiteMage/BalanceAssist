@@ -173,9 +173,19 @@ export type TeamPollState = {
   scheduleRequestOpen: boolean;
 };
 
-export async function relayUserMessage(sessionId: string, text: string): Promise<boolean> {
-  const result = await postJson<{ ok: boolean }>('/api/telegram/relay', { sessionId, text });
-  return Boolean(result?.ok);
+export async function relayUserMessage(sessionId: string, text: string, requestId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout('/api/telegram/relay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-request-id': requestId },
+      body: JSON.stringify({ sessionId, text }),
+      keepalive: true
+    });
+    if (!response.ok) return false;
+    return Boolean((await response.json() as { ok?: boolean }).ok);
+  } catch {
+    return false;
+  }
 }
 
 export async function fetchTeamMessages(

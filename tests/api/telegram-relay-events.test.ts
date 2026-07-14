@@ -21,4 +21,15 @@ describe('POST /api/telegram/relay', () => {
     expect(rpc).toHaveBeenCalledWith('relay_human_message', { p_session_id: 'sess-relay', p_request_id: 'retry-key', p_text: 'Same text' });
     await expect(response.json()).resolves.toMatchObject({ ok: true, queued: true, messageId: 33, handoffId: 'handoff-33' });
   });
+
+  test('rejects a relay request without the client retry identity', async () => {
+    const { POST } = await import('@/app/api/telegram/relay/route');
+    const response = await POST(new Request('http://localhost/api/telegram/relay', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'sess-relay', text: 'Same text' })
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: 'request_id_required' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
 });

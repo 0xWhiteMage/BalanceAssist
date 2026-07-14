@@ -148,6 +148,7 @@ export function WidgetOverlay({
   const [isOpen, setIsOpen] = useState(autoOpen);
   const [view, setView] = useState<'chat' | 'calendly'>('chat');
   const [calendlyUrl, setCalendlyUrl] = useState<string | null>(null);
+  const configuredCalendlyUrl = calendlyUrlOverride?.trim() || null;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
@@ -179,6 +180,7 @@ export function WidgetOverlay({
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionBootstrapPromiseRef = useRef<Promise<string | null> | null>(null);
+  const previousSessionIdRef = useRef<string | null>(sessionId);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -219,7 +221,10 @@ export function WidgetOverlay({
   }, [teamMessages]);
 
   useEffect(() => {
-    resetTeamRelay();
+    if (previousSessionIdRef.current && previousSessionIdRef.current !== sessionId) {
+      resetTeamRelay();
+    }
+    previousSessionIdRef.current = sessionId;
   }, [sessionId, resetTeamRelay]);
 
   const scrollToBottom = useCallback(() => {
@@ -233,10 +238,11 @@ export function WidgetOverlay({
   }, [messages, isTyping, scrollToBottom]);
 
   useEffect(() => {
-    if (isTeamConnected && humanScheduleRequestOpen && calendlyUrl && view === 'chat') {
+    if (isTeamConnected && humanScheduleRequestOpen && configuredCalendlyUrl && view === 'chat') {
+      setCalendlyUrl(configuredCalendlyUrl);
       setView('calendly');
     }
-  }, [isTeamConnected, humanScheduleRequestOpen, calendlyUrl, view]);
+  }, [configuredCalendlyUrl, isTeamConnected, humanScheduleRequestOpen, view]);
 
   useEffect(() => {
     if (isTeamConnected || briefApproved) return;
@@ -909,7 +915,11 @@ export function WidgetOverlay({
 
   function handleInlineCardClick(card: InlineCard) {
     if (card.type === 'calendly') {
-      setCalendlyUrl(calendlyUrlOverride ?? card.url);
+      if (!configuredCalendlyUrl) {
+        void botSay('Scheduling is currently unavailable. Please ask the Balance team to arrange a time.');
+        return;
+      }
+      setCalendlyUrl(configuredCalendlyUrl);
       setView('calendly');
     } else if (card.type === 'telegram') {
       handleTeamConnect();
@@ -1017,7 +1027,7 @@ export function WidgetOverlay({
     e.target.value = '';
   }
 
-  const canInteract = !isSessionExpired && (hasStarted || isTeamConnected);
+  const canInteract = !isSessionExpired && (hasStarted || humanRequested);
   const showNoticeGate = !noticeConsent;
   const showStartChoices = noticeConsent !== null && !canInteract && messages.length === 0;
   const showAttachmentButton = false;
@@ -1179,7 +1189,11 @@ export function WidgetOverlay({
                   onChange={handleDraftEdit}
                   telegramBroadcastStatus={telegramBroadcastStatus}
                   onBookCatchUp={() => {
-                    setCalendlyUrl('https://calendly.com/haiha-dang/catch-up');
+                    if (!configuredCalendlyUrl) {
+                      void botSay('Scheduling is currently unavailable. Please ask the Balance team to arrange a time.');
+                      return;
+                    }
+                    setCalendlyUrl(configuredCalendlyUrl);
                     setView('calendly');
                   }}
                   onTalkToHuman={handleTeamConnect}
@@ -1422,7 +1436,7 @@ export function WidgetOverlay({
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={isTeamConnected ? 'Message the team...' : 'Type your message...'}
+                  placeholder={humanRequested ? 'Message the team request...' : 'Type your message...'}
                   style={{
                     flex: 1,
                     padding: '10px 14px',

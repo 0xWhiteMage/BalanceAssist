@@ -6,6 +6,20 @@ test('widget landing shows human escalation', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Talk to a human', exact: true })).toBeVisible();
 });
 
+test('direct human contact keeps a usable pending request input without claiming a team connection', async ({ page }) => {
+  await page.route('**/api/sessions/inspect', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ exists: false }) }));
+  await page.route('**/api/sessions', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessionId: 'human-request-session', persisted: true }) }));
+  await page.route('**/api/projects/human-request-session/consent', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, consent: { producerTransfer: true } }) }));
+  await page.goto('/preview');
+
+  await page.getByTestId('consent-button').click();
+  await page.getByRole('button', { name: 'Talk to a human', exact: true }).click();
+
+  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Team contact requested');
+  await expect(page.getByText('Team connected', { exact: true })).toHaveCount(0);
+});
+
 test('restores focus after closing its nested reference dialog without force clicks', async ({ page }) => {
   await page.route('**/api/sessions/inspect', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, exists: false }) });

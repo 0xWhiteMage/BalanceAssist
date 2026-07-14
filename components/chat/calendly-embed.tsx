@@ -94,7 +94,8 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
         return;
       }
 
-      const expectedSource = fallbackFrameRef.current?.contentWindow ?? null;
+      const inlineFrame = containerRef.current?.querySelector('iframe');
+      const expectedSource = fallbackFrameRef.current?.contentWindow ?? inlineFrame?.contentWindow ?? null;
       if (!expectedSource || event.source !== expectedSource) {
         return;
       }
@@ -161,7 +162,7 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
             Book a Discovery Call
           </p>
           <p style={{ margin: 0, fontSize: '11px', color: brandTokens.colors.mutedText }}>
-            30 min · Video call
+            15 min · Video call
           </p>
         </div>
       </header>

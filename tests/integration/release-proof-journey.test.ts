@@ -186,7 +186,7 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     const draftResponse = await updateDraft(new Request(`${origin}/api/projects/${session.sessionId}/draft`, { method: 'PUT', headers: auth, body: JSON.stringify({ fields: [
       { field: 'service', value: 'production', provenance: 'confirmed' }, { field: 'projectScope', value: 'Film', provenance: 'confirmed' },
       { field: 'contactName', value: 'Ada', provenance: 'confirmed' }, { field: 'contactEmail', value: 'ada@example.test', provenance: 'confirmed' }
-    ] }) }), { params: Promise.resolve({ sessionId: session.sessionId }) });
+    ], expectedDraftVersion: 0 }) }), { params: Promise.resolve({ sessionId: session.sessionId }) });
     expect((await draftResponse.json()).draftVersion).toBe(1);
     await expect(client!.query('select draft_version, draft from public.sessions where id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [expect.objectContaining({ draft_version: 1, draft: expect.objectContaining({ contactEmail: expect.any(Object) }) })] });

@@ -6,7 +6,7 @@ import type { TeamMessage, TeamPollState } from '@/lib/api/client';
 type Dependencies = {
   sessionId: string | null;
   fetchTeamMessages: (sessionId: string, sinceId?: number) => Promise<TeamPollState>;
-  relayUserMessage: (sessionId: string, text: string) => Promise<boolean>;
+  relayUserMessage: (sessionId: string, text: string, requestId: string) => Promise<boolean>;
 };
 
 export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }: Dependencies) {
@@ -21,6 +21,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const sinceIdRef = useRef(0);
   const pollingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryRef = useRef<{ text: string; requestId: string } | null>(null);
 
   const poll = useCallback(async () => {
     if (!sessionId || pollingRef.current) return;
@@ -74,8 +75,16 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     if (!sessionId) return false;
     setWaitingForReply(true);
     setStatus('sending');
-    const sent = await relayUserMessage(sessionId, text);
-    if (sent) setStatus('pending');
+    const retry = retryRef.current?.text === text ? retryRef.current : {
+      text,
+      requestId: crypto.randomUUID()
+    };
+    retryRef.current = retry;
+    const sent = await relayUserMessage(sessionId, text, retry.requestId);
+    if (sent) {
+      retryRef.current = null;
+      setStatus('pending');
+    }
     else {
       setWaitingForReply(false);
       setStatus('requested');
@@ -86,6 +95,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const reset = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     sinceIdRef.current = 0;
+    retryRef.current = null;
     setRequested(false); setStatus('idle'); setIsTeamConnected(false); setWaitingForReply(false);
     setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false); setMessages([]);
   }, []);

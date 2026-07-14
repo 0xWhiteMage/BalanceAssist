@@ -66,4 +66,26 @@ describe('CalendlyEmbed', () => {
 
     expect(onScheduled).not.toHaveBeenCalled();
   });
+
+  test('accepts a scheduled event from the actual iframe created by the inline widget', () => {
+    const onScheduled = vi.fn();
+    (window as unknown as { Calendly: unknown }).Calendly = {
+      initInlineWidget: ({ parentElement, url }: { url: string; parentElement: HTMLElement }) => {
+        const frame = document.createElement('iframe');
+        frame.src = url;
+        parentElement.appendChild(frame);
+      }
+    };
+    render(<CalendlyEmbed url={TEST_URL} onBack={() => {}} onScheduled={onScheduled} />);
+    const frame = document.querySelector('.calendly-inline-widget iframe') as HTMLIFrameElement;
+
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: 'https://calendly.com',
+      data: { event: 'calendly.event_scheduled' },
+      source: frame.contentWindow
+    }));
+
+    expect(onScheduled).toHaveBeenCalledOnce();
+    delete (window as unknown as { Calendly?: unknown }).Calendly;
+  });
 });

@@ -63,6 +63,25 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay brief rail gating (Fix 4)', () => {
+  test('makes direct human contact usable while the request is pending without claiming the team is connected', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/consent')) return new Response(JSON.stringify({ ok: true, consent: { producerTransfer: true } }), { status: 200 });
+      if (url.includes('/api/sessions')) return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    fireEvent.click(await screen.findByTestId('consent-button'));
+    fireEvent.click(await screen.findByRole('button', { name: /talk to a human/i }));
+
+    const input = await screen.findByPlaceholderText(/message the team request/i);
+    fireEvent.change(input, { target: { value: 'Please call me' } });
+    expect(input).toHaveValue('Please call me');
+    expect(screen.getByText(/team contact requested/i)).toBeVisible();
+    expect(screen.queryByText(/^team connected$/i)).toBeNull();
+  });
+
   test('typing an out-of-scope "draft text for my homework" message does NOT open the brief rail', async () => {
     global.fetch = chatSessionResponse();
 

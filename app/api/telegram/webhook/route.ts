@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getEnv } from '@/lib/env';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { verifyWebhookChatId, verifyWebhookSecret, verifyWebhookSender } from '@/lib/telegram/webhook-auth';
@@ -140,6 +141,18 @@ export async function POST(request: Request) {
   const scheduleMatch = message.text.match(/^\/schedule(?:@\w+)?\s*(.*)$/i);
   if (scheduleMatch) {
     const note = scheduleMatch[1]?.trim() || null;
+    const calendlyUrl = getEnv().CALENDLY_URL?.trim();
+
+    if (!calendlyUrl) {
+      const { error: unavailableMessageError } = await supabase.from('human_messages').insert({
+        session_id: sessionId,
+        sender: 'team',
+        text: `${senderName}: Scheduling is currently unavailable. We will arrange a time directly.`,
+        telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
+      });
+      if (unavailableMessageError) return NextResponse.json({ ok: false, error: unavailableMessageError.message }, { status: 500 });
+      return NextResponse.json({ ok: true, sessionId, scheduleRequestOpen: false, schedulingAvailable: false });
+    }
 
     logger.info('/schedule received', {
       sessionId,
@@ -166,8 +179,8 @@ export async function POST(request: Request) {
       session_id: sessionId,
       sender: 'team',
       text: note
-        ? `${senderName}: Please book a call using the calendar below. ${note}`
-        : `${senderName}: Please book a discovery call using the calendar that just appeared in your chat.`,
+          ? `${senderName}: Please book a 15-minute call using the configured calendar below. ${note}`
+          : `${senderName}: Please book a 15-minute call using the configured calendar that just appeared in your chat.`,
       telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
     });
 
@@ -210,9 +223,9 @@ export async function POST(request: Request) {
     const { error: requestMessageError } = await supabase.from('human_messages').insert({
       session_id: sessionId,
       sender: 'team',
-      text: note
-        ? `${senderName}: Please upload ${note}. Use the attachment (paperclip) icon on the left of the message box to attach your files.`
-        : `${senderName}: Please upload the files for this project. Use the attachment (paperclip) icon on the left of the message box to attach your files.`,
+        text: note
+          ? `${senderName}: We need ${note}. File delivery in this chat is currently unavailable; please reply to coordinate a supported transfer method.`
+          : `${senderName}: We need files for this project. File delivery in this chat is currently unavailable; please reply to coordinate a supported transfer method.`,
       telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
     });
 

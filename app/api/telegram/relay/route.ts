@@ -18,10 +18,12 @@ export async function POST(request: Request) {
   const { sessionId, text } = parsed.data;
   const authResult = await requireSession(request, sessionId);
   if (!authResult.ok) return authResult.response;
+  const requestId = extractRequestId(request)?.trim();
+  if (!requestId) return jsonWithCors({ ok: false, error: 'request_id_required' }, { status: 400 }, request);
 
   const { data, error } = await authResult.supabase.rpc('relay_human_message', {
     p_session_id: sessionId,
-    p_request_id: extractRequestId(request),
+    p_request_id: requestId,
     p_text: text
   });
   const result = Array.isArray(data) ? data[0] as {

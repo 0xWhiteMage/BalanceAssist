@@ -339,7 +339,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
   test('after Calendly completes without verified server confirmation, the widget stays truthful about team notification', async () => {
     mockWidgetFetch();
 
-    render(<WidgetOverlay autoOpen={true} />);
+    render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/15-minute-call" />);
 
     const input = await startAiConversation();
 
