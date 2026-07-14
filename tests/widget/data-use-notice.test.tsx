@@ -49,6 +49,12 @@ describe('DataUseNotice', () => {
     expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/follow up/i);
   });
 
+  test('discloses deletion status, its 24-hour SLA, and external-copy limits', () => {
+    render(<DataUseNotice onConsent={vi.fn()} />);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/deletion request.*within 24 hours/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/telegram.*backups/i);
+  });
+
   test('links to the privacy page for more detail', () => {
     render(<DataUseNotice onConsent={() => {}} />);
     expect(screen.getByRole('link', { name: /privacy/i })).toHaveAttribute('href', DATA_USE_NOTICE_COPY.privacyLink);

@@ -28,32 +28,27 @@ export async function POST(
     return jsonWithCors({ error: 'Session mismatch' }, { status: 403 });
   }
 
-  const requestedAt = new Date().toISOString();
-
-  const { error } = await session.supabase
-    .from('events')
-    .insert({
-      session_id: sessionId,
-      event_name: 'deletion_requested',
-      properties: {
-        requestedAt,
-        source: 'api/projects/delete'
-      }
-    });
+  const { data: job, error } = await session.supabase
+    .from('deletion_jobs')
+    .upsert({ session_id: sessionId, state: 'requested' }, { onConflict: 'session_id', ignoreDuplicates: true })
+    .select('id, state, requested_at, attempts')
+    .single();
 
   if (error) {
     return jsonWithCors({ error: 'project_delete_failed' }, { status: 500 });
   }
 
-  emitEvent('deletion_requested', { sessionId }, requestId);
+  const requestedAt = job.requested_at;
+  emitEvent('deletion_requested', {}, requestId);
 
-  logger.info('Deletion requested', { sessionId, requestedAt });
+  logger.info('Deletion requested', { jobId: job.id, state: job.state });
 
   return jsonWithCors({
     ok: true,
     sessionId,
+    jobId: job.id,
     deleted: false,
-    status: 'requested',
+    status: job.state,
     message:
       'We recorded your deletion request. This endpoint does not automatically erase Telegram messages, backups, or other downstream copies.',
     requestedAt

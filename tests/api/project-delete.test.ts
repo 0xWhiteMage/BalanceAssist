@@ -25,6 +25,7 @@ function createRouteSupabase(session: SessionRow) {
   const state = { ...session };
   const sessionUpdates: Array<Record<string, unknown>> = [];
   const events: Array<Record<string, unknown>> = [];
+  const deletionJobs: Array<Record<string, unknown>> = [];
 
   const supabase = {
     rpc: async (name: string, args: { p_session_id: string; p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) => {
@@ -77,11 +78,26 @@ function createRouteSupabase(session: SessionRow) {
         };
       }
 
+      if (table === 'deletion_jobs') {
+        return {
+          upsert(payload: Record<string, unknown>) {
+            deletionJobs.push(payload);
+            return {
+              select() {
+                return {
+                  single: async () => ({ data: { id: 'job-1', state: 'requested', requested_at: '2026-07-14T00:00:00.000Z', attempts: 0 }, error: null })
+                };
+              }
+            };
+          }
+        };
+      }
+
       throw new Error(`Unexpected table ${table}`);
     }
   };
 
-  return { supabase, sessionUpdates, events, state };
+  return { supabase, sessionUpdates, events, deletionJobs, state };
 }
 
 function authorizedSession(sessionId: string, supabase: unknown) {
@@ -254,16 +270,14 @@ describe('delete route', () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.sessionId).toBe('session-4');
+    expect(data.jobId).toBe('job-1');
     expect(data.deleted).toBe(false);
     expect(data.status).toBe('requested');
     expect(data.message).toMatch(/recorded your deletion request/i);
     expect(data.message).not.toMatch(/has been deleted/i);
     expect(data.requestedAt).toBeTruthy();
-    expect(harness.events).toHaveLength(1);
-    expect(harness.events[0]).toMatchObject({
-      session_id: 'session-4',
-      event_name: 'deletion_requested'
-    });
+    expect(harness.deletionJobs).toEqual([{ session_id: 'session-4', state: 'requested' }]);
+    expect(harness.events).toHaveLength(0);
   });
 
   test('rejects deletion requests for a different authenticated session', async () => {

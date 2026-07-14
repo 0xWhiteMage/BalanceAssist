@@ -36,12 +36,12 @@ describe('scheduler health routes', () => {
 
   test('returns alert-ready failure when worker, outbox, or expiry checks are unhealthy', async () => {
     process.env.CRON_SECRET = 'scheduler-secret';
-    client.rpc.mockResolvedValue({ data: { healthy: false, stale_workers: ['handoff-dispatch'], oldest_pending_outbox_seconds: 901, expired_session_backlog: 2 }, error: null });
+    client.rpc.mockResolvedValue({ data: { healthy: false, stale_workers: ['handoff-dispatch', 'deletion-worker'], oldest_pending_outbox_seconds: 901, expired_session_backlog: 2, oldest_pending_deletion_seconds: 901 }, error: null });
     const { GET } = await import('@/app/api/internal/scheduler-health/route');
 
     const response = await GET(new Request('https://example.test/api/internal/scheduler-health', { headers: { authorization: 'Bearer scheduler-secret' } }));
 
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ ok: false, staleWorkers: ['handoff-dispatch'], oldestPendingOutboxSeconds: 901, expiredSessionBacklog: 2 });
+    await expect(response.json()).resolves.toEqual({ ok: false, staleWorkers: ['handoff-dispatch', 'deletion-worker'], oldestPendingOutboxSeconds: 901, expiredSessionBacklog: 2, oldestPendingDeletionSeconds: 901 });
   });
 });
