@@ -3,6 +3,69 @@
 -- Run only against the verified empty post-018 production baseline.
 -- Any error aborts this transaction; do not run individual sections.
 
+-- This catalog-only preflight intentionally runs before BEGIN and makes no changes.
+DO $$
+DECLARE
+  v_missing text[];
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NULL THEN
+    RAISE EXCEPTION 'verified 001-018 baseline is required; stop and do not run this recovery script';
+  END IF;
+
+  SELECT array_agg(signature ORDER BY signature) INTO v_missing
+  FROM (
+    SELECT required_relation AS signature
+    FROM (VALUES
+      ('public.sessions'),
+      ('public.handoff_outbox'),
+      ('public.uploaded_files'),
+      ('public.human_messages'),
+      ('public.leads')
+    ) AS required_relations(required_relation)
+    WHERE to_regclass(required_relation) IS NULL
+
+    UNION ALL
+
+    SELECT required_column AS signature
+    FROM (VALUES
+      ('sessions.id'), ('sessions.created_at'), ('sessions.updated_at'), ('sessions.status'),
+      ('sessions.draft'), ('sessions.draft_version'), ('sessions.telegram_thread_id'),
+      ('handoff_outbox.id'), ('handoff_outbox.session_id'), ('handoff_outbox.payload'),
+      ('handoff_outbox.state'), ('handoff_outbox.idempotency_key'), ('handoff_outbox.next_attempt_at'),
+      ('handoff_outbox.created_at'), ('handoff_outbox.updated_at'), ('handoff_outbox.claim_expires_at'),
+      ('uploaded_files.id'), ('uploaded_files.session_id'), ('uploaded_files.storage_path'),
+      ('uploaded_files.original_name'), ('uploaded_files.mime_type'), ('uploaded_files.size_bytes'),
+      ('uploaded_files.status'),
+      ('human_messages.id'), ('human_messages.session_id'), ('human_messages.sender'),
+      ('human_messages.text'), ('human_messages.telegram_thread_id'),
+      ('leads.id'), ('leads.session_id'), ('leads.qualification_status'), ('leads.score'),
+      ('leads.recommended_next_step'), ('leads.lead_draft'), ('leads.contact_name'),
+      ('leads.contact_email'), ('leads.idempotency_key')
+    ) AS required_columns(required_column)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM pg_attribute
+      WHERE attrelid = to_regclass('public.' || split_part(required_column, '.', 1))
+        AND attname = split_part(required_column, '.', 2)
+        AND attnum > 0
+        AND NOT attisdropped
+    )
+
+    UNION ALL SELECT 'schema_migrations.018'
+    WHERE NOT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '018')
+    UNION ALL SELECT 'public.set_updated_at()'
+    WHERE to_regprocedure('public.set_updated_at()') IS NULL
+    UNION ALL SELECT 'gen_random_uuid()'
+    WHERE to_regprocedure('gen_random_uuid()') IS NULL
+  ) AS missing(signature);
+
+  IF v_missing IS NOT NULL THEN
+    RAISE EXCEPTION 'verified 001-018 baseline is required; stop and do not run this recovery script'
+      USING DETAIL = 'Missing baseline signature: ' || array_to_string(v_missing, ', ');
+  END IF;
+END
+$$;
+
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.schema_migrations (

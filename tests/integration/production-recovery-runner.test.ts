@@ -65,7 +65,20 @@ describe('production recovery runner', () => {
     const excludedMigrations = migrations.filter(({ version }) => BigInt(version) >= 38n && BigInt(version) <= 43n);
 
     expect(artifact).toMatch(/^-- SQL Editor fallback only; not for cleanup\.\r?\n-- Do not directly manage Supabase Storage relations or buckets\.\r?\n/);
-    expect(artifact.indexOf('BEGIN;')).toBeGreaterThan(0);
+    const begin = artifact.indexOf('BEGIN;');
+    const baselinePreflight = artifact.slice(0, begin);
+    expect(begin).toBeGreaterThan(0);
+    expect(baselinePreflight).toContain("WHERE version = '018'");
+    expect(baselinePreflight).toContain("RAISE EXCEPTION 'verified 001-018 baseline is required; stop and do not run this recovery script'");
+    for (const relation of ['sessions', 'handoff_outbox', 'uploaded_files', 'human_messages', 'leads']) {
+      expect(baselinePreflight).toContain(`'public.${relation}'`);
+    }
+    expect(baselinePreflight).toContain('WHERE to_regclass(required_relation) IS NULL');
+    for (const column of ['sessions.id', 'sessions.draft', 'handoff_outbox.claim_expires_at', 'uploaded_files.status', 'human_messages.telegram_thread_id', 'leads.idempotency_key']) {
+      expect(baselinePreflight).toContain(`'${column}'`);
+    }
+    expect(baselinePreflight).toContain("to_regprocedure('public.set_updated_at()')");
+    expect(baselinePreflight).toContain("to_regprocedure('gen_random_uuid()')");
     expect(artifact).toContain('CREATE TABLE IF NOT EXISTS public.schema_migrations');
     expect(artifact).toContain("RAISE EXCEPTION 'recovery migrations 019-037 are already recorded: %'");
 
@@ -108,11 +121,13 @@ describe('production recovery runner', () => {
     expect(artifact.match(/COMMIT;/g)).toHaveLength(1);
     expect(artifact).not.toMatch(/(?:INSERT INTO|UPDATE|DELETE FROM|CREATE|ALTER|DROP)\s+storage\./i);
 
-    const runArtifact = documentation.indexOf('1. Run `supabase/production-recovery-019-037.sql` in the Supabase SQL Editor.');
-    const successfulCommit = documentation.indexOf('2. Continue only after it commits successfully with no errors.');
-    const createBucket = documentation.indexOf('3. Create `temporary-attachments` in the Supabase Storage dashboard with public access disabled.');
-    const verification = documentation.indexOf('4. Run the read-only verification query below.');
-    expect(runArtifact).toBeGreaterThan(-1);
+    const baselineVerification = documentation.indexOf('1. Run the baseline verification query below.');
+    const runArtifact = documentation.indexOf('2. Run `supabase/production-recovery-019-037.sql` in the Supabase SQL Editor.');
+    const successfulCommit = documentation.indexOf('3. Continue only after it commits successfully with no errors.');
+    const createBucket = documentation.indexOf('4. Create `temporary-attachments` in the Supabase Storage dashboard with public access disabled.');
+    const verification = documentation.indexOf('5. Run the read-only verification query below.');
+    expect(baselineVerification).toBeGreaterThan(-1);
+    expect(runArtifact).toBeGreaterThan(baselineVerification);
     expect(successfulCommit).toBeGreaterThan(runArtifact);
     expect(createBucket).toBeGreaterThan(successfulCommit);
     expect(verification).toBeGreaterThan(createBucket);
@@ -121,6 +136,11 @@ describe('production recovery runner', () => {
     expect(documentation).toContain('Pass only when the bucket query returns exactly one row with `public = false`.');
     expect(documentation).toContain('Pass only when the policy query returns zero rows and the readiness query returns `true`.');
     expect(documentation).toContain('On any failure, stop. Do not retry blindly and do not apply migrations 038-043.');
+    expect(documentation).toContain("SELECT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '018') AS tracker_018_recorded;");
+    expect(documentation).toContain("SELECT 'public.sessions' AS required_relation");
+    expect(documentation).toContain("SELECT 'sessions.id' AS required_column");
+    expect(documentation).toContain('Pass only when `tracker_018_recorded` is true and the relation, column, and function checks return zero rows.');
+    expect(documentation).toContain("SELECT 'public.set_updated_at()' AS required_function");
     expect(documentation).toContain("SELECT version, filename\nFROM public.schema_migrations\nWHERE version BETWEEN '019' AND '037'\nORDER BY version;");
     expect(documentation).toContain("SELECT id, name, public\nFROM storage.buckets\nWHERE id = 'temporary-attachments';");
     expect(documentation).toContain('WITH RECURSIVE memberships(browser_role, role_oid) AS');
