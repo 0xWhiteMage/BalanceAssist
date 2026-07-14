@@ -60,4 +60,14 @@ describe('private attachment storage migration', () => {
     expect(migration).toMatch(/DELETE FROM public\.private_attachment_cleanup/i);
     expect(migration).toMatch(/to_regclass\('storage\.objects'\)/i);
   });
+
+  test('attests effective browser-role policy access using name[] roles and recursive membership', () => {
+    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/034_private_attachment_effective_attestation.sql'), 'utf8');
+
+    expect(migration).toMatch(/WITH RECURSIVE/i);
+    expect(migration).toMatch(/pg_auth_members/i);
+    expect(migration).toMatch(/role_names/i);
+    expect(migration).toMatch(/role_name = ANY\(p\.roles\)/i);
+    expect(migration).not.toMatch(/r\.oid = ANY\(p\.roles\)|m\.roleid = ANY\(p\.roles\)/i);
+  });
 });

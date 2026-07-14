@@ -2,6 +2,16 @@
 -- privileges and all policies applicable to each browser role at call time.
 CREATE OR REPLACE FUNCTION public.private_attachment_storage_is_ready(p_bucket text)
 RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+  WITH RECURSIVE memberships(browser_role, role_oid) AS (
+    SELECT r.rolname, r.oid FROM pg_roles r WHERE r.rolname IN ('anon', 'authenticated')
+    UNION
+    SELECT mships.browser_role, m.roleid
+    FROM memberships mships
+    JOIN pg_auth_members m ON m.member = mships.role_oid
+  ), role_names AS (
+    SELECT m.browser_role, r.rolname AS role_name
+    FROM memberships m JOIN pg_roles r ON r.oid = m.role_oid
+  )
   SELECT p_bucket = 'temporary-attachments'
     AND to_regclass('storage.buckets') IS NOT NULL
     AND to_regclass('storage.objects') IS NOT NULL
@@ -15,10 +25,10 @@ RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_catal
           OR has_table_privilege(r.oid, 'storage.objects', 'delete'))
     )
     AND NOT EXISTS (
-      SELECT 1 FROM pg_policies p JOIN pg_roles r ON r.rolname IN ('anon', 'authenticated')
+      SELECT 1 FROM pg_policies p
       WHERE p.schemaname = 'storage' AND p.tablename = 'objects'
-        AND ('public'::name = ANY(p.roles) OR r.oid = ANY(p.roles) OR EXISTS (
-          SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid AND m.roleid = ANY(p.roles)
+        AND ('public'::name = ANY(p.roles) OR EXISTS (
+          SELECT 1 FROM role_names WHERE role_name = ANY(p.roles)
         ))
     );
 $$;
