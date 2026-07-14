@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 const policyBaseline = 37n;
 
 export function assertExpandOnlyMigration(source, filename) {
+  if (/^0(?:38|39|40|41|42)_/.test(filename)) {
+    throw new Error(`${filename} is a reviewed destructive cleanup migration. Run the one-time Production cleanup migrations workflow for versions 038-042 after its backup/audit attestation is approved.`);
+  }
+
   if (/--|\/\*|\*\//.test(source)) {
     throw new Error(`${filename} is not expand-only: contains comments; use the separately approved cleanup migration workflow.`);
   }

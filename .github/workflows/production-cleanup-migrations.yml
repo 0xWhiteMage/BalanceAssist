@@ -1,0 +1,95 @@
+name: Production cleanup migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable commit SHA containing the reviewed cleanup migrations
+        required: true
+        type: string
+      backup_audit_attestation:
+        description: BACKUP_AUDIT_VERIFIED:<UTC ISO-8601 timestamp>, no more than 24 hours old
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-cleanup-migrations
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - name: Validate cleanup commit and backup audit attestation
+        id: validate
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+          BACKUP_AUDIT_ATTESTATION: ${{ inputs.backup_audit_attestation }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BACKUP_AUDIT_ATTESTATION" =~ ^BACKUP_AUDIT_VERIFIED:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]]
+          attestation_timestamp="${BACKUP_AUDIT_ATTESTATION#BACKUP_AUDIT_VERIFIED:}"
+          attested_at="$(date -u -d "$attestation_timestamp" +%s)"
+          now="$(date -u +%s)"
+          test "$attested_at" -le "$now"
+          test $((now - attested_at)) -le $((24 * 60 * 60))
+          git init --quiet release
+          cd release
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "$RELEASE_REF^{commit}"
+          git merge-base --is-ancestor "$RELEASE_REF" origin/main
+          release_sha="$(git rev-parse "$RELEASE_REF^{commit}")"
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
+
+  cleanup:
+    needs: [validate]
+    environment: production-cleanup-migrations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Dry-run, apply, and verify reviewed cleanup migrations
+        env:
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_DATABASE_URL"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          echo "Reviewed one-time cleanup versions: 038,039,040,041,042"
+          node scripts/apply-production-cleanup-migrations.mjs --dry-run
+          result="$(node scripts/apply-production-cleanup-migrations.mjs)"
+          echo "$result"
+          echo "## Applied cleanup migrations" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$result\`" >> "$GITHUB_STEP_SUMMARY"
+
+  smoke:
+    needs: [cleanup, validate]
+    environment: production-cleanup-migrations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke post-cleanup production health
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_SHA"
+          test -n "$PRODUCTION_URL"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null "$PRODUCTION_URL/api/health"

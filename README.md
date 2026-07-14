@@ -58,7 +58,7 @@ See `.env.example` for the canonical list. Summary:
 ### 1. Production prerequisites
 
 ```bash
-Apply the full incremental migration chain in order, through `037_scheduler_health.sql` (except intentionally absent `005`). Do not combine it with legacy snapshot `000_full_schema.sql`.
+Apply the full incremental migration chain in order, through `042_deletion_recovery_ownership.sql` (except intentionally absent `005`). Do not combine it with legacy snapshot `000_full_schema.sql`.
 ```
 
 ### 2. Connect Vercel
@@ -82,13 +82,24 @@ In **Settings → Secrets and variables → Actions** add:
 | `TELEGRAM_BOT_TOKEN` | Same as in Vercel env |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `production` environment only; immutable Vercel deploy and alias promotion |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `production` environment only; bounded schema/service-role readiness probes |
-| `PRODUCTION_DATABASE_URL` | `production-migrations` environment only; never repository configuration |
+| `PRODUCTION_DATABASE_URL` | `production-migrations` and `production-cleanup-migrations` environments only; never repository configuration |
 
 Set the protected `production` environment variable `VERCEL_GIT_DEPLOYMENTS_DISABLED_AT` to a UTC ISO-8601 dashboard-audit timestamp (for example, `2026-07-14T12:00:00Z`). The release gate rejects absent, malformed, future, or more-than-90-day-old attestations. Recheck the Vercel setting before each release and quarterly; a failed gate or a Vercel Git deployment outside a release is an alert requiring the setting to be disabled and the release/audit history to be reviewed.
 
-Create GitHub environments named `production` and `production-migrations`, with required reviewer approval. Protect `main` as the release branch. Manually dispatch `Production release` with a lowercase 40-character commit SHA. Before a protected environment or credential is available, the workflow safely fetches `main`, confirms the SHA is a reachable commit ancestor, and emits the canonical SHA. Every credentialed job directly needs that validated output. It then reruns lint, typecheck, unit, local Supabase migration/integration, build, E2E, audit, and diff gates; deploys that SHA to an immutable Vercel URL; smokes its health route and service-role schema readiness; waits for approved production migration; promotes the immutable deployment to the production alias; smokes the alias and readiness again; then configures Telegram. Missing Vercel, URL, setup-token, Telegram-token, Supabase readiness credentials, or Vercel-audit attestation fails the release.
+Create GitHub environments named `production`, `production-migrations`, and `production-cleanup-migrations`, each with required reviewer approval. Protect `main` as the release branch. Manually dispatch `Production release` with a lowercase 40-character commit SHA. Before a protected environment or credential is available, the workflow safely fetches `main`, confirms the SHA is a reachable commit ancestor, and emits the canonical SHA. Every credentialed job directly needs that validated output. It then reruns lint, typecheck, unit, local Supabase migration/integration, build, E2E, audit, and diff gates; deploys that SHA to an immutable Vercel URL; smokes its health route and service-role schema readiness; waits for approved production migration; promotes the immutable deployment to the production alias; smokes the alias and readiness again; then configures Telegram. Missing Vercel, URL, setup-token, Telegram-token, Supabase readiness credentials, Vercel-audit attestation, or required cleanup prerequisite fails the release.
 
-Production migrations are forward-only and run only in the protected `production-migrations` job after disposable-stack validation and immutable-deployment smoke, before alias promotion. Starting after `037_scheduler_health.sql`, the runner fail-closes unless a migration is exactly one supported additive `CREATE TABLE`, `ALTER TABLE ... ADD COLUMN`, or `CREATE INDEX` statement; comments, procedural SQL, data mutations, and contraction require a separately approved cleanup workflow after compatible readers have drained. The runner records applied versions in `public.schema_migrations` and prints the final schema version. Never put the production database credential in `.env` or run it outside the approved workflow.
+Production migrations are forward-only and run only in the protected `production-migrations` job after disposable-stack validation and immutable-deployment smoke, before alias promotion. Starting after `037_scheduler_health.sql`, the runner fail-closes unless a migration is exactly one supported additive `CREATE TABLE`, `ALTER TABLE ... ADD COLUMN`, or `CREATE INDEX` statement. When it sees reviewed cleanup versions `038` through `042`, it clearly reports the prerequisite: run `Production cleanup migrations` first. The runner records applied versions in `public.schema_migrations` and prints the final schema version. Never put the production database credential in `.env` or run it outside the approved workflow.
+
+### One-time cleanup migration runbook
+
+`038_durable_deletion_jobs.sql` through `042_deletion_recovery_ownership.sql` are reviewed destructive cleanup migrations. They are a one-time sequence, not a general-purpose SQL path. Do not add versions or modify their reviewed content: the dedicated runner permits only these filenames, versions, and SHA-256 source hashes.
+
+1. Take and validate a production backup, review the deletion/audit state, and retain the evidence with the release record.
+2. Manually dispatch `Production cleanup migrations` with the exact lowercase 40-character SHA already reachable from protected `main` and `backup_audit_attestation` set to `BACKUP_AUDIT_VERIFIED:<UTC ISO-8601 timestamp>`. The timestamp must be current, not future, and no more than 24 hours old.
+3. Approve the protected `production-cleanup-migrations` environment. The workflow dry-runs the exact five reviewed migrations, applies them transactionally, verifies that `038,039,040,041,042` are recorded in `public.schema_migrations`, and places the result in the job summary.
+4. Confirm the post-migration health smoke passes. This workflow does not build or deploy the application, change a Vercel alias, or configure any webhook.
+
+After the recorded-version verification succeeds, dispatch the ordinary production release for later additive migrations as needed.
 
 The `Handoff dispatch` workflow runs every five minutes and can be started with `workflow_dispatch`. This is a best-effort cadence: GitHub scheduled workflows can be delayed, especially during high load, so it does not guarantee dispatch exactly every five minutes. Dispatch retries wait at least one five-minute scheduler window. A fourth failed dispatch evaluation escalates pending handoffs at or after 15 minutes, subject to scheduler delay.
 
