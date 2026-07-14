@@ -13,11 +13,13 @@ describe('production migration policy', () => {
   });
 
   it('allows reviewed cleanup migrations only when every version is already recorded', () => {
-    const recordedVersions = ['038', '039', '040', '041', '042'];
+    const recordedVersions = ['038', '039', '040', '041', '042', '043'];
 
     expect(() => productionMigrations.assertReviewedCleanupMigrationsRecorded(recordedVersions)).not.toThrow();
     expect(() => productionMigrations.assertReviewedCleanupMigrationsRecorded(recordedVersions.filter((version) => version !== '040')))
       .toThrow('040 is pending; run Production cleanup migrations before this release');
+    expect(() => productionMigrations.assertReviewedCleanupMigrationsRecorded(recordedVersions.filter((version) => version !== '043')))
+      .toThrow('043 is pending; run Production cleanup migrations before this release');
   });
 
   it('queries the migration tracker before evaluating production migration files', async () => {
@@ -50,7 +52,7 @@ describe('production migration policy', () => {
   it('identifies the protected cleanup workflow as the prerequisite for reviewed destructive versions', () => {
     expect(() => assertExpandOnlyMigration('DELETE FROM public.deletion_jobs;', '038_durable_deletion_jobs.sql'))
       .toThrow('Production cleanup migrations');
-    expect(() => assertExpandOnlyMigration('DROP TABLE public.deletion_jobs;', '042_deletion_recovery_ownership.sql'))
-      .toThrow('038-042');
+    expect(() => assertExpandOnlyMigration('DROP TABLE public.deletion_jobs;', '043_deletion_state_batched_cleanup.sql'))
+      .toThrow('038-043');
   });
 });

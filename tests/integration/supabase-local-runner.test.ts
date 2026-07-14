@@ -19,11 +19,11 @@ describe('local Supabase release runner', () => {
   test('CI installs the CLI, runs the local stack suite, preserves diagnostics, and always stops it', async () => {
     const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
 
-    expect(workflow).toContain('supabase/setup-cli@v1');
+    expect(workflow).toContain('supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1');
     expect(workflow).toContain('npm run test:supabase');
     expect(workflow).toContain('if: always()');
     expect(workflow).toContain('supabase stop --no-backup');
-    expect(workflow).toContain('actions/upload-artifact@v4');
+    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
   });
 
   test('keeps migration tracker hardening safe when Supabase bootstraps before the custom runner', async () => {

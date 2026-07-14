@@ -49,7 +49,7 @@ describe('production cleanup migration workflow', () => {
     expect(cleanup?.run).not.toContain('echo "$PRODUCTION_BACKUP_AUDIT_REFERENCE"');
     expect(cleanup?.run).toContain('node scripts/apply-production-cleanup-migrations.mjs --dry-run');
     expect(cleanup?.run).toContain('node scripts/apply-production-cleanup-migrations.mjs');
-    expect(cleanup?.run).toContain('038,039,040,041,042');
+    expect(cleanup?.run).toContain('038,039,040,041,042,043');
     expect(cleanup?.run).toContain('$GITHUB_STEP_SUMMARY');
 
     expect(jobs.smoke?.steps?.find((step) => step.name === 'Smoke post-cleanup production health')?.run).toContain('$PRODUCTION_URL/api/health');

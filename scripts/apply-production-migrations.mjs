@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
 
 const policyBaseline = 37n;
-const reviewedCleanupVersions = ['038', '039', '040', '041', '042'];
+const reviewedCleanupVersions = ['038', '039', '040', '041', '042', '043'];
 
 export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
   const recorded = new Set(recordedVersions);
@@ -16,8 +16,8 @@ export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
 }
 
 export function assertExpandOnlyMigration(source, filename) {
-  if (/^0(?:38|39|40|41|42)_/.test(filename)) {
-    throw new Error(`${filename} is a reviewed destructive cleanup migration. Run the one-time Production cleanup migrations workflow for versions 038-042 after its backup/audit attestation is approved.`);
+  if (/^0(?:38|39|40|41|42|43)_/.test(filename)) {
+    throw new Error(`${filename} is a reviewed destructive cleanup migration. Run the one-time Production cleanup migrations workflow for versions 038-043 after its backup/audit attestation is approved.`);
   }
 
   if (/--|\/\*|\*\//.test(source)) {

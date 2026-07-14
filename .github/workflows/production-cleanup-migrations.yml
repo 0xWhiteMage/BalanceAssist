@@ -71,7 +71,7 @@ jobs:
           test "$attested_at" -le "$now"
           test $((now - attested_at)) -le $((24 * 60 * 60))
           test "$backup_release_sha" = "$RELEASE_SHA"
-          echo "Reviewed one-time cleanup versions: 038,039,040,041,042"
+          echo "Reviewed one-time cleanup versions: 038,039,040,041,042,043"
           node scripts/apply-production-cleanup-migrations.mjs --dry-run
           result="$(node scripts/apply-production-cleanup-migrations.mjs)"
           echo "$result"

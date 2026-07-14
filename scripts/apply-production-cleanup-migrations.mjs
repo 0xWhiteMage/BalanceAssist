@@ -11,7 +11,8 @@ const reviewedCleanupMigrations = new Map([
   ['039', { filename: '039_deletion_scheduler_health.sql', sha256: '5ef142d3b23de7acf7e1d46a78f848e3427779a2f9d30516152dc401fb28008b' }],
   ['040', { filename: '040_deletion_recovery_lifecycle.sql', sha256: 'c99d3ec9d27500a959010bd20e03bb466946f65fa7f6be7835de2f273421fba6' }],
   ['041', { filename: '041_deletion_backlog_count.sql', sha256: '87c5c9f1e5559e1176c8d83457eebbb9d4fbd8264798f793f2a7836076346d4f' }],
-  ['042', { filename: '042_deletion_recovery_ownership.sql', sha256: '551540ad4fd8996206ff75760a2614b5f76e786dd9f8ebe898284b4282da025d' }]
+  ['042', { filename: '042_deletion_recovery_ownership.sql', sha256: '551540ad4fd8996206ff75760a2614b5f76e786dd9f8ebe898284b4282da025d' }],
+  ['043', { filename: '043_deletion_state_batched_cleanup.sql', sha256: '85e7e1d658e9671f17c489f50b4a2486516ec4b721b5ad0b131df01e0de40257' }]
 ]);
 
 export const cleanupMigrationVersions = [...reviewedCleanupMigrations.keys()];

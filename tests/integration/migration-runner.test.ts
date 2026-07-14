@@ -78,7 +78,7 @@ describe('test migration runner', () => {
     expect(packageJson.scripts['test:release-proof:http']).toBe(
       'vitest run --no-file-parallelism tests/integration/release-proof-http.test.ts'
     );
-    expect(workflow).toContain('supabase/setup-cli@v1');
+    expect(workflow).toContain('supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1');
     expect(workflow).toContain('- run: npm run test:supabase');
   });
 
@@ -89,7 +89,7 @@ describe('test migration runner', () => {
     expect(workflow).toContain('- run: npm run test:supabase');
     expect(workflow).toContain('supabase stop --no-backup');
     expect(workflow).toContain('supabase-release-proof-diagnostics');
-    expect(workflow).toContain('actions/upload-artifact@v4');
+    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
     expect(workflow).toContain('playwright-report');
     expect(playwright).toContain('retries: process.env.CI ? 2 : 0');
     expect(playwright).toContain("trace: 'retain-on-failure'");
@@ -112,6 +112,6 @@ describe('test migration runner', () => {
     ]) {
       expect(workflow).not.toContain(`secrets.${secret}`);
     }
-    expect(workflow).toContain('supabase/setup-cli@v1');
+    expect(workflow).toContain('supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1');
   });
 });
