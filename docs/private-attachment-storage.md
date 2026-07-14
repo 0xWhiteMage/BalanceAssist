@@ -1,17 +1,7 @@
 # Private Attachment Storage Setup
 
-Migration `029_private_attachment_storage.sql` creates the `temporary-attachments` bucket when the Supabase `storage` schema is available. It is safe to rerun: the bucket is upserted and forced private.
+Database migrations do not create or manage the `temporary-attachments` Storage bucket. Create the bucket through the Supabase Storage API or Dashboard with public access disabled, then set `SUPABASE_PRIVATE_UPLOAD_BUCKET=temporary-attachments` in the server environment.
 
-If the migration runner cannot access the Supabase `storage` schema, run this idempotent SQL in the Supabase SQL Editor, then set `SUPABASE_PRIVATE_UPLOAD_BUCKET=temporary-attachments` in the server environment:
+Do not use SQL to create, alter, delete, grant access to, or add policies for `storage` relations. In particular, browser Storage policies are prohibited for this bucket. Service-role server code is the only writer, and the bucket must never expose public URLs.
 
-```sql
-insert into storage.buckets (id, name, public)
-values ('temporary-attachments', 'temporary-attachments', false)
-on conflict (id) do update set public = false;
-
-select id, public
-from storage.buckets
-where id = 'temporary-attachments';
-```
-
-The validation query must return exactly one row with `public = false`. Migration `033_private_attachment_live_attestation.sql` checks the bucket, browser-role policies, and grants at upload time; any drift disables uploads. Service-role server code is the only writer; do not add browser policies or public URLs for this bucket. Files are temporarily retained for up to 24 hours solely to analyse the current same-browser draft and are never sent to the Balance team or Telegram.
+Readiness is a read-only attestation: `private_attachment_storage_is_ready('temporary-attachments')` confirms that the expected bucket exists, is non-public, has Storage object RLS enabled, and has no browser-role policy. Any failed attestation disables uploads. Files are temporarily retained for up to 24 hours solely to analyse the current same-browser draft and are never sent to the Balance team or Telegram.

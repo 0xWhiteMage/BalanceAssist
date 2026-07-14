@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate:test": "node scripts/apply-test-migrations.mjs",
+    "db:migrate:recover-production": "node scripts/recover-production-migrations.mjs",
     "test:db:prepare": "node scripts/apply-test-migrations.mjs",
     "test:db": "vitest run --no-file-parallelism tests/integration/database-schema.test.ts tests/integration/rate-limit.test.ts tests/integration/session-capability.test.ts tests/integration/release-proof-journey.test.ts",
     "test:release-proof:http": "vitest run --no-file-parallelism tests/integration/release-proof-http.test.ts",
