@@ -60,12 +60,17 @@ describe('private attachment storage migration', () => {
       expect(migration).toMatch(/pg_class.*relrowsecurity/is);
       expect(migration).toMatch(/pg_policies/i);
       expect(migration).toMatch(/'public'::name/i);
-      expect(migration).toMatch(/'anon'::name/i);
-      expect(migration).toMatch(/'authenticated'::name/i);
       expect(migration).toMatch(/REVOKE ALL ON FUNCTION/i);
       expect(migration).toMatch(/GRANT EXECUTE ON FUNCTION.*service_role/i);
       expect(migration).not.toMatch(/information_schema\.role_table_grants|has_table_privilege/i);
     }
+
+    expect(effectiveAttestation).toMatch(/WITH RECURSIVE/i);
+    expect(effectiveAttestation).toMatch(/pg_auth_members/i);
+    expect(effectiveAttestation).toMatch(/role_names/i);
+    expect(effectiveAttestation).toMatch(/role_name = ANY\(p\.roles\)/i);
+    expect(liveAttestation).toMatch(/'anon'::name/i);
+    expect(liveAttestation).toMatch(/'authenticated'::name/i);
   });
 
   test('never mutates Supabase Storage relations', () => {
@@ -85,6 +90,28 @@ describe('private attachment storage migration', () => {
       expect(migration).not.toMatch(/(?:INSERT|UPDATE|DELETE)\s+(?:INTO\s+)?storage\./i);
       expect(migration).not.toMatch(/(?:CREATE|DROP) POLICY[\s\S]*?storage\.objects/i);
       expect(migration).not.toMatch(/REVOKE[\s\S]*?storage\.objects/i);
+    }
+  });
+
+  test('keeps bundled private Storage migrations identical and owner-safe', () => {
+    const bundle = readFileSync(resolve(process.cwd(), 'supabase/production-migrations-019-043.sql'), 'utf8');
+
+    for (const filename of [
+      '029_private_attachment_storage.sql',
+      '030_private_attachment_retention.sql',
+      '031_private_attachment_cleanup_hardening.sql',
+      '032_legacy_cleanup_record_remediation.sql',
+      '033_private_attachment_live_attestation.sql',
+      '034_private_attachment_effective_attestation.sql',
+    ]) {
+      const source = readFileSync(resolve(process.cwd(), `supabase/migrations/${filename}`), 'utf8').trim();
+      const section = bundle.match(new RegExp(`-- BEGIN ${filename}\\n(?:-- =+\\n)?([\\s\\S]*?)\\n-- END ${filename}`))?.[1];
+
+      expect(section?.trimEnd()).toBe(source);
+      expect(section).not.toMatch(/ALTER TABLE storage\.(objects|buckets)/i);
+      expect(section).not.toMatch(/(?:INSERT|UPDATE|DELETE)\s+(?:INTO\s+)?storage\./i);
+      expect(section).not.toMatch(/(?:CREATE|DROP) POLICY[\s\S]*?storage\.objects/i);
+      expect(section).not.toMatch(/REVOKE[\s\S]*?storage\.objects/i);
     }
   });
 });
