@@ -14,4 +14,4 @@ from storage.buckets
 where id = 'temporary-attachments';
 ```
 
-The validation query must return exactly one row with `public = false`. Migration `033_private_attachment_live_attestation.sql` checks the bucket, browser-role policies, and grants at upload time; any drift disables uploads. Service-role server code is the only writer; do not add browser policies or public URLs for this bucket. Files are temporarily retained solely to analyse the current draft and are never sent to the Balance team or Telegram.
+The validation query must return exactly one row with `public = false`. Migration `033_private_attachment_live_attestation.sql` checks the bucket, browser-role policies, and grants at upload time; any drift disables uploads. Service-role server code is the only writer; do not add browser policies or public URLs for this bucket. Files are temporarily retained for up to 24 hours solely to analyse the current same-browser draft and are never sent to the Balance team or Telegram.

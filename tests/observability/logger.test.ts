@@ -35,4 +35,35 @@ describe('createLogger', () => {
     expect(entry.fileContent).toBe('[redacted]');
     spy.mockRestore();
   });
+
+  test('recursively redacts PII, filenames, URLs, raw errors, capabilities, and credentials', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logger = createLogger('test', 'rid-789');
+
+    logger.info('safe status', {
+      status: 'retrying',
+      nested: {
+        contactEmail: 'user@example.com',
+        fileName: 'private-brief.pdf',
+        endpoint: 'https://example.com/private',
+        error: new Error('database detail'),
+        capability: 'raw-capability',
+        apiKey: 'credential'
+      }
+    });
+
+    const entry = spy.mock.calls[0][2] as Record<string, unknown>;
+    expect(entry).toMatchObject({
+      status: 'retrying',
+      nested: {
+        contactEmail: '[redacted]',
+        fileName: '[redacted]',
+        endpoint: '[redacted]',
+        error: '[redacted]',
+        capability: '[redacted]',
+        apiKey: '[redacted]'
+      }
+    });
+    spy.mockRestore();
+  });
 });

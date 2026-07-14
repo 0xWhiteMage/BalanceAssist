@@ -1,8 +1,9 @@
+import { sanitizeObservabilityData } from '@/lib/observability/sanitize';
+
 type EventName =
   | 'consent_granted'
   | 'consent_denied'
   | 'attachment_quarantined'
-  | 'attachment_forwarded'
   | 'handoff_enqueued'
   | 'handoff_delivered'
   | 'handoff_failed'
@@ -26,8 +27,7 @@ type EventSchemaVersion = 1;
 const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: readonly string[] }> = {
   consent_granted: { version: 1, fields: ['sessionId', 'consentVersion'] },
   consent_denied: { version: 1, fields: ['sessionId'] },
-  attachment_quarantined: { version: 1, fields: ['sessionId', 'reason', 'originalName'] },
-  attachment_forwarded: { version: 1, fields: ['sessionId', 'originalName', 'mimeType'] },
+  attachment_quarantined: { version: 1, fields: ['sessionId', 'reason'] },
   handoff_enqueued: { version: 1, fields: ['sessionId', 'handoffId', 'caseId', 'routingDestination'] },
   handoff_delivered: { version: 1, fields: ['handoffId', 'durationMs'] },
   handoff_failed: { version: 1, fields: ['handoffId', 'reason'] },
@@ -47,31 +47,6 @@ const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: re
   temporary_sessions_expired: { version: 1, fields: ['deletedSessions', 'deferredSessions', 'releasedClaims'] },
 };
 
-const SENSITIVE_KEYS = new Set([
-  'email', 'contactEmail', 'contactName', 'contactCompany',
-  'summary', 'messageText', 'fileContent', 'url', 'signedUrl',
-  'password', 'secret', 'token', 'capability', 'capabilityHash',
-]);
-
-function redactValue(key: string, value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (SENSITIVE_KEYS.has(key)) return '[redacted]';
-  if (typeof value === 'string' && value.length > 200) return value.slice(0, 200) + '...';
-  return value;
-}
-
-function redactFields(data: Record<string, unknown>): Record<string, unknown> {
-  const redacted: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (Array.isArray(value)) {
-      redacted[key] = value.map((v) => redactValue(key, v));
-    } else {
-      redacted[key] = redactValue(key, value);
-    }
-  }
-  return redacted;
-}
-
 export function emitEvent(
   eventName: EventName,
   data: Record<string, unknown>,
@@ -80,14 +55,7 @@ export function emitEvent(
   const schema = EVENT_SCHEMAS[eventName];
   if (!schema) return;
 
-  const allowedData: Record<string, unknown> = {};
-  for (const field of schema.fields) {
-    if (field in data) {
-      allowedData[field] = data[field];
-    }
-  }
-
-  const redacted = redactFields(allowedData);
+  const redacted = sanitizeObservabilityData(data, schema.fields);
 
   const entry = {
     ts: new Date().toISOString(),

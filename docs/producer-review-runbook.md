@@ -3,7 +3,7 @@
 ## Use This Runbook When
 
 - briefs are persisted but producer handoffs are not arriving
-- uploads are being quarantined unexpectedly
+- private analysis files are being quarantined unexpectedly
 - users report that reset or deletion actions did not stick
 - webhook-auth or scheduling verification incidents occur
 
@@ -13,7 +13,6 @@
 2. Check recent trust events for:
    - `lead_persisted`
    - `handoff_enqueued`
-   - `attachment_forwarded`
    - `attachment_quarantined`
    - `deletion_requested`
    - `project_reset`
@@ -86,11 +85,11 @@ CI always creates the check job. Set repository variable `REQUIRE_TEST_SUPABASE_
 - Look for `lead_persisted` without `handoff_enqueued`.
 - Inspect `app/api/leads/finalize` logs and the session's recorded producer-share consent.
 
-### Upload accepted but not sent to team
+### Private analysis upload is unavailable or quarantined
 
-- Check whether the session was finalized.
-- Check whether producer-share consent was recorded server-side.
-- Review `attachment_quarantined` vs `attachment_forwarded` events.
+- Confirm `SUPABASE_PRIVATE_UPLOAD_BUCKET=temporary-attachments` and migration `033` live attestation are healthy.
+- Confirm the user granted analysis consent. Analysis files are never sent to the team or Telegram.
+- Review aggregate `attachment_quarantined` events; filenames and file content are intentionally unavailable in observability.
 
 ### User says reset/delete did not work
 

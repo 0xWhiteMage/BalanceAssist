@@ -96,7 +96,7 @@ test('system prompt positions Balance Assist as a focused, scoped AI for Balance
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/focused AI for Balance Studio/i);
   expect(prompt).toMatch(/Project brief/i);
-  expect(prompt).toMatch(/Job application to Balance/i);
+  expect(prompt).toMatch(/General questions about Balance/i);
 });
 
 test('system prompt instructs substantive answers for general questions', () => {
@@ -186,11 +186,11 @@ test('system prompt deflects out-of-scope requests with a friendly acknowledgeme
   expect(prompt).toMatch(/outside what you're set up to help with/i);
 });
 
-test('system prompt scopes the AI to project brief + job application + general questions only', () => {
+test('system prompt scopes the AI to project briefs and general Balance questions only', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toContain('Project brief');
-  expect(prompt).toContain('Job application');
   expect(prompt).toContain('General questions about Balance');
+  expect(prompt).not.toMatch(/job application|CV capture|resume/i);
   expect(prompt).not.toContain('Document drafting');
   expect(prompt).not.toMatch(/post-event writeups/);
   expect(prompt).not.toMatch(/proposals, briefs, scripts/);
@@ -202,9 +202,10 @@ test('system prompt does not draft documents for the user', () => {
   expect(prompt).toMatch(/OUT OF SCOPE/i);
 });
 
-test('system prompt routes job-application answers to Balance\'s own channels', () => {
+test('system prompt treats careers requests as general Balance questions without applicant-data capture', () => {
   const prompt = buildSystemPrompt();
-  expect(prompt).toMatch(/submitted through Balance/i);
+  expect(prompt).toMatch(/careers, locations, services, FAQs/i);
+  expect(prompt).not.toMatch(/applicant data/i);
 });
 
 test('system prompt contains a LOW-INFORMATION REPLIES block that forbids "I\'m not sure about that" and similar filler', () => {

@@ -66,7 +66,7 @@ describe('emitEvent', () => {
     const parsed = JSON.parse(jsonStr);
     expect(parsed.sessionId).toBe('abc-123');
     expect(parsed.reason).toBe('Invalid MIME type');
-    expect(parsed.originalName).toBe('file.pdf');
+    expect(parsed.originalName).toBeUndefined();
     spy.mockRestore();
   });
 
@@ -91,6 +91,23 @@ describe('emitEvent', () => {
     const parsed = JSON.parse(jsonStr);
     expect(parsed.reason.length).toBeLessThan(300);
     expect(parsed.reason).toContain('...');
+    spy.mockRestore();
+  });
+
+  test('recursively redacts allowed event data that contains sensitive values', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    emitEvent('attachment_quarantined', {
+      sessionId: 'abc',
+      reason: { error: new Error('storage failure'), url: 'https://example.com/private' },
+      originalName: 'private-brief.pdf',
+    });
+
+    const parsed = JSON.parse(spy.mock.calls[0][1] as string);
+    expect(parsed).toMatchObject({
+      sessionId: 'abc',
+      reason: { error: '[redacted]', url: '[redacted]' }
+    });
+    expect(parsed.originalName).toBeUndefined();
     spy.mockRestore();
   });
 

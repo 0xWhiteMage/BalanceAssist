@@ -240,25 +240,6 @@ export async function uploadRequestedFiles(
   }
 }
 
-export async function notifyScheduleCompleted(sessionId: string): Promise<boolean> {
-  try {
-    const response = await fetchWithTimeout('/api/telegram/schedule-complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId })
-    });
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const data = (await response.json()) as { ok?: boolean };
-    return data.ok === true;
-  } catch {
-    return false;
-  }
-}
-
 export type ReferenceLinkPayload = {
   sessionId: string;
   url: string;

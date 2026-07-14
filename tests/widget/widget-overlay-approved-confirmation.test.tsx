@@ -14,10 +14,6 @@ const { finalizeLeadMock } = vi.hoisted(() => ({
   }))
 }));
 
-const { notifyScheduleCompletedMock } = vi.hoisted(() => ({
-  notifyScheduleCompletedMock: vi.fn(async () => true)
-}));
-
 vi.mock('@/lib/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api/client')>('@/lib/api/client');
   return {
@@ -29,7 +25,6 @@ vi.mock('@/lib/api/client', async () => {
       fileRequestNote: null,
       scheduleRequestOpen: false
     })),
-    notifyScheduleCompleted: notifyScheduleCompletedMock,
     logEvent: vi.fn(async () => ({ ok: true, eventName: 'mock-event' })),
     createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '', persisted: true })),
     getCurrentSession: vi.fn(async () => null)
@@ -66,8 +61,6 @@ afterEach(() => {
     delivered: false,
     retryable: false
   });
-  notifyScheduleCompletedMock.mockReset();
-  notifyScheduleCompletedMock.mockResolvedValue(true);
 });
 
 const originalFetch = global.fetch;
@@ -298,7 +291,6 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
 
   test('after Calendly completes without verified server confirmation, the widget stays truthful about team notification', async () => {
     mockWidgetFetch();
-    notifyScheduleCompletedMock.mockResolvedValueOnce(false);
 
     render(<WidgetOverlay autoOpen={true} />);
 
@@ -336,7 +328,6 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     await waitFor(() => {
       expect(document.body.textContent).toMatch(/still verifying that the balance team received it/i);
     });
-    expect(notifyScheduleCompletedMock).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toMatch(/notified automatically/i);
   }, 10000);
 });

@@ -121,7 +121,7 @@ describe('chatRequest client', () => {
     ]);
   });
 
-  test('uploadRequestedFiles does not send obsolete consent JSON for team-requested uploads', async () => {
+  test('uploadRequestedFiles sends files without producer-transfer consent data', async () => {
 
     global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(JSON.stringify({ ok: true }), {

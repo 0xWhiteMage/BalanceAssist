@@ -1,6 +1,6 @@
 # Balance Assist
 
-AI assistant widget for Balance Studio. Embeds as a floating widget on the live site, talks to leads via Deepseek with tool calling, captures a structured brief in a persistent left rail, and relays human handoff to Telegram in real time. Scoped to three legitimate use cases: project briefs, job applications, and general questions about Balance.
+AI assistant widget for Balance Studio. It captures project briefs and answers general Balance questions. Same-browser drafts are temporary for up to 24 hours; a producer receives no effect until the user explicitly approves transfer.
 
 ## Commands
 
@@ -16,7 +16,7 @@ AI assistant widget for Balance Studio. Embeds as a floating widget on the live 
 - `/` — landing page
 - `/widget` — full reference board (design preview)
 - `/preview` — real Balance Studio site with the widget overlaid
-- `/internal/uploads` — admin-only browser for uploaded reference files (requires `SETUP_TOKEN`)
+- `/internal/uploads` — admin-only inspection route for private attachment metadata (requires `SETUP_TOKEN`)
 
 ## API endpoints
 
@@ -30,9 +30,9 @@ Public (called by the widget):
 - `GET /api/telegram/messages` — poll for new team replies
 - `POST /api/telegram/webhook` — Telegram sends replies here
 - `POST /api/telegram/simulate` — dev-only: simulate a team reply
-- `POST /api/telegram/upload` — file upload metadata only; the file itself is hosted by Telegram and referenced by `telegram_file_id`
+- `POST /api/telegram/upload` — analysis-only private attachment upload; files are never forwarded to Telegram or the Balance team
 - `POST /api/attachments/link` — persist a reference link (YouTube, Vimeo, Figma, Loom, Google Drive, other) for the current session
-- `POST /api/telegram/schedule-complete` — notify Telegram that a Calendly catch-up was booked
+- `POST /api/telegram/schedule-complete` — rejects unverified browser booking claims; it does not notify Telegram
 
 Admin (require `SETUP_TOKEN`):
 
@@ -46,19 +46,17 @@ Admin (require `SETUP_TOKEN`):
 
 See `.env.example` for the canonical list. Summary:
 
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase project
-- `SUPABASE_SERVICE_ROLE_KEY` (legacy) or `SUPABASE_SECRET_KEY` (preferred) — server-side Supabase access
+- `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SECRET_KEY` — server-side Supabase access
 - `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` (default `deepseek-v4-flash`) — LLM provider
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — Telegram relay
 - `SETUP_TOKEN` — protects admin endpoints and `/internal/uploads`
 
 ## Deploy to production
 
-### 1. Create a GitHub repo
+### 1. Production prerequisites
 
 ```bash
-git remote add origin https://github.com/<your-username>/balance-assist.git
-git push -u origin main
+Apply the full incremental migration chain in order, from `001_initial_schema.sql` through `034_private_attachment_effective_attestation.sql` (except intentionally absent `005`). Do not combine it with legacy snapshot `000_full_schema.sql`.
 ```
 
 ### 2. Connect Vercel
@@ -137,7 +135,7 @@ curl -X POST http://127.0.0.1:3000/api/telegram/simulate \
 
 ## Database setup
 
-The authoritative schema is the incremental chain from `001_initial_schema.sql` through `034_private_attachment_effective_attestation.sql` (including the intentionally absent `005` version). `000_full_schema.sql` is a legacy snapshot and must not be combined with the incremental chain. Migration `027_handoff_send_reservations.sql` remains part of that chain. Temporary-draft expiry is invoked every five minutes by the GitHub Actions worker. A dispatcher reserves `sending` for 90 seconds before its 45-second Telegram call; expiry or revoked consent suppresses only unclaimed handoffs and cannot retract an already accepted external transfer.
+The authoritative schema is the full incremental chain from `001_initial_schema.sql` through `034_private_attachment_effective_attestation.sql`, including `027_handoff_send_reservations.sql` and excluding intentionally absent `005`. `000_full_schema.sql` is a legacy snapshot and must not be combined with it. Temporary-draft expiry is invoked by the best-effort GitHub Actions worker every five minutes. A dispatcher reserves `sending` for 90 seconds before its 45-second Telegram call; expiry or revoked consent suppresses only unclaimed handoffs and cannot retract an already accepted external transfer.
 
 Chat requires an authenticated session capability and an allowed request origin. Chat calls are limited durably to 20 per session capability per hour; session creation is limited to 10 per client IP per hour. Production Vercel deployments must set `TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for`; session creation fails with `session_rate_limit_identity_unavailable` when that trusted identity is unavailable. `X-Forwarded-For` and `X-Real-IP` are never accepted directly.
 
@@ -158,6 +156,6 @@ The widget captures a project brief in a persistent left rail alongside the chat
 
 - The persistent left rail (`ReviewPanel`) is visible from the moment the visitor signals project intent. It shows a progress strip, the eight reviewable fields (project scope, project type, service, timeline, budget, contact name, company, email), and a Send-to-team CTA. Every field is click-to-edit, even when unfilled.
 - The rail's CTA is **always visible** — labelled "Send to team" in essentials mode and "Approve & send to team" in summary mode — and is disabled until all eight fields are filled. Clicking it is the only action that calls `POST /api/leads/finalize` and forwards to Telegram + Supabase. After send, the widget confirms the brief is approved, shows the Telegram broadcast status, and offers options to book a catch-up or talk to a human.
-- Reference attachments live in an attachments popover above the chat input bar. Leads can paste a YouTube, Vimeo, Figma, Loom, or Google Drive URL (classified automatically), persisted via `POST /api/attachments/link` into `reference_links` after separate producer-review consent. Analysis-consented file uploads are enabled only when `SUPABASE_PRIVATE_UPLOAD_BUCKET=temporary-attachments` is configured and the server live-attests the private bucket. Files are retained solely to analyse the current draft, use opaque keys, expire after 24 hours, and are never sent to the Balance team or Telegram. The popover is opt-in — the rail shows a clean "no attachments yet" hint when the list is empty.
+- Reference attachments live in an attachments popover above the chat input bar. Links require separate producer-transfer consent. Analysis-consented files are enabled only when `SUPABASE_PRIVATE_UPLOAD_BUCKET=temporary-attachments` is configured and the server live-attests the private bucket. Files use opaque keys, are retained solely to analyse the current draft for up to 24 hours, and are never sent to the Balance team or Telegram.
 
-The widget also answers general questions about Balance, drafts Balance job-application material, and falls back to local responses when the LLM is unavailable. Out-of-scope requests (homework, recipes, roleplay, etc.) are declined and the user is pointed back to the three in-scope paths.
+The widget also answers general questions about Balance and falls back to local responses when the LLM is unavailable. Careers requests redirect to Balance's official careers page; the widget does not collect applicant material. Out-of-scope requests (homework, recipes, roleplay, etc.) are declined.

@@ -1,12 +1,8 @@
+import { sanitizeObservabilityData } from '@/lib/observability/sanitize';
+
 type LogLevel = 'info' | 'warn' | 'error';
 
 type LogContext = Record<string, unknown>;
-
-const SENSITIVE_KEYS = new Set([
-  'email', 'contactEmail', 'contactName', 'contactCompany',
-  'summary', 'messageText', 'fileContent', 'url', 'signedUrl',
-  'password', 'secret', 'token', 'capability', 'capabilityHash'
-]);
 
 function generateRequestId(): string {
   return typeof crypto !== 'undefined' && crypto.randomUUID
@@ -14,23 +10,11 @@ function generateRequestId(): string {
     : Math.random().toString(36).slice(2, 10);
 }
 
-function redactContext(context?: LogContext): LogContext | undefined {
-  if (!context) {
-    return undefined;
-  }
-
-  const redacted: LogContext = {};
-  for (const [key, value] of Object.entries(context)) {
-    redacted[key] = SENSITIVE_KEYS.has(key) ? '[redacted]' : value;
-  }
-  return redacted;
-}
-
 function emit(level: LogLevel, tag: string, message: string, context?: LogContext, requestId?: string) {
   const prefix = `[${tag}]`;
   const entry: Record<string, unknown> = { ts: new Date().toISOString() };
   if (requestId) entry.rid = requestId;
-  if (context) Object.assign(entry, redactContext(context));
+  if (context) Object.assign(entry, sanitizeObservabilityData(context));
 
   const method = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
   console[method](prefix, message, entry);
