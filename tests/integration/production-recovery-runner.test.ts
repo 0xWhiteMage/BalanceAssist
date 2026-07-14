@@ -56,6 +56,62 @@ afterEach(async () => {
 });
 
 describe('production recovery runner', () => {
+  it('keeps the SQL Editor fallback transactional, source-verified, and storage-neutral', async () => {
+    const artifact = await readFile(resolve(process.cwd(), 'supabase/production-recovery-019-037.sql'), 'utf8');
+    const documentation = await readFile(resolve(process.cwd(), 'docs/private-attachment-storage.md'), 'utf8');
+    const migrations = (await import(pathToFileURL(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs')).href))
+      .getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')) as Migration[];
+    const recoveryMigrations = migrations.filter(({ version }) => BigInt(version) >= 19n && BigInt(version) <= 37n);
+    const excludedMigrations = migrations.filter(({ version }) => BigInt(version) >= 38n && BigInt(version) <= 43n);
+
+    expect(artifact).toMatch(/^-- SQL Editor fallback only; not for cleanup\.\r?\n-- Do not directly manage Supabase Storage relations or buckets\.\r?\n/);
+    expect(artifact.indexOf('BEGIN;')).toBeGreaterThan(0);
+    expect(artifact).toContain('CREATE TABLE IF NOT EXISTS public.schema_migrations');
+    expect(artifact).toContain("RAISE EXCEPTION 'recovery migrations 019-037 are already recorded: %'");
+
+    const firstSourceSection = artifact.indexOf('-- BEGIN 019_api_rate_limits.sql');
+    expect(artifact.indexOf('BEGIN;')).toBeLessThan(firstSourceSection);
+    expect(artifact.indexOf('CREATE TABLE IF NOT EXISTS public.schema_migrations')).toBeLessThan(firstSourceSection);
+    expect(artifact.indexOf("RAISE EXCEPTION 'recovery migrations 019-037 are already recorded: %'")).toBeLessThan(firstSourceSection);
+
+    for (const migration of recoveryMigrations) {
+      const source = await readFile(migration.path, 'utf8');
+      const section = new RegExp(
+        `-- BEGIN ${migration.filename.replace('.', '\\.')}\\r?\\n-- =+\\r?\\n([\\s\\S]*?)-- END ${migration.filename.replace('.', '\\.')}\\r?\\n`
+      ).exec(artifact);
+
+      expect(section?.[1]).toBe(source);
+    }
+    expect(recoveryMigrations.map(({ filename }) => artifact.indexOf(`-- BEGIN ${filename}`))).toEqual(
+      [...recoveryMigrations.map(({ filename }) => artifact.indexOf(`-- BEGIN ${filename}`))].sort((left, right) => left - right)
+    );
+    expect((artifact.match(/-- BEGIN 0(?:19|2[0-9]|3[0-7])_/g) ?? [])).toHaveLength(19);
+
+    for (const migration of excludedMigrations) {
+      const source = await readFile(migration.path, 'utf8');
+      expect(artifact).not.toContain(migration.filename);
+      expect(artifact).not.toContain(source);
+    }
+
+    const trackerInsert = /INSERT INTO public\.schema_migrations \(version, filename\)\r?\nVALUES\r?\n([\s\S]*?);/.exec(artifact);
+    expect(trackerInsert?.[1].match(/\('0(?:19|2[0-9]|3[0-7])', '[^']+'\)/g)).toHaveLength(19);
+    expect(trackerInsert?.[0]).not.toContain('ON CONFLICT');
+    expect(artifact).toContain("RAISE EXCEPTION 'schema_migrations verification failed for 019-037'");
+    expect(artifact.lastIndexOf('COMMIT;')).toBe(artifact.trimEnd().length - 'COMMIT;'.length);
+    expect(artifact.match(/COMMIT;/g)).toHaveLength(1);
+    expect(artifact).not.toMatch(/(?:INSERT INTO|UPDATE|DELETE FROM|CREATE|ALTER|DROP)\s+storage\./i);
+
+    expect(documentation).toContain('After the SQL Editor script succeeds, create `temporary-attachments` as a private bucket in the Supabase Storage dashboard.');
+    expect(documentation).toContain('Do not add browser Storage policies.');
+    expect(documentation).toContain("SELECT version, filename\nFROM public.schema_migrations\nWHERE version BETWEEN '019' AND '037'\nORDER BY version;");
+    expect(documentation).toContain("SELECT id, name, public\nFROM storage.buckets\nWHERE id = 'temporary-attachments';");
+    expect(documentation).toContain('WITH RECURSIVE memberships(browser_role, role_oid) AS');
+    expect(documentation).toContain("WHERE schemaname = 'storage'\n  AND tablename = 'objects'");
+    expect(documentation).toContain("'public'::name = ANY(roles) OR EXISTS");
+    expect(documentation).toContain('SELECT 1 FROM role_names WHERE role_name = ANY(roles)');
+    expect(documentation).toContain("SELECT public.private_attachment_storage_is_ready('temporary-attachments');");
+  });
+
   it('labels the production bundle as source evidence while preserving every source section', async () => {
     const bundle = await readFile(resolve(process.cwd(), 'supabase/production-migrations-019-043.sql'), 'utf8');
     const migrations = (await import(pathToFileURL(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs')).href))
