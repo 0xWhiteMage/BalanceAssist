@@ -2,28 +2,24 @@
 
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { validateIsolatedSupabaseConfig } from '@/lib/testing/supabase-service-role';
 
 const url = process.env.TEST_SUPABASE_URL;
 const serviceRoleKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
 const anonKey = process.env.TEST_SUPABASE_ANON_KEY;
-const projectRef = process.env.TEST_SUPABASE_PROJECT_REF;
-const required = process.env.REQUIRE_TEST_SUPABASE_SERVICE_ROLE === '1';
-const error = validateIsolatedSupabaseConfig({
-  url,
-  serviceRoleKey,
-  anonKey,
-  projectRef,
-  allow: process.env.ALLOW_TEST_SUPABASE_SERVICE_ROLE
-});
-const serviceRoleTest = error ? (required ? it : it.skip) : it;
+const localStack = process.env.TEST_SUPABASE_LOCAL === '1';
+const error = !localStack || !url || !serviceRoleKey || !anonKey
+  ? 'Local Supabase test configuration is unavailable'
+  : !['127.0.0.1', 'localhost'].includes(new URL(url).hostname)
+    ? 'TEST_SUPABASE_URL must be a local Supabase endpoint'
+    : undefined;
+const serviceRoleTest = error ? it.skip : it;
 
 function restUrl(table: string, query = '') {
   return new URL(`/rest/v1/${table}${query}`, url!);
 }
 
-describe('isolated Supabase service-role access', () => {
-  serviceRoleTest(`uses only explicitly enabled test configuration${error ? `: ${error}` : ''}`, async () => {
+describe('local Supabase service-role access', () => {
+  serviceRoleTest(`allows service role and denies anon access${error ? `: ${error}` : ''}`, async () => {
     if (error) throw new Error(error);
 
     const sourceUrl = `https://balance-assist-test.invalid/service-role/${randomUUID()}`;

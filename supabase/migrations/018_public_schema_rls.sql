@@ -7,7 +7,6 @@ ALTER TABLE public.uploaded_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reference_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.processed_telegram_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.handoff_outbox ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL PRIVILEGES ON TABLE
   public.sessions,
@@ -17,8 +16,7 @@ REVOKE ALL PRIVILEGES ON TABLE
   public.uploaded_files,
   public.reference_links,
   public.processed_telegram_updates,
-  public.handoff_outbox,
-  public.schema_migrations
+  public.handoff_outbox
 FROM PUBLIC;
 
 -- Supabase provides these roles; plain PostgreSQL test services may not.
@@ -33,8 +31,7 @@ BEGIN
       public.uploaded_files,
       public.reference_links,
       public.processed_telegram_updates,
-      public.handoff_outbox,
-      public.schema_migrations
+      public.handoff_outbox
     FROM anon;
   END IF;
 
@@ -47,9 +44,23 @@ BEGIN
       public.uploaded_files,
       public.reference_links,
       public.processed_telegram_updates,
-      public.handoff_outbox,
-      public.schema_migrations
+      public.handoff_outbox
     FROM authenticated;
+  END IF;
+
+  -- Supabase CLI can run project migrations before the custom migration
+  -- runner creates this optional public tracker table.
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;
+    REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM PUBLIC;
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+      REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM anon;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+      REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM authenticated;
+    END IF;
   END IF;
 END
 $$;

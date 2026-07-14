@@ -50,18 +50,31 @@ if (cli.error || cli.status !== 0) {
         const build = run('npm', ['run', 'build'], { stdio: 'inherit' });
         if (build.status !== 0) throw new Error('Production build failed.');
 
+        const testEnvironment = {
+          ...process.env,
+          NEXT_PUBLIC_SUPABASE_URL: environment.API_URL,
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: environment.ANON_KEY,
+          SUPABASE_SERVICE_ROLE_KEY: environment.SERVICE_ROLE_KEY,
+          TEST_DATABASE_URL: environment.DB_URL,
+          TEST_SUPABASE_LOCAL: '1',
+          TEST_SUPABASE_URL: environment.API_URL,
+          TEST_SUPABASE_SERVICE_ROLE_KEY: environment.SERVICE_ROLE_KEY,
+          TEST_SUPABASE_ANON_KEY: environment.ANON_KEY,
+          RELEASE_PROOF_ARTIFACTS_DIR: diagnosticsDir
+        };
         const test = run('npm', ['run', 'test:release-proof:http'], {
           stdio: 'inherit',
-          env: {
-            ...process.env,
-            NEXT_PUBLIC_SUPABASE_URL: environment.API_URL,
-            NEXT_PUBLIC_SUPABASE_ANON_KEY: environment.ANON_KEY,
-            SUPABASE_SERVICE_ROLE_KEY: environment.SERVICE_ROLE_KEY,
-            TEST_DATABASE_URL: environment.DB_URL,
-            RELEASE_PROOF_ARTIFACTS_DIR: diagnosticsDir
-          }
+          env: testEnvironment
         });
-        process.exitCode = test.status ?? 1;
+        if (test.status !== 0) {
+          process.exitCode = test.status ?? 1;
+        } else {
+          const serviceRole = run('npm', ['run', 'test:supabase:service-role'], {
+            stdio: 'inherit',
+            env: testEnvironment
+          });
+          process.exitCode = serviceRole.status ?? 1;
+        }
       } catch (error) {
         console.error(error instanceof Error ? error.message : 'Local Supabase release journey failed.');
         process.exitCode = 1;
