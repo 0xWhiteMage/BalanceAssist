@@ -17,6 +17,20 @@ describe('database migration history expectation', () => {
     expect(source).toContain("'032:032_legacy_cleanup_record_remediation.sql'");
     expect(source).toContain("'033:033_private_attachment_live_attestation.sql'");
     expect(source).toContain("'034:034_private_attachment_effective_attestation.sql'");
-    await expect(readFile(resolve(process.cwd(), 'README.md'), 'utf8')).resolves.toContain('034_private_attachment_effective_attestation.sql');
+    expect(source).toContain("'035:035_schema_migrations_tracker_hardening.sql'");
+    await expect(readFile(resolve(process.cwd(), 'README.md'), 'utf8')).resolves.toContain('035_schema_migrations_tracker_hardening.sql');
+  });
+
+  it('keeps tracker hardening in a forward migration rather than changing recorded 018', async () => {
+    const migration = await readFile(
+      resolve(process.cwd(), 'supabase/migrations/035_schema_migrations_tracker_hardening.sql'),
+      'utf8'
+    );
+
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS public.schema_migrations');
+    expect(migration).toContain('ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM PUBLIC');
+    expect(migration).toContain('FROM anon');
+    expect(migration).toContain('FROM authenticated');
   });
 });

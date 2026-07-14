@@ -58,7 +58,7 @@ See `.env.example` for the canonical list. Summary:
 ### 1. Production prerequisites
 
 ```bash
-Apply the full incremental migration chain in order, from `001_initial_schema.sql` through `034_private_attachment_effective_attestation.sql` (except intentionally absent `005`). Do not combine it with legacy snapshot `000_full_schema.sql`.
+Apply the full incremental migration chain in order, from `001_initial_schema.sql` through `035_schema_migrations_tracker_hardening.sql` (except intentionally absent `005`). Do not combine it with legacy snapshot `000_full_schema.sql`.
 ```
 
 ### 2. Connect Vercel
@@ -137,7 +137,7 @@ curl -X POST http://127.0.0.1:3000/api/telegram/simulate \
 
 ## Database setup
 
-The authoritative schema is the full incremental chain from `001_initial_schema.sql` through `034_private_attachment_effective_attestation.sql`, including `027_handoff_send_reservations.sql` and excluding intentionally absent `005`. `000_full_schema.sql` is a legacy snapshot and must not be combined with it. Temporary-draft expiry is invoked by the best-effort GitHub Actions worker every five minutes. A dispatcher reserves `sending` for 90 seconds before its 45-second Telegram call; expiry or revoked consent suppresses only unclaimed handoffs and cannot retract an already accepted external transfer.
+The authoritative schema is the full incremental chain from `001_initial_schema.sql` through `035_schema_migrations_tracker_hardening.sql`, including `027_handoff_send_reservations.sql` and excluding intentionally absent `005`. `000_full_schema.sql` is a legacy snapshot and must not be combined with it. Temporary-draft expiry is invoked by the best-effort GitHub Actions worker every five minutes. A dispatcher reserves `sending` for 90 seconds before its 45-second Telegram call; expiry or revoked consent suppresses only unclaimed handoffs and cannot retract an already accepted external transfer.
 
 Chat requires an authenticated session capability and an allowed request origin. Chat calls are limited durably to 20 per session capability per hour; session creation is limited to 10 per client IP per hour. Production Vercel deployments must set `TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for`; session creation fails with `session_rate_limit_identity_unavailable` when that trusted identity is unavailable. `X-Forwarded-For` and `X-Real-IP` are never accepted directly.
 

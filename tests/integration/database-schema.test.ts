@@ -222,7 +222,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        '031_private_attachment_cleanup_hardening.sql',
         '032_legacy_cleanup_record_remediation.sql',
         '033_private_attachment_live_attestation.sql',
-        '034_private_attachment_effective_attestation.sql'
+        '034_private_attachment_effective_attestation.sql',
+        '035_schema_migrations_tracker_hardening.sql'
     ]);
   });
 
@@ -701,8 +702,52 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
          '031:031_private_attachment_cleanup_hardening.sql',
           '032:032_legacy_cleanup_record_remediation.sql',
           '033:033_private_attachment_live_attestation.sql',
-          '034:034_private_attachment_effective_attestation.sql'
+          '034:034_private_attachment_effective_attestation.sql',
+          '035:035_schema_migrations_tracker_hardening.sql'
     ]);
+  });
+
+  it('hardens a tracker after 018 was already recorded', async () => {
+    const { Client } = await import('pg');
+    const runner = await loadRunner();
+    const database = `balance_assist_tracker_upgrade_${process.pid}_${Date.now()}`;
+    const upgradeConnection = withDatabase(connectionString!, database);
+    await adminClient!.query(`create database ${database}`);
+    try {
+      await runner.applyMigrations({ connectionString: upgradeConnection, migrationsDir, throughVersion: '018' });
+      const upgradeClient = new Client({ connectionString: upgradeConnection });
+      await upgradeClient.connect();
+      try {
+        await upgradeClient.query('grant all privileges on table public.schema_migrations to public, anon, authenticated');
+        const result = await runner.applyMigrations({ connectionString: upgradeConnection, migrationsDir });
+        const tracker = await upgradeClient.query(`
+          select
+            (select relrowsecurity from pg_class where oid = 'public.schema_migrations'::regclass) as rls,
+            exists(
+              select 1
+              from pg_class c
+              cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) as acl
+              where c.oid = 'public.schema_migrations'::regclass
+                and acl.grantee = 0
+                and acl.privilege_type = 'SELECT'
+            ) as public_select,
+            has_table_privilege('anon', 'public.schema_migrations', 'select') as anon_select,
+            has_table_privilege('authenticated', 'public.schema_migrations', 'select') as authenticated_select
+        `);
+
+        expect(result.applied).toContain('035_schema_migrations_tracker_hardening.sql');
+        expect(tracker.rows).toEqual([{
+          rls: true,
+          public_select: false,
+          anon_select: false,
+          authenticated_select: false
+        }]);
+      } finally {
+        await upgradeClient.end();
+      }
+    } finally {
+      await adminClient!.query(`drop database if exists ${database}`);
+    }
   });
 
   it('records consent through a locked session and rejects ledger rewrites', async () => {
