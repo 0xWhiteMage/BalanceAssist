@@ -83,6 +83,7 @@ In **Settings → Secrets and variables → Actions** add:
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `production` environment only; immutable Vercel deploy and alias promotion |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `production` environment only; bounded schema/service-role readiness probes |
 | `PRODUCTION_DATABASE_URL` | `production-migrations` and `production-cleanup-migrations` environments only; never repository configuration |
+| `PRODUCTION_BACKUP_AUDIT_REFERENCE` | `production-cleanup-migrations` environment only; protected backup/audit record bound to the cleanup release SHA |
 
 Set the protected `production` environment variable `VERCEL_GIT_DEPLOYMENTS_DISABLED_AT` to a UTC ISO-8601 dashboard-audit timestamp (for example, `2026-07-14T12:00:00Z`). The release gate rejects absent, malformed, future, or more-than-90-day-old attestations. Recheck the Vercel setting before each release and quarterly; a failed gate or a Vercel Git deployment outside a release is an alert requiring the setting to be disabled and the release/audit history to be reviewed.
 
@@ -95,8 +96,8 @@ Production migrations are forward-only and run only in the protected `production
 `038_durable_deletion_jobs.sql` through `042_deletion_recovery_ownership.sql` are reviewed destructive cleanup migrations. They are a one-time sequence, not a general-purpose SQL path. Do not add versions or modify their reviewed content: the dedicated runner permits only these filenames, versions, and SHA-256 source hashes.
 
 1. Take and validate a production backup, review the deletion/audit state, and retain the evidence with the release record.
-2. Manually dispatch `Production cleanup migrations` with the exact lowercase 40-character SHA already reachable from protected `main` and `backup_audit_attestation` set to `BACKUP_AUDIT_VERIFIED:<UTC ISO-8601 timestamp>`. The timestamp must be current, not future, and no more than 24 hours old.
-3. Approve the protected `production-cleanup-migrations` environment. The workflow dry-runs the exact five reviewed migrations, applies them transactionally, verifies that `038,039,040,041,042` are recorded in `public.schema_migrations`, and places the result in the job summary.
+2. Create the protected `production-cleanup-migrations` environment secret `PRODUCTION_BACKUP_AUDIT_REFERENCE` before dispatch. Its exact format is `BACKUP_AUDIT:<UTC ISO-8601 timestamp>|<provider>|<backup-or-audit-id>|<release SHA>`; the timestamp must be current, not future, and no more than 24 hours old, and the SHA must exactly match the selected cleanup release. Do not place this record in the dispatch form or workflow output.
+3. Manually dispatch `Production cleanup migrations` with the exact lowercase 40-character SHA already reachable from protected `main`. The workflow rejects any run whose workflow definition is not `refs/heads/main`, then waits for approval of the protected `production-cleanup-migrations` environment. It dry-runs the exact five reviewed migrations, validates the protected backup/audit reference, applies them transactionally, verifies that `038,039,040,041,042` are recorded in `public.schema_migrations`, and places only the migration result in the job summary.
 4. Confirm the post-migration health smoke passes. This workflow does not build or deploy the application, change a Vercel alias, or configure any webhook.
 
 After the recorded-version verification succeeds, dispatch the ordinary production release for later additive migrations as needed.
