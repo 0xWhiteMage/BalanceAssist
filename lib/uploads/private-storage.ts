@@ -4,7 +4,7 @@ import { validateFile } from '@/lib/uploads/quarantine';
 import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
 export type PrivateStorageClient = {
-  rpc: (fn: 'private_attachment_storage_is_ready' | 'private_attachment_cleanup_owner', args: { p_bucket: string } | { p_session_id: string }) => Promise<{ data: boolean | string | null; error: unknown }>;
+  rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: boolean | string | null; error: unknown }>;
   storage: {
     getBucket: (bucket: string) => Promise<{ data: { id: string; public: boolean } | null; error: unknown }>;
     from: (bucket: string) => {
@@ -63,23 +63,18 @@ export async function storePrivateUpload(input: { client: PrivateStorageClient; 
     throw new PrivateStorageError('private_storage_upload_failed');
   }
 
-  const owner = await input.client.rpc('private_attachment_cleanup_owner', { p_session_id: input.sessionId });
-  if (owner.error || typeof owner.data !== 'string') {
-    throw new PrivateStorageError('private_storage_recovery_unavailable');
-  }
   const objectKey = randomUUID();
   const checksum = createHash('sha256').update(bytes).digest('hex');
   const retentionExpiresAt = temporaryDraftExpiry().toISOString();
   // Reserve recovery before creating an object so a failed rollback cannot orphan it.
-  const cleanup = await input.client.from('private_attachment_cleanup').insert({
-    bucket: input.bucket,
-    object_key: objectKey,
-    checksum_sha256: checksum,
-    retention_expires_at: retentionExpiresAt,
-    cleanup_owner_id: owner.data,
-    status: 'pending_cleanup'
+  const cleanup = await input.client.rpc('reserve_private_attachment_cleanup', {
+    p_session_id: input.sessionId,
+    p_bucket: input.bucket,
+    p_object_key: objectKey,
+    p_checksum_sha256: checksum,
+    p_retention_expires_at: retentionExpiresAt
   });
-  if (cleanup.error) {
+  if (cleanup.error || cleanup.data !== true) {
     throw new PrivateStorageError('private_storage_recovery_unavailable');
   }
   const storage = input.client.storage.from(input.bucket);

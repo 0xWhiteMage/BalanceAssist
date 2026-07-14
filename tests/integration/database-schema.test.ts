@@ -930,4 +930,39 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       await client!.query("delete from public.private_attachment_cleanup where object_key = 'recovery-owner-b'");
     }
   });
+
+  it('blocks new upload cleanup reservations after deletion is requested and pages every cleanup obligation', async () => {
+    const session = await client!.query("insert into public.sessions (source_url) values ('https://deletion-pagination.example.test') returning id, cleanup_owner_id");
+    const sessionId = session.rows[0].id;
+    const ownerId = session.rows[0].cleanup_owner_id;
+    try {
+      await client!.query('select * from public.request_deletion_job($1)', [sessionId]);
+      const reservation = await client!.query(
+        "select public.reserve_private_attachment_cleanup($1, 'temporary-attachments', 'late-object', repeat('0', 64), now() + interval '1 hour') as reserved",
+        [sessionId]
+      );
+      expect(reservation.rows).toEqual([{ reserved: false }]);
+
+      await client!.query(
+        `insert into public.private_attachment_cleanup (object_key, bucket, checksum_sha256, retention_expires_at, status, cleanup_owner_id)
+         select 'page-recovery-' || n, 'temporary-attachments', repeat('0', 64), now(), 'pending_cleanup', $1
+         from generate_series(1, 1001) n`,
+        [ownerId]
+      );
+      const firstPage = await client!.query(
+        "select object_key from public.deletion_recovery_cleanup_page($1, 'temporary-attachments', 1000)",
+        [ownerId]
+      );
+      await client!.query('delete from public.private_attachment_cleanup where object_key = any($1)', [firstPage.rows.map((row) => row.object_key)]);
+      const secondPage = await client!.query(
+        "select object_key from public.deletion_recovery_cleanup_page($1, 'temporary-attachments', 1000)",
+        [ownerId]
+      );
+      expect(firstPage.rows).toHaveLength(1000);
+      expect(secondPage.rows).toHaveLength(1);
+    } finally {
+      await client!.query('delete from public.sessions where id = $1', [sessionId]);
+      await client!.query('delete from public.private_attachment_cleanup where cleanup_owner_id = $1', [ownerId]);
+    }
+  });
 });
