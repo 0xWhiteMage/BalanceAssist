@@ -107,6 +107,7 @@ test.describe('balance assist intake via persistent rail', () => {
   });
 
   test('rail is gated on hasProjectIntent, then auto-switches to summary and triggers send', async ({ page }) => {
+    const consentRequests: Array<{ scope?: string; granted?: boolean }> = [];
     await page.route('**/api/sessions/inspect', async (route) => {
       await route.fulfill({
         status: 200,
@@ -125,6 +126,15 @@ test.describe('balance assist intake via persistent rail', () => {
           sessionId: 'mock-session-id',
           persisted: true
         })
+      });
+    });
+
+    await page.route('**/api/projects/mock-session-id/consent', async (route) => {
+      consentRequests.push(await route.request().postDataJSON());
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, consent: { producerTransfer: true } })
       });
     });
 
@@ -210,6 +220,10 @@ test.describe('balance assist intake via persistent rail', () => {
     // "element is stable" wait — the click handler itself is what we
     // care about, and the button is reachable throughout the animation.
     await approveButton.click({ force: true });
+
+    await expect.poll(() => consentRequests).toContainEqual(
+      expect.objectContaining({ scope: 'producer_transfer', granted: true })
+    );
 
     // The chat input must still be visible — the rail sits to the
     // left of the chat, never covering it.
