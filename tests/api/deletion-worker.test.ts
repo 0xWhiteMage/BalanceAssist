@@ -10,19 +10,24 @@ vi.mock('@/lib/security/config', () => ({ validateAdminRequestAny: () => ({ ok: 
 
 import { POST } from '@/app/api/internal/deletion-worker/route';
 
-function workerClient(removeError = false, sessionId: string | null = 'session-1') {
+function workerClient(removeError = false, sessionId: string | null = 'session-1', cleanupOwner: string | null = 'owner-1') {
   const calls: string[] = [];
+  const cleanupFilters: Array<[string, string]> = [];
   return {
     calls,
+    cleanupFilters,
     rpc: vi.fn(async (name: string) => {
       calls.push(name);
-      if (name === 'claim_deletion_job') return { data: { id: 'job-1', session_id: sessionId, lease_token: 'token-1' }, error: null };
+      if (name === 'claim_deletion_job') return { data: { id: 'job-1', session_id: sessionId, cleanup_owner_id: cleanupOwner, lease_token: 'token-1' }, error: null };
       if (name === 'start_deletion_job' || name === 'delete_session_for_deletion_job' || name === 'complete_deletion_job' || name === 'complete_orphaned_deletion_job' || name === 'fail_deletion_job') return { data: true, error: null };
       return { data: null, error: null };
     }),
     storage: { from: () => ({ remove: async () => { calls.push('remove-object'); return { error: removeError ? { message: 'nope' } : null }; } }) },
     from: (table: string) => ({
-      select: () => ({ eq: () => ({ eq: () => ({ data: table === 'uploaded_files' ? [{ id: 'file-1', object_key: 'opaque-object' }] : table === 'private_attachment_cleanup' ? [{ id: 'recovery-1', object_key: 'recovery-object' }] : [], error: null }) }) }),
+      select: () => ({ eq: (column: string, value: string) => ({ eq: (nextColumn: string, nextValue: string) => {
+        if (table === 'private_attachment_cleanup') cleanupFilters.push([column, value], [nextColumn, nextValue]);
+        return { data: table === 'uploaded_files' ? [{ id: 'file-1', object_key: 'opaque-object' }] : table === 'private_attachment_cleanup' ? [{ id: 'recovery-1', object_key: 'recovery-object' }] : [], error: null };
+      } }) }),
       delete: () => ({ eq: async () => { calls.push(`delete-${table}-row`); return { error: null }; } })
     })
   };
@@ -38,6 +43,17 @@ describe('deletion worker', () => {
     const response = await POST(new Request('http://localhost/api/internal/deletion-worker', { method: 'POST' }));
     expect(response.status).toBe(200);
     expect(supabase.calls).toEqual(['claim_deletion_job', 'start_deletion_job', 'remove-object', 'delete-uploaded_files-row', 'remove-object', 'delete-private_attachment_cleanup-row', 'delete_session_for_deletion_job', 'complete_deletion_job']);
+  });
+
+  test('selects recovery records only for the claimed job cleanup owner', async () => {
+    const supabase = workerClient();
+    hasSupabaseServerConfigMock.mockReturnValue(true);
+    createServerSupabaseClientMock.mockReturnValue(supabase);
+    process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
+
+    await POST(new Request('http://localhost/api/internal/deletion-worker', { method: 'POST' }));
+
+    expect(supabase.cleanupFilters).toContainEqual(['cleanup_owner_id', 'owner-1']);
   });
 
   test('completes a claimed job whose session was already cascaded instead of retrying forever', async () => {
@@ -60,6 +76,19 @@ describe('deletion worker', () => {
     const response = await POST(new Request('http://localhost/api/internal/deletion-worker', { method: 'POST' }));
     expect(response.status).toBe(503);
     expect(supabase.calls).toContain('fail_deletion_job');
+    expect(supabase.calls).not.toContain('delete_session_for_deletion_job');
+  });
+
+  test('defers a legacy live-session job with no opaque owner without touching recovery records', async () => {
+    const supabase = workerClient(false, 'session-1', null);
+    hasSupabaseServerConfigMock.mockReturnValue(true);
+    createServerSupabaseClientMock.mockReturnValue(supabase);
+    process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
+
+    const response = await POST(new Request('http://localhost/api/internal/deletion-worker', { method: 'POST' }));
+
+    expect(response.status).toBe(503);
+    expect(supabase.calls).not.toContain('remove-object');
     expect(supabase.calls).not.toContain('delete_session_for_deletion_job');
   });
 });

@@ -875,4 +875,59 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       await client!.query('delete from public.sessions where id = $1', [sessionId]);
     }
   });
+
+  it('isolates deletion recovery cleanup and orphan completion by opaque owner', async () => {
+    const sessions = await client!.query(
+      `insert into public.sessions (source_url) values
+        ('https://deletion-owner-a.example.test'),
+        ('https://deletion-owner-b.example.test')
+       returning id, cleanup_owner_id`
+    );
+    const [firstSession, secondSession] = sessions.rows;
+    const firstJob = await client!.query('select * from public.request_deletion_job($1)', [firstSession.id]);
+    const secondJob = await client!.query('select * from public.request_deletion_job($1)', [secondSession.id]);
+    const firstOwner = firstJob.rows[0].cleanup_owner_id;
+    const secondOwner = secondJob.rows[0].cleanup_owner_id;
+
+    try {
+      expect(firstOwner).toBe(firstSession.cleanup_owner_id);
+      expect(secondOwner).toBe(secondSession.cleanup_owner_id);
+      expect(firstOwner).not.toBe(secondOwner);
+      await client!.query(
+        `insert into public.private_attachment_cleanup
+          (object_key, bucket, checksum_sha256, retention_expires_at, status, cleanup_owner_id)
+         values
+          ('recovery-owner-a', 'temporary-attachments', repeat('0', 64), now(), 'pending_cleanup', $1),
+          ('recovery-owner-b', 'temporary-attachments', repeat('0', 64), now(), 'pending_cleanup', $2)`,
+        [firstOwner, secondOwner]
+      );
+      const claimedRecovery = await client!.query(
+        `select object_key from public.private_attachment_cleanup
+         where status = 'pending_cleanup' and cleanup_owner_id = $1
+         order by object_key`,
+        [firstOwner]
+      );
+      expect(claimedRecovery.rows).toEqual([{ object_key: 'recovery-owner-a' }]);
+
+      const lease = await client!.query(
+        `update public.deletion_jobs
+         set state = 'processing', lease_token = gen_random_uuid(), lease_expires_at = now() + interval '5 minutes'
+         where id = $1
+         returning lease_token`,
+        [firstJob.rows[0].id]
+      );
+      await client!.query('delete from public.sessions where id = $1', [firstSession.id]);
+      const blocked = await client!.query('select public.complete_orphaned_deletion_job($1, $2) as completed', [firstJob.rows[0].id, lease.rows[0].lease_token]);
+      expect(blocked.rows).toEqual([{ completed: false }]);
+
+      await client!.query("delete from public.private_attachment_cleanup where object_key = 'recovery-owner-a'");
+      const completed = await client!.query('select public.complete_orphaned_deletion_job($1, $2) as completed', [firstJob.rows[0].id, lease.rows[0].lease_token]);
+      expect(completed.rows).toEqual([{ completed: true }]);
+      const unrelated = await client!.query("select object_key from public.private_attachment_cleanup where object_key = 'recovery-owner-b'");
+      expect(unrelated.rows).toEqual([{ object_key: 'recovery-owner-b' }]);
+    } finally {
+      await client!.query('delete from public.sessions where id = $1', [secondSession.id]);
+      await client!.query("delete from public.private_attachment_cleanup where object_key = 'recovery-owner-b'");
+    }
+  });
 });

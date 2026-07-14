@@ -24,4 +24,13 @@ describe('durable deletion jobs migration', () => {
     expect(migration).toMatch(/pending_cleanup/);
     expect(migration).not.toMatch(/ALTER TABLE public\.private_attachment_cleanup ADD COLUMN session_id/i);
   });
+
+  test('uses an opaque cleanup owner to isolate recovery rows without session IDs or object-key-derived ownership', () => {
+    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/042_deletion_recovery_ownership.sql'), 'utf8');
+    expect(migration).toMatch(/cleanup_owner_id uuid/i);
+    expect(migration).toMatch(/private_attachment_cleanup_owner/i);
+    expect(migration).toMatch(/c\.cleanup_owner_id = job\.cleanup_owner_id/i);
+    expect(migration).toMatch(/SET cleanup_owner_id = s\.cleanup_owner_id/i);
+    expect(migration).not.toMatch(/ALTER TABLE public\.private_attachment_cleanup\s+ADD COLUMN IF NOT EXISTS session_id/i);
+  });
 });

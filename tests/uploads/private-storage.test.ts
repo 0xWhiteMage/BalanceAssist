@@ -10,7 +10,7 @@ function makeFile(name = 'client-brief.pdf') {
   return file;
 }
 
-function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; attested?: boolean; insertError?: boolean; cleanupInsertError?: boolean; removeError?: boolean; cleanupDeleteError?: boolean; updateError?: boolean; expiredError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string; cleanup_required_at?: string | null }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
+function makeClient(options?: { bucket?: { id: string; public: boolean } | null; readiness?: 'ready' | 'unavailable'; attested?: boolean; cleanupOwner?: string | null; insertError?: boolean; cleanupInsertError?: boolean; removeError?: boolean; cleanupDeleteError?: boolean; updateError?: boolean; expiredError?: boolean; expired?: Array<{ id: string; object_key: string; session_id: string; cleanup_required_at?: string | null }>; orphaned?: Array<{ object_key: string; bucket: string }> }) {
   const upload = vi.fn(async () => ({ error: null }));
   const remove = vi.fn(async () => ({ error: options?.removeError ? { message: 'delete failed' } : null }));
   const insert = vi.fn(async () => ({ error: options?.insertError ? { message: 'metadata failed' } : null }));
@@ -26,7 +26,7 @@ function makeClient(options?: { bucket?: { id: string; public: boolean } | null;
   }));
 
   return {
-    rpc: vi.fn(async () => ({ data: options?.attested ?? true, error: null })),
+    rpc: vi.fn(async (name: string) => ({ data: name === 'private_attachment_cleanup_owner' ? (options?.cleanupOwner ?? 'owner-1') : (options?.attested ?? true), error: null })),
     storage: {
       getBucket: vi.fn(async () => ({ data: options?.bucket === undefined ? { id: 'temporary-attachments', public: false } : options.bucket, error: null })),
       from: vi.fn(() => ({ upload, remove }))
@@ -126,6 +126,17 @@ describe('private attachment storage', () => {
       status: 'pending_cleanup'
     }));
     expect(JSON.stringify(client.insert.mock.calls)).not.toContain('private-budget.pdf');
+    expect(JSON.stringify(client.cleanupInsert.mock.calls)).not.toContain(sessionId);
+  });
+
+  test('reserves recovery cleanup with the session opaque owner rather than a session identifier', async () => {
+    const client = makeClient({ insertError: true, removeError: true, cleanupOwner: 'owner-1' });
+
+    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+      .rejects.toMatchObject({ code: 'private_storage_metadata_failed' });
+
+    expect(client.rpc).toHaveBeenCalledWith('private_attachment_cleanup_owner', { p_session_id: sessionId });
+    expect(client.cleanupInsert).toHaveBeenCalledWith(expect.objectContaining({ cleanup_owner_id: 'owner-1' }));
     expect(JSON.stringify(client.cleanupInsert.mock.calls)).not.toContain(sessionId);
   });
 
