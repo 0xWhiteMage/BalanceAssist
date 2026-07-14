@@ -16,13 +16,44 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - name: Validate release commit
+        id: validate
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet release
+          cd release
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "$RELEASE_REF^{commit}"
+          git merge-base --is-ancestor "$RELEASE_REF" origin/main
+          release_sha="$(git rev-parse "$RELEASE_REF^{commit}")"
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
+
   gates:
+    needs: [validate]
     environment: production
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout validated release commit
+        uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.validate.outputs.sha }}
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+      - name: Verify Vercel dashboard release control
+        env:
+          VERCEL_GIT_DEPLOYMENTS_DISABLED_AT: ${{ vars.VERCEL_GIT_DEPLOYMENTS_DISABLED_AT }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -49,9 +80,12 @@ jobs:
     outputs:
       deployment_url: ${{ steps.deploy.outputs.deployment_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout validated release commit
+        uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.validate.outputs.sha }}
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -69,7 +103,7 @@ jobs:
           test -n "$VERCEL_PROJECT_ID"
           test -n "$VERCEL_TOKEN"
           GITHUB_SHA="$(git rev-parse HEAD)"
-          test "$GITHUB_SHA" = "${{ inputs.ref }}"
+          test "$GITHUB_SHA" = "$RELEASE_SHA"
           npm exec vercel pull -- --yes --environment=production --token="$VERCEL_TOKEN"
           npm exec vercel build -- --token="$VERCEL_TOKEN"
           deployment_url="$(npx vercel deploy --prebuilt --token="$VERCEL_TOKEN" --meta githubCommitSha="$GITHUB_SHA")"
@@ -93,9 +127,12 @@ jobs:
     environment: production-migrations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout validated release commit
+        uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.validate.outputs.sha }}
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -107,6 +144,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$PRODUCTION_DATABASE_URL"
+          # The runner enforces expand-only SQL; cleanup needs a separate approved workflow.
           node scripts/apply-production-migrations.mjs
 
   promote:
