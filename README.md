@@ -10,6 +10,7 @@ AI assistant widget for Balance Studio. It captures project briefs and answers g
 - `npm test`
 - `npm run build`
 - `npm run test:e2e`
+- `npm run test:db` (requires `TEST_DATABASE_URL` and a prepared disposable PostgreSQL database)
 
 ## Routes
 
@@ -149,6 +150,12 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/balance_assist_t
 ```
 
 Do not point `TEST_DATABASE_URL` at production data.
+
+## Release proof
+
+CI starts disposable PostgreSQL 16, executes every incremental migration through the latest version, then runs the database suite including the release-proof journey. That journey invokes the real session, consent, canonical-draft, finalize, authenticated dispatch, webhook, and polling routes; PostgreSQL is real and Telegram is a local fake HTTP boundary. Local runs skip that journey only when `TEST_DATABASE_URL` is absent.
+
+Playwright continues to build and start the production server. CI retries failures twice and uploads HTML/JUnit reports, screenshots, and traces from failed runs as the `playwright-report` artifact.
 
 ## Intake flow
 

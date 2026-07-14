@@ -29,6 +29,10 @@ export type TelegramUpdate = {
 
 export const HANDOFF_SEND_TIMEOUT_MS = 45_000;
 
+function telegramApiBaseUrl() {
+  return (process.env.TELEGRAM_API_BASE_URL ?? 'https://api.telegram.org').replace(/\/$/, '');
+}
+
 export function getTelegramConfig(): { botToken: string; chatId: string } | null {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -50,7 +54,7 @@ export async function sendTelegramMessage(
     return null;
   }
 
-  const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
+  const url = `${telegramApiBaseUrl()}/bot${config.botToken}/sendMessage`;
 
   const body: Record<string, unknown> = {
     chat_id: config.chatId,

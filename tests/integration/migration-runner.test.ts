@@ -75,11 +75,25 @@ describe('test migration runner', () => {
 
     expect(packageJson.scripts['test:db:prepare']).toBe('node scripts/apply-test-migrations.mjs');
     expect(packageJson.scripts['test:db']).toBe(
-      'vitest run --no-file-parallelism tests/integration/database-schema.test.ts tests/integration/rate-limit.test.ts tests/integration/session-capability.test.ts'
+      'vitest run --no-file-parallelism tests/integration/database-schema.test.ts tests/integration/rate-limit.test.ts tests/integration/session-capability.test.ts tests/integration/release-proof-journey.test.ts'
     );
     expect(workflow.indexOf('- run: npm run test:db:prepare')).toBeLessThan(
       workflow.indexOf('- run: npm run test:db\n')
     );
+  });
+
+  it('runs the release-proof journey after migration execution and publishes Playwright failure evidence', async () => {
+    const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
+    const playwright = await readFile(resolve(process.cwd(), 'playwright.config.ts'), 'utf8');
+
+    expect(workflow.indexOf('- run: npm run test:db:prepare')).toBeLessThan(
+      workflow.indexOf('- run: npm run test:db\n')
+    );
+    expect(workflow).toContain('actions/upload-artifact@v4');
+    expect(workflow).toContain('playwright-report');
+    expect(playwright).toContain('retries: process.env.CI ? 2 : 0');
+    expect(playwright).toContain("trace: 'retain-on-failure'");
+    expect(playwright).toContain("screenshot: 'only-on-failure'");
   });
 
   it('runs the configured Supabase service-role check only with test secrets', async () => {

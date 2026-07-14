@@ -204,10 +204,11 @@ export function WidgetOverlay({
 
   const applyCanonicalDraftState = sessionDraft.applyCanonicalDraft;
   const hydrateCanonicalDraft = sessionDraft.hydrateDraft;
+  const { messages: teamMessages, reset: resetTeamRelay } = teamRelay;
 
 
   useEffect(() => {
-    const delivered = teamRelay.messages.filter(
+    const delivered = teamMessages.filter(
       (message) => !messagesRef.current.some((existing) => existing.teamDbId === message.id)
     );
     if (delivered.length === 0) return;
@@ -216,11 +217,11 @@ export function WidgetOverlay({
     }))];
     messagesRef.current = next;
     setMessages(next);
-  }, [teamRelay.messages]);
+  }, [teamMessages]);
 
   useEffect(() => {
-    teamRelay.reset();
-  }, [sessionId, teamRelay.reset]);
+    resetTeamRelay();
+  }, [sessionId, resetTeamRelay]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
