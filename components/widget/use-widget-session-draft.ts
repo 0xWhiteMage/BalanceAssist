@@ -32,6 +32,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const draftVersionRef = useRef(0);
   const bootstrapRef = useRef<Promise<string | null> | null>(null);
   const approveInFlightRef = useRef(false);
+  const isSessionExpired = expiresAt !== null && Date.parse(expiresAt) <= Date.now();
 
   const applyCanonicalDraft = useCallback((values: Record<string, string>, version: number) => {
     const nextDraft = { ...createDefaultLeadDraft(), ...values } as LeadDraft;
@@ -148,7 +149,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }, []);
 
   return {
-    noticeConsent, setNoticeConsent, sessionId, expiresAt, sessionUnavailable, draft, draftVersion,
+    noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, draftVersion,
     hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession,
     applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,

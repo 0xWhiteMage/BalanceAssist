@@ -62,6 +62,22 @@ describe('useWidgetSessionDraft', () => {
     expect(succeeded).toHaveBeenCalledTimes(1);
     expect(result.current.briefApproved).toBe(true);
   });
+
+  test('exposes an expired temporary capability status', async () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true, expiresAt: '2026-07-13T10:00:00.000Z' })),
+      getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null),
+      updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true),
+      requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+
+    expect(result.current.isSessionExpired).toBe(true);
+  });
 });
 
 describe('useTeamRelay', () => {
