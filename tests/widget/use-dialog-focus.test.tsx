@@ -23,6 +23,56 @@ function DialogHarness() {
   );
 }
 
+function FilteredDialogHarness() {
+  const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus({ active: open, dialogRef, onDismiss: () => setOpen(false) });
+
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(true)}>Open</button>
+      {open && (
+        <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Filtered dialog">
+          <button type="button" hidden>Hidden</button>
+          <button type="button" inert={true}>Inert</button>
+          <button type="button" tabIndex={-1}>Programmatic only</button>
+          <button type="button">First visible</button>
+          <button type="button">Last visible</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NestedDialogHarness() {
+  const [outerOpen, setOuterOpen] = useState(false);
+  const [innerOpen, setInnerOpen] = useState(false);
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  useDialogFocus({ active: outerOpen, dialogRef: outerRef, onDismiss: () => setOuterOpen(false) });
+  useDialogFocus({ active: innerOpen, dialogRef: innerRef, onDismiss: () => setInnerOpen(false) });
+
+  return (
+    <main>
+      <button type="button">Page background</button>
+      <section>
+        <button type="button" onClick={() => setOuterOpen(true)}>Open outer</button>
+        {outerOpen && (
+          <div ref={outerRef} role="dialog" aria-modal="true" aria-label="Outer dialog">
+            <button type="button" onClick={() => setInnerOpen(true)}>Open inner</button>
+            <button type="button">Outer action</button>
+            {innerOpen && (
+              <div ref={innerRef} role="dialog" aria-modal="true" aria-label="Inner dialog">
+                <button type="button">Inner action</button>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
 describe('useDialogFocus', () => {
   test('traps focus, dismisses on Escape, restores the opener, and inerts sibling content', () => {
     render(<DialogHarness />);
@@ -50,5 +100,42 @@ describe('useDialogFocus', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(opener);
     expect(background).not.toHaveAttribute('inert');
+  });
+
+  test('wraps only visible, enabled tab stops', () => {
+    render(<FilteredDialogHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    const first = screen.getByRole('button', { name: 'First visible' });
+    const last = screen.getByRole('button', { name: 'Last visible' });
+    expect(document.activeElement).toBe(first);
+
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  test('inerts page and outer dialog controls while a nested dialog is open, then restores them', () => {
+    render(<NestedDialogHarness />);
+    const pageBackground = screen.getByRole('button', { name: 'Page background' });
+    const outerOpener = screen.getByRole('button', { name: 'Open outer' });
+
+    fireEvent.click(outerOpener);
+    expect(pageBackground.closest('[inert]')).not.toBeNull();
+    expect(outerOpener.closest('[inert]')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open inner' }));
+    const outerAction = screen.getByRole('button', { name: 'Outer action' });
+    expect(outerAction.closest('[inert]')).not.toBeNull();
+
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Inner dialog' }), { key: 'Escape' });
+    expect(outerAction.closest('[inert]')).toBeNull();
+    expect(pageBackground.closest('[inert]')).not.toBeNull();
+
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Outer dialog' }), { key: 'Escape' });
+    expect(pageBackground.closest('[inert]')).toBeNull();
+    expect(outerOpener.closest('[inert]')).toBeNull();
   });
 });

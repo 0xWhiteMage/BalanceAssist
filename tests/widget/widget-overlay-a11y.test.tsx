@@ -155,6 +155,21 @@ describe('WidgetOverlay accessibility', () => {
     expect(dialog.contains(newFocused)).toBe(true);
   });
 
+  test('uses the transcript log as the only live announcement mechanism for transcript updates', async () => {
+    stubFetch();
+    const { container, getByRole } = render(<WidgetOverlay autoOpen={true} />);
+    fireEvent.click(container.querySelector('[data-testid="consent-button"]')!);
+    fireEvent.click(getByRole('button', { name: /start with balance assist/i }));
+
+    await waitFor(() => {
+      expect(container.querySelector('[role="log"]')).not.toBeNull();
+    });
+    const transcript = container.querySelector('[role="log"]')!;
+
+    expect(transcript).toHaveAttribute('aria-live', 'polite');
+    expect(transcript?.parentElement).not.toHaveAttribute('aria-live');
+  });
+
   test('close button has accessible name', () => {
     stubFetch();
     const { getByLabelText } = render(<WidgetOverlay autoOpen={true} />);

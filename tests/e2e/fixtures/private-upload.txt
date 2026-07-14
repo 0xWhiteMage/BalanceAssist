@@ -1,0 +1,1 @@
+Private upload fixture for keyboard accessibility coverage.

@@ -12,6 +12,41 @@ async function enterAiIntake(page: Page) {
 }
 
 test.describe('mobile intake', () => {
+  test('keeps the narrow widget inside the viewport with 44px actions', async ({ page }) => {
+    await page.route('**/api/sessions/inspect', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, exists: false }) });
+    });
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessionId: 'narrow-layout-session', persisted: true }) });
+    });
+    await page.goto('/preview');
+    await page.getByTestId('consent-button').click();
+    await page.getByRole('button', { name: /start with balance assist/i }).click();
+
+    const attachment = page.getByRole('button', { name: 'Attach references' });
+    await expect(attachment).toBeVisible();
+    const layout = await page.evaluate(() => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Balance Assist"]')!;
+      const action = document.querySelector<HTMLElement>('button[aria-label="Attach references"]')!;
+      const bounds = dialog.getBoundingClientRect();
+      const actionBounds = action.getBoundingClientRect();
+      return {
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        dialogLeft: bounds.left,
+        dialogRight: bounds.right,
+        actionWidth: actionBounds.width,
+        actionHeight: actionBounds.height
+      };
+    });
+
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.dialogLeft).toBeGreaterThanOrEqual(0);
+    expect(layout.dialogRight).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.actionWidth).toBeGreaterThanOrEqual(44);
+    expect(layout.actionHeight).toBeGreaterThanOrEqual(44);
+  });
+
   test('uses chat/brief tabs on mobile after project intent is detected', async ({ page }) => {
     await page.route('**/api/sessions/inspect', async (route) => {
       await route.fulfill({

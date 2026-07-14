@@ -1183,8 +1183,6 @@ export function WidgetOverlay({
                 id={isMobile ? 'widget-chat-panel' : undefined}
                 role={isMobile ? 'tabpanel' : undefined}
                 aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
-                aria-live="polite"
-                aria-relevant="additions text"
                 style={{
                   flex: 1,
                   overflowY: 'auto',
@@ -1341,7 +1339,7 @@ export function WidgetOverlay({
                       aria-expanded={attachmentOpen}
                       onClick={() => setAttachmentOpen((o) => !o)}
                       style={{
-                        width: '36px',
+                        width: '44px',
                         height: '44px',
                         borderRadius: '50%',
                         border: `1px solid ${brandTokens.colors.border}`,
