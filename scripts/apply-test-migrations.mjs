@@ -65,6 +65,23 @@ export async function applyMigrations({
       )
     `);
 
+    const { rows: trackerSchema } = await client.query(
+      "SELECT to_regclass('supabase_migrations.schema_migrations') AS relation"
+    );
+    if (trackerSchema[0]?.relation) {
+      const { rows: cliMigrations } = await client.query(
+        'SELECT version FROM supabase_migrations.schema_migrations'
+      );
+      const cliVersions = new Set(cliMigrations.map((migration) => String(migration.version)));
+      for (const migration of migrations) {
+        if (!cliVersions.has(migration.version)) continue;
+        await client.query(
+          'INSERT INTO public.schema_migrations (version, filename) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING',
+          [migration.version, migration.filename]
+        );
+      }
+    }
+
     const recorded = await client.query('SELECT version, filename FROM public.schema_migrations');
     const recordedByVersion = new Map(recorded.rows.map((row) => [row.version, row.filename]));
 

@@ -39,7 +39,12 @@ describe('local Supabase service-role access', () => {
       expect(inserted.status).toBe(201);
       serviceInsertSucceeded = true;
 
-      for (const table of ['sessions', 'leads', 'handoff_outbox']) {
+      const trackerSelect = await fetch(restUrl('schema_migrations', '?select=*&limit=1'), {
+        headers: { apikey: serviceRoleKey!, Authorization: `Bearer ${serviceRoleKey!}` }
+      });
+      expect(trackerSelect.status).toBe(200);
+
+      for (const table of ['sessions', 'leads', 'handoff_outbox', 'schema_migrations']) {
         const anonSelect = await fetch(restUrl(table, '?select=*&limit=1'), {
           headers: { apikey: anonKey!, Authorization: `Bearer ${anonKey!}` }
         });

@@ -28,15 +28,20 @@ describe('local Supabase release runner', () => {
 
   test('keeps migration tracker hardening safe when Supabase bootstraps before the custom runner', async () => {
     const migration = await readFile(resolve(process.cwd(), 'supabase/migrations/018_public_schema_rls.sql'), 'utf8');
+    const runner = await readFile(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs'), 'utf8');
 
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS public.schema_migrations');
     expect(migration).toContain("to_regclass('public.schema_migrations')");
+    expect(runner).toContain('supabase_migrations.schema_migrations');
   });
 
   test('runs the local service-role and anon denial proof with generated credentials', async () => {
     const source = await readFile(resolve(process.cwd(), 'scripts/test-supabase.mjs'), 'utf8');
+    const serviceRoleTest = await readFile(resolve(process.cwd(), 'tests/integration/supabase-service-role.test.ts'), 'utf8');
 
     expect(source).toContain("['run', 'test:supabase:service-role']");
     expect(source).toContain('TEST_SUPABASE_URL: environment.API_URL');
     expect(source).toContain('TEST_SUPABASE_ANON_KEY: environment.ANON_KEY');
+    expect(serviceRoleTest).toContain('const trackerSelect');
   });
 });

@@ -20,6 +20,12 @@ REVOKE ALL PRIVILEGES ON TABLE
 FROM PUBLIC;
 
 -- Supabase provides these roles; plain PostgreSQL test services may not.
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
+  version text PRIMARY KEY,
+  filename text NOT NULL,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
@@ -49,7 +55,7 @@ BEGIN
   END IF;
 
   -- Supabase CLI can run project migrations before the custom migration
-  -- runner creates this optional public tracker table.
+  -- runner creates its public tracker table.
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
     ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;
     REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM PUBLIC;
