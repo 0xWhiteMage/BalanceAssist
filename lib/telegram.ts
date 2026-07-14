@@ -30,7 +30,15 @@ export type TelegramUpdate = {
 export const HANDOFF_SEND_TIMEOUT_MS = 45_000;
 
 function telegramApiBaseUrl() {
-  return (process.env.TELEGRAM_API_BASE_URL ?? 'https://api.telegram.org').replace(/\/$/, '');
+  const configured = process.env.TELEGRAM_API_BASE_URL;
+  if (process.env.ALLOW_TEST_TELEGRAM_TRANSPORT !== '1' || !configured) return 'https://api.telegram.org';
+  try {
+    const url = new URL(configured);
+    if (url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')) return url.origin;
+  } catch {
+    // Fall through to Telegram's fixed production endpoint.
+  }
+  return 'https://api.telegram.org';
 }
 
 export function getTelegramConfig(): { botToken: string; chatId: string } | null {
@@ -122,7 +130,7 @@ export async function sendTelegramDocument(
     form.set('message_thread_id', String(options.threadId));
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
+  const response = await fetch(`${telegramApiBaseUrl()}/bot${config.botToken}/sendDocument`, {
     method: 'POST',
     body: form
   });
@@ -176,7 +184,7 @@ export async function sendDocument(
 
   let response: Response;
   try {
-    response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
+    response = await fetch(`${telegramApiBaseUrl()}/bot${config.botToken}/sendDocument`, {
       method: 'POST',
       body: form
     });
@@ -222,7 +230,7 @@ export async function createForumTopic(
     body.icon_color = options.iconColor;
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/createForumTopic`, {
+  const response = await fetch(`${telegramApiBaseUrl()}/bot${config.botToken}/createForumTopic`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -267,7 +275,7 @@ export async function editForumTopic(
     body.icon_color = options.iconColor;
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/editForumTopic`, {
+  const response = await fetch(`${telegramApiBaseUrl()}/bot${config.botToken}/editForumTopic`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -283,7 +291,7 @@ export async function closeForumTopic(threadId: number): Promise<boolean> {
     return false;
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/closeForumTopic`, {
+  const response = await fetch(`${telegramApiBaseUrl()}/bot${config.botToken}/closeForumTopic`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -302,7 +310,7 @@ export async function deleteForumTopic(threadId: number): Promise<boolean> {
     return false;
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${config.botToken}/deleteForumTopic`, {
+  const response = await fetch(`${telegramApiBaseUrl()}/bot${config.botToken}/deleteForumTopic`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

@@ -11,6 +11,7 @@ AI assistant widget for Balance Studio. It captures project briefs and answers g
 - `npm run build`
 - `npm run test:e2e`
 - `npm run test:db` (requires `TEST_DATABASE_URL` and a prepared disposable PostgreSQL database)
+- `npm run test:supabase` (optional local Docker + Supabase CLI release journey; CI owns this check)
 
 ## Routes
 
@@ -153,7 +154,15 @@ Do not point `TEST_DATABASE_URL` at production data.
 
 ## Release proof
 
-CI starts disposable PostgreSQL 16, executes every incremental migration through the latest version, then runs the database suite including the release-proof journey. That journey invokes the real session, consent, canonical-draft, finalize, authenticated dispatch, webhook, and polling routes; PostgreSQL is real and Telegram is a local fake HTTP boundary. Local runs skip that journey only when `TEST_DATABASE_URL` is absent.
+CI installs the Supabase CLI and starts a disposable local Docker stack. The repository's ordered migration runner applies the full incremental chain, excluding legacy `000_full_schema.sql`, against Supabase's local PostgreSQL database. This includes storage schema, bucket policies, and RPCs before the release journey runs against Supabase HTTP/PostgREST. The journey starts a production Next server and a local fake Telegram HTTP boundary, then invokes session, consent, canonical-draft, finalize, authenticated dispatch, webhook, and polling routes. It uses locally generated credentials only in that test process and never logs them.
+
+For an optional local run, install Docker and the Supabase CLI, then run one command:
+
+```bash
+npm run test:supabase
+```
+
+When either prerequisite is unavailable, the command prints a clear skip message and exits successfully; ordinary unit tests do not require Docker or Supabase. CI remains the authoritative release-proof execution environment.
 
 Playwright continues to build and start the production server. CI retries failures twice and uploads HTML/JUnit reports, screenshots, and traces from failed runs as the `playwright-report` artifact.
 

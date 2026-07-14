@@ -42,64 +42,25 @@ jobs:
 
   database:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: balance_assist_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d balance_assist_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    env:
-      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/balance_assist_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+      - uses: supabase/setup-cli@v1
       - run: npm ci
-      - run: npm run test:db:prepare
-      - run: npm run test:db
-
-  supabase-service-role:
-    runs-on: ubuntu-latest
-    env:
-      TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
-      TEST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
-      TEST_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
-      TEST_SUPABASE_PROJECT_REF: ${{ secrets.TEST_SUPABASE_PROJECT_REF }}
-      ALLOW_TEST_SUPABASE_SERVICE_ROLE: 1
-      REQUIRE_TEST_SUPABASE_SERVICE_ROLE: ${{ vars.REQUIRE_TEST_SUPABASE_SERVICE_ROLE || '0' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - run: npm run test:supabase
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop --no-backup
+      - name: Upload Supabase release diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - name: Run isolated Supabase service-role check
-        shell: bash
-        run: |
-          if [ "$REQUIRE_TEST_SUPABASE_SERVICE_ROLE" != "1" ]; then
-            echo "Skipping isolated Supabase service-role check: required mode is disabled."
-            exit 0
-          fi
-
-          for name in TEST_SUPABASE_URL TEST_SUPABASE_SERVICE_ROLE_KEY TEST_SUPABASE_ANON_KEY TEST_SUPABASE_PROJECT_REF; do
-            if [ -z "${!name}" ]; then
-              echo "Required isolated Supabase configuration is missing: $name" >&2
-              exit 1
-            fi
-          done
-
-          npm run test:supabase:service-role
+          name: supabase-release-proof-diagnostics
+          path: .artifacts/supabase-release-proof/
+          if-no-files-found: warn
 
   build:
     runs-on: ubuntu-latest

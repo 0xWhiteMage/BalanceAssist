@@ -76,6 +76,14 @@ function databaseSupabase(client: import('pg').Client) {
         return {
           then: (resolve: (value: { error: null }) => unknown) => client.query(sql, values).then(() => resolve({ error: null })),
           eq: (column: string, value: unknown) => update([...filters, [column, value]]),
+          is: (column: string, value: unknown) => ({
+            select: async () => {
+              const nullableSql = `${sql} and ${column} is ${value === null ? 'null' : '$' + (values.length + 1)} returning *`;
+              const nullableValues = value === null ? values : [...values, value];
+              const { rows } = await client.query(nullableSql, nullableValues);
+              return { data: rows, error: null };
+            }
+          }),
           select: () => ({ maybeSingle: () => client.query(`${sql} returning *`, values).then(({ rows }) => ({ data: rows[0] ?? null, error: null })) })
         };
       };
@@ -123,12 +131,13 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     process.env.TELEGRAM_CHAT_ID = '-100123';
     process.env.TELEGRAM_WEBHOOK_SECRET = 'release-proof-webhook';
     process.env.TELEGRAM_ALLOWED_USERNAMES = 'producer';
+    process.env.ALLOW_TEST_TELEGRAM_TRANSPORT = '1';
     telegramServer = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       telegramRequests.push({ path: request.url, body: JSON.parse(Buffer.concat(chunks).toString() || '{}') });
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ ok: true, result: { message_id: 321, chat: { id: -100123 } } }));
+      response.end(JSON.stringify({ ok: true, result: request.url?.endsWith('/createForumTopic') ? { message_thread_id: 77, name: 'Release proof' } : { message_id: 321, chat: { id: -100123 } } }));
     });
     await new Promise<void>((resolve) => telegramServer!.listen(0, '127.0.0.1', resolve));
     telegramUrl = `http://127.0.0.1:${(telegramServer.address() as import('node:net').AddressInfo).port}`;
@@ -162,7 +171,6 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     expect((await draftResponse.json()).draftVersion).toBe(1);
     await expect(client!.query('select draft_version, draft from public.sessions where id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [expect.objectContaining({ draft_version: 1, draft: expect.objectContaining({ contactEmail: expect.any(Object) }) })] });
-    await client!.query('update public.sessions set telegram_thread_id = 77 where id = $1', [session.sessionId]);
     const final = await finalizeLead(new Request(`${origin}/api/leads/finalize`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: session.sessionId, qualificationStatus: 'qualified' }) }));
     expect((await final.json()).queued).toBe(true);
     await expect(client!.query('select state from public.handoff_outbox where session_id = $1', [session.sessionId]))
@@ -171,6 +179,7 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     expect((await dispatched.json()).results).toEqual([expect.objectContaining({ status: 'sent' })]);
     await expect(client!.query('select state from public.handoff_outbox where session_id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [{ state: 'sent' }] });
+    expect(telegramRequests).toContainEqual(expect.objectContaining({ path: '/botrelease-proof-bot/createForumTopic', body: expect.objectContaining({ chat_id: '-100123' }) }));
     expect(telegramRequests).toContainEqual(expect.objectContaining({ path: '/botrelease-proof-bot/sendMessage', body: expect.objectContaining({ chat_id: '-100123', message_thread_id: 77 }) }));
     const webhook = await receiveWebhook(new Request(`${origin}/api/telegram/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'release-proof-webhook' }, body: JSON.stringify({ update_id: Date.now(), message: { message_id: 322, message_thread_id: 77, chat: { id: -100123, type: 'supergroup' }, from: { id: 2, username: 'producer', first_name: 'Pat' }, text: 'We will follow up.' } }) }));
     expect(webhook.status).toBe(200);
