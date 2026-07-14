@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const { finalizeLeadMock } = vi.hoisted(() => ({
   finalizeLeadMock: vi.fn(async () => ({
@@ -135,6 +135,53 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay approved confirmation (Fix 5)', () => {
+  test('does not update unmounted state or raise a window error when delayed approval output completes', async () => {
+    mockWidgetFetch();
+    let resolveFinalize: ((value: Awaited<ReturnType<typeof finalizeLeadMock>>) => void) | undefined;
+    finalizeLeadMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFinalize = resolve;
+    }));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const windowErrors: ErrorEvent[] = [];
+    const onWindowError = (event: ErrorEvent) => windowErrors.push(event);
+    window.addEventListener('error', onWindowError);
+
+    try {
+      const { unmount } = render(<WidgetOverlay autoOpen={true} />);
+      const input = await startAiConversation();
+      fireEvent.change(input, { target: { value: '30s animation for social media' } });
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+      const approveButton = await waitFor(() => {
+        const button = document.querySelector('[data-testid="approve-button"]') as HTMLButtonElement | null;
+        if (!button) throw new Error('approve-button not yet rendered');
+        return button;
+      });
+      fireEvent.click(approveButton);
+      await waitFor(() => expect(finalizeLeadMock).toHaveBeenCalledTimes(1));
+
+      unmount();
+      await act(async () => {
+        resolveFinalize?.({
+          ok: true,
+          sessionId: 'mock-session-id',
+          qualificationStatus: 'qualified',
+          persisted: true,
+          queued: true,
+          delivered: false,
+          retryable: false
+        });
+        await Promise.resolve();
+      });
+
+      expect(consoleError).not.toHaveBeenCalled();
+      expect(windowErrors).toEqual([]);
+    } finally {
+      window.removeEventListener('error', onWindowError);
+      consoleError.mockRestore();
+    }
+  });
+
   test('after a successful approve, the rail renders a "Book a catch-up" CTA inside the green approved confirmation', async () => {
     mockWidgetFetch();
 

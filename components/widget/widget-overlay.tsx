@@ -275,6 +275,20 @@ export function WidgetOverlay({
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      cancelRef.current = true;
+      if (advanceTimerRef.current) {
+        clearTimeout(advanceTimerRef.current);
+        advanceTimerRef.current = null;
+      }
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const botSay = useCallback(
     async (
       text: string,
@@ -346,6 +360,7 @@ export function WidgetOverlay({
     cancelRef.current = false;
 
     const activeSessionId = await loadOrCreateSession();
+    if (cancelRef.current) return;
     if (!activeSessionId) return;
 
     setHasStarted(true);
@@ -429,6 +444,7 @@ export function WidgetOverlay({
           capturedFields
         }
       });
+      if (cancelRef.current) return;
       if (!data) {
         const localFallback = getLocalResponse(latestUserText, {
           draft: draftRef.current,
@@ -604,6 +620,7 @@ export function WidgetOverlay({
 
     try {
       const activeSessionId = await ensureSession();
+      if (cancelRef.current) return;
       if (!activeSessionId) {
         sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
@@ -611,6 +628,7 @@ export function WidgetOverlay({
       }
 
       if (!await recordProducerTransferConsent(activeSessionId)) {
+        if (cancelRef.current) return;
         sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
         await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
@@ -618,6 +636,7 @@ export function WidgetOverlay({
       }
 
       const finalizeResponse = await finalizeLead({ sessionId: activeSessionId });
+      if (cancelRef.current) return;
       if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
         sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
@@ -637,6 +656,7 @@ export function WidgetOverlay({
       await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
       await advanceStep('handoff', draftRef.current);
     } catch {
+      if (cancelRef.current) return;
       sessionDraft.finishApproval(false);
       setTelegramBroadcastStatus('unconfigured');
       await botSay('Sorry — something went wrong saving your brief. Please try again.');
@@ -880,7 +900,9 @@ export function WidgetOverlay({
         await botSay(getFallbackResponse());
       }
     } finally {
-      setIsTyping(false);
+      if (!cancelRef.current) {
+        setIsTyping(false);
+      }
       submitInFlightRef.current = false;
     }
   }

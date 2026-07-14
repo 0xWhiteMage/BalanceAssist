@@ -646,5 +646,63 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       expect(requestLog.some((entry) => entry.url.includes('/api/projects/delete-session-id/delete') && entry.method === 'POST')).toBe(true);
       expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/recorded your deletion request/i);
     });
+  }, 10000);
+
+  test('clears the scheduled reset after delayed submit output when the overlay unmounts', async () => {
+    global.fetch = makeFetchRecorder([
+      ({ url, method }) => {
+        if (url.includes('/api/sessions/inspect')) {
+          return new Response(JSON.stringify({ ok: true, exists: false }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        if (url.includes('/api/sessions') && method === 'POST') {
+          return new Response(JSON.stringify({ sessionId: 'reset-session-id', persisted: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        if (url.includes('/api/projects/reset-session-id/reset') && method === 'POST') {
+          return new Response(JSON.stringify({ ok: true, reset: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return null;
+      }
+    ]);
+
+    const { unmount } = render(<WidgetOverlay autoOpen={true} />);
+    await startWithBalanceAssist();
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
+    }, { timeout: 7000 });
+    const input = await findChatInput();
+    await waitFor(() => expect(input).not.toBeDisabled(), { timeout: 7000 });
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
+    const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+
+    try {
+      fireEvent.change(input, { target: { value: 'forget this project' } });
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+      await act(async () => {
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(850);
+      });
+      const resetTimer = setTimeoutSpy.mock.results
+        .map((result, index) => ({ timer: result.value, delay: setTimeoutSpy.mock.calls[index]?.[1] }))
+        .find(({ delay }) => delay === 200)?.timer;
+      expect(resetTimer).toBeDefined();
+
+      unmount();
+
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(resetTimer);
+    } finally {
+      vi.useRealTimers();
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+    }
   });
 });
