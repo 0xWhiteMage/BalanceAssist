@@ -69,26 +69,26 @@ describe('test migration runner', () => {
     expect(() => runner.getIncrementalMigrations(migrationsDir)).toThrow(/Duplicate migration version 001/);
   });
 
-  it('prepares the shared database before database test files run', async () => {
+  it('prepares the local Supabase database before the HTTP release journey runs', async () => {
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
     const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
 
     expect(packageJson.scripts['test:db:prepare']).toBe('node scripts/apply-test-migrations.mjs');
-    expect(packageJson.scripts['test:db']).toBe(
-      'vitest run --no-file-parallelism tests/integration/database-schema.test.ts tests/integration/rate-limit.test.ts tests/integration/session-capability.test.ts tests/integration/release-proof-journey.test.ts'
+    expect(packageJson.scripts['test:supabase']).toBe('node scripts/test-supabase.mjs');
+    expect(packageJson.scripts['test:release-proof:http']).toBe(
+      'vitest run --no-file-parallelism tests/integration/release-proof-http.test.ts'
     );
-    expect(workflow.indexOf('- run: npm run test:db:prepare')).toBeLessThan(
-      workflow.indexOf('- run: npm run test:db\n')
-    );
+    expect(workflow).toContain('supabase/setup-cli@v1');
+    expect(workflow).toContain('- run: npm run test:supabase');
   });
 
-  it('runs the release-proof journey after migration execution and publishes Playwright failure evidence', async () => {
+  it('runs the release-proof journey after local stack setup and publishes failure evidence', async () => {
     const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
     const playwright = await readFile(resolve(process.cwd(), 'playwright.config.ts'), 'utf8');
 
-    expect(workflow.indexOf('- run: npm run test:db:prepare')).toBeLessThan(
-      workflow.indexOf('- run: npm run test:db\n')
-    );
+    expect(workflow).toContain('- run: npm run test:supabase');
+    expect(workflow).toContain('supabase stop --no-backup');
+    expect(workflow).toContain('supabase-release-proof-diagnostics');
     expect(workflow).toContain('actions/upload-artifact@v4');
     expect(workflow).toContain('playwright-report');
     expect(playwright).toContain('retries: process.env.CI ? 2 : 0');
@@ -96,26 +96,22 @@ describe('test migration runner', () => {
     expect(playwright).toContain("screenshot: 'only-on-failure'");
   });
 
-  it('runs the configured Supabase service-role check only with test secrets', async () => {
+  it('does not require external Supabase service-role secrets in CI', async () => {
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
     const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
 
     expect(packageJson.scripts['test:supabase:service-role']).toBe(
       'vitest run tests/integration/supabase-service-role.test.ts'
     );
-    expect(workflow).toContain('supabase-service-role:');
+    expect(workflow).not.toContain('supabase-service-role:');
     for (const secret of [
       'TEST_SUPABASE_URL',
       'TEST_SUPABASE_SERVICE_ROLE_KEY',
       'TEST_SUPABASE_ANON_KEY',
       'TEST_SUPABASE_PROJECT_REF'
     ]) {
-      expect(workflow).toContain(`secrets.${secret}`);
+      expect(workflow).not.toContain(`secrets.${secret}`);
     }
-    expect(workflow).not.toContain('supabase-service-role:\n    if:');
-    expect(workflow).toContain('Skipping isolated Supabase service-role check');
-    expect(workflow).toContain('Required isolated Supabase configuration is missing');
-    expect(workflow).toContain('ALLOW_TEST_SUPABASE_SERVICE_ROLE: 1');
-    expect(workflow).toContain('vars.REQUIRE_TEST_SUPABASE_SERVICE_ROLE');
+    expect(workflow).toContain('supabase/setup-cli@v1');
   });
 });
