@@ -39,13 +39,13 @@ export async function POST(request: Request) {
       const deleted = await db.from('uploaded_files').delete().eq('id', file.id);
       if (deleted.error) return fail();
     }
-    const recovery = await db.from('private_attachment_cleanup').select('id, object_key').eq('cleanup_owner_id', job.cleanup_owner_id).eq('bucket', bucket);
+    const recovery = await db.from('private_attachment_cleanup').select('object_key').eq('cleanup_owner_id', job.cleanup_owner_id).eq('bucket', bucket);
     if (recovery.error) return fail();
     for (const record of recovery.data ?? []) {
-      if (!record.id || !record.object_key) return fail();
+      if (!record.object_key) return fail();
       const removed = await db.storage.from(bucket).remove([record.object_key]);
       if (removed.error) return fail();
-      const deleted = await db.from('private_attachment_cleanup').delete().eq('id', record.id);
+      const deleted = await db.from('private_attachment_cleanup').delete().eq('object_key', record.object_key);
       if (deleted.error) return fail();
     }
     const deletedSession = await db.rpc('delete_session_for_deletion_job', { p_job_id: job.id, p_lease_token: job.lease_token });

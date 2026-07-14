@@ -13,9 +13,13 @@ import { POST } from '@/app/api/internal/deletion-worker/route';
 function workerClient(removeError = false, sessionId: string | null = 'session-1', cleanupOwner: string | null = 'owner-1') {
   const calls: string[] = [];
   const cleanupFilters: Array<[string, string]> = [];
+  const cleanupSelections: string[] = [];
+  const cleanupDeleteFilters: Array<[string, string]> = [];
   return {
     calls,
     cleanupFilters,
+    cleanupSelections,
+    cleanupDeleteFilters,
     rpc: vi.fn(async (name: string) => {
       calls.push(name);
       if (name === 'claim_deletion_job') return { data: { id: 'job-1', session_id: sessionId, cleanup_owner_id: cleanupOwner, lease_token: 'token-1' }, error: null };
@@ -24,11 +28,16 @@ function workerClient(removeError = false, sessionId: string | null = 'session-1
     }),
     storage: { from: () => ({ remove: async () => { calls.push('remove-object'); return { error: removeError ? { message: 'nope' } : null }; } }) },
     from: (table: string) => ({
-      select: () => ({ eq: (column: string, value: string) => ({ eq: (nextColumn: string, nextValue: string) => {
+      select: (columns: string) => ({ eq: (column: string, value: string) => ({ eq: (nextColumn: string, nextValue: string) => {
         if (table === 'private_attachment_cleanup') cleanupFilters.push([column, value], [nextColumn, nextValue]);
-        return { data: table === 'uploaded_files' ? [{ id: 'file-1', object_key: 'opaque-object' }] : table === 'private_attachment_cleanup' ? [{ id: 'recovery-1', object_key: 'recovery-object' }] : [], error: null };
+        if (table === 'private_attachment_cleanup') cleanupSelections.push(columns);
+        return { data: table === 'uploaded_files' ? [{ id: 'file-1', object_key: 'opaque-object' }] : table === 'private_attachment_cleanup' ? [{ object_key: 'recovery-object' }] : [], error: null };
       } }) }),
-      delete: () => ({ eq: async () => { calls.push(`delete-${table}-row`); return { error: null }; } })
+      delete: () => ({ eq: async (column: string, value: string) => {
+        if (table === 'private_attachment_cleanup') cleanupDeleteFilters.push([column, value]);
+        calls.push(`delete-${table}-row`);
+        return { error: null };
+      } })
     })
   };
 }
@@ -54,6 +63,18 @@ describe('deletion worker', () => {
     await POST(new Request('http://localhost/api/internal/deletion-worker', { method: 'POST' }));
 
     expect(supabase.cleanupFilters).toContainEqual(['cleanup_owner_id', 'owner-1']);
+  });
+
+  test('uses opaque object keys to select and delete recovery records', async () => {
+    const supabase = workerClient();
+    hasSupabaseServerConfigMock.mockReturnValue(true);
+    createServerSupabaseClientMock.mockReturnValue(supabase);
+    process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
+
+    await POST(new Request('http://localhost/api/internal/deletion-worker', { method: 'POST' }));
+
+    expect(supabase.cleanupSelections).toEqual(['object_key']);
+    expect(supabase.cleanupDeleteFilters).toEqual([['object_key', 'recovery-object']]);
   });
 
   test('completes a claimed job whose session was already cascaded instead of retrying forever', async () => {
