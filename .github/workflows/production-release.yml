@@ -168,6 +168,17 @@ jobs:
     environment: production
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
       - name: Promote immutable deployment
         env:
           DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}

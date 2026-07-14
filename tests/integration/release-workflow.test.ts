@@ -8,7 +8,7 @@ import { parse } from 'yaml';
 type Workflow = {
   on?: Record<string, unknown>;
   concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
-  jobs?: Record<string, { needs?: string[]; environment?: string; steps?: Array<{ name?: string; run?: string; env?: Record<string, string> }> }>;
+  jobs?: Record<string, { needs?: string[]; environment?: string; steps?: Array<{ name?: string; uses?: string; with?: Record<string, string>; run?: string; env?: Record<string, string> }> }>;
 };
 
 async function workflow(name: string) {
@@ -38,6 +38,14 @@ describe('production release workflows', () => {
     expect(jobs.migration?.environment).toBe('production-migrations');
     expect(jobs.promote?.needs).toEqual(['deploy', 'migration', 'validate']);
     expect(jobs.telegram?.needs).toEqual(['promote', 'validate']);
+    const promoteCheckout = jobs.promote?.steps?.find((step) => step.name === 'Checkout validated release commit');
+    expect(promoteCheckout?.uses).toBe('actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5');
+    expect(promoteCheckout?.with?.ref).toBe('${{ needs.validate.outputs.sha }}');
+    expect(promoteCheckout?.env?.RELEASE_SHA).toBe('${{ needs.validate.outputs.sha }}');
+    const promoteSetupNode = jobs.promote?.steps?.find((step) => step.uses?.startsWith('actions/setup-node@'));
+    expect(promoteSetupNode?.uses).toBe('actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020');
+    expect(promoteSetupNode?.with).toMatchObject({ 'node-version': 20, cache: 'npm' });
+    expect(jobs.promote?.steps?.some((step) => step.run === 'npm ci')).toBe(true);
     for (const [name, job] of Object.entries(jobs)) {
       const hasCredentials = JSON.stringify(job).includes('secrets.') || job.environment !== undefined;
       if (hasCredentials) {
@@ -87,6 +95,15 @@ describe('production release workflows', () => {
       expect(action).toMatch(/@[0-9a-f]{40}$/);
     }
     expect(packageJson.devDependencies.vercel).toBe('56.1.0');
+    expect(packageJson.overrides).toMatchObject({
+      '@tootallnate/once': '2.0.1',
+      minimatch: '10.2.3',
+      'path-to-regexp': '8.4.0',
+      tar: '7.5.16',
+      undici: '6.27.0',
+      '@vercel/node': { 'path-to-regexp': '6.3.0' },
+      '@vercel/remix-builder': { 'path-to-regexp': '6.3.0' },
+    });
     expect(source).toContain('./node_modules/.bin/vercel pull');
     expect(source).toContain('./node_modules/.bin/vercel build');
     expect(source).toContain('./node_modules/.bin/vercel deploy');

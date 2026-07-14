@@ -18,7 +18,18 @@
     "test:e2e": "playwright install chromium && playwright test"
   },
   "overrides": {
-    "postcss": "8.5.16"
+    "@tootallnate/once": "2.0.1",
+    "@vercel/node": {
+      "path-to-regexp": "6.3.0"
+    },
+    "@vercel/remix-builder": {
+      "path-to-regexp": "6.3.0"
+    },
+    "minimatch": "10.2.3",
+    "path-to-regexp": "8.4.0",
+    "postcss": "8.5.16",
+    "tar": "7.5.16",
+    "undici": "6.27.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.54.0",
