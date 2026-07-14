@@ -101,37 +101,6 @@ jobs:
             test-results/
           if-no-files-found: warn
 
-  telegram-webhook:
-    needs: [lint, typecheck, test, database, build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure Telegram webhook
-        env:
-          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
-          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
-        run: |
-          if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL secret is not set. Skipping webhook setup."
-            exit 0
-          fi
-
-          echo "Setting Telegram webhook to $PRODUCTION_URL/api/telegram/webhook"
-
-          HEADERS=(-H "Content-Type: application/json")
-          if [ -n "$SETUP_TOKEN" ]; then
-            HEADERS+=(-H "Authorization: Bearer $SETUP_TOKEN")
-          fi
-
-          curl -fsS -X POST "${HEADERS[@]}" \
-            -d "{\"webhookUrl\":\"${PRODUCTION_URL}/api/telegram/webhook\"}" \
-            "${PRODUCTION_URL}/api/telegram/setup"
-
-          echo ""
-          echo "Verifying webhook..."
-
-          curl -fsS "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/getWebhookInfo"
-
   dependency-audit:
     runs-on: ubuntu-latest
     steps:

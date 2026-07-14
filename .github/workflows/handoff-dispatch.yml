@@ -26,3 +26,8 @@ jobs:
           curl --fail --silent --show-error --max-time 30 --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
             "${PRODUCTION_URL}/api/internal/handoff-dispatch"
+          curl --fail --silent --show-error --max-time 30 --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --header "Content-Type: application/json" \
+            --data '{"worker":"handoff-dispatch"}' \
+            "${PRODUCTION_URL}/api/internal/scheduler-heartbeat"

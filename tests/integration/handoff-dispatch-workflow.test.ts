@@ -44,13 +44,28 @@ describe('handoff dispatch workflow', () => {
         PRODUCTION_URL: '${{ secrets.PRODUCTION_URL }}',
         CRON_SECRET: '${{ secrets.CRON_SECRET }}'
       },
-      run: `set -euo pipefail
-curl --fail --silent --show-error --max-time 30 --request POST \\
-  --header "Authorization: Bearer \${CRON_SECRET}" \\
-  "\${PRODUCTION_URL}/api/internal/handoff-dispatch"
-`
+      run: expect.stringContaining('"${PRODUCTION_URL}/api/internal/handoff-dispatch"')
     });
+    expect(step?.run).toContain('"${PRODUCTION_URL}/api/internal/scheduler-heartbeat"');
+    expect(step?.run).toContain("--data '{\"worker\":\"handoff-dispatch\"}'");
     expect(step?.run).not.toContain('secrets.');
     expect(step?.env?.CRON_SECRET).toBe('${{ secrets.CRON_SECRET }}');
+  });
+
+  it('monitors scheduler health on the existing five-minute cadence and fails closed', async () => {
+    const source = await readFile(resolve(process.cwd(), '.github/workflows/scheduler-health.yml'), 'utf8');
+    const workflow = parse(source) as Workflow;
+    const monitor = workflow.jobs?.monitor;
+    const step = monitor?.steps?.find(({ name }) => name === 'Fail alert-ready when scheduler work is overdue');
+
+    expect(workflow.on?.schedule).toEqual([{ cron: '*/5 * * * *' }]);
+    expect(workflow.on?.workflow_dispatch).toEqual(null);
+    expect(workflow.permissions).toEqual({});
+    expect(workflow.concurrency).toEqual({ group: 'scheduler-health', 'cancel-in-progress': false });
+    expect(step?.run).toContain('test -n "$PRODUCTION_URL"');
+    expect(step?.run).toContain('test -n "$CRON_SECRET"');
+    expect(step?.run).toContain('/api/internal/scheduler-health');
+    expect(step?.run).not.toContain('|| true');
+    expect(step?.run).not.toContain('secrets.');
   });
 });

@@ -1,0 +1,151 @@
+name: Production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable commit SHA to release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  gates:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: supabase/setup-cli@v1
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run test:supabase
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm audit --audit-level=high
+      - run: git diff --check
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop --no-backup
+
+  deploy:
+    needs: [gates]
+    environment: production
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_url: ${{ steps.deploy.outputs.deployment_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Deploy immutable Vercel preview
+        id: deploy
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
+          test -n "$VERCEL_TOKEN"
+          GITHUB_SHA="$(git rev-parse HEAD)"
+          test "$GITHUB_SHA" = "${{ inputs.ref }}"
+          npm exec vercel pull -- --yes --environment=production --token="$VERCEL_TOKEN"
+          npm exec vercel build -- --token="$VERCEL_TOKEN"
+          deployment_url="$(npx vercel deploy --prebuilt --token="$VERCEL_TOKEN" --meta githubCommitSha="$GITHUB_SHA")"
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: [deploy]
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke immutable deployment
+        env:
+          DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOYMENT_URL"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 30 "$DEPLOYMENT_URL/api/health"
+
+  migration:
+    needs: [smoke]
+    environment: production-migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Apply production migrations
+        env:
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_DATABASE_URL"
+          node scripts/apply-production-migrations.mjs
+
+  promote:
+    needs: [deploy, migration]
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote immutable deployment
+        env:
+          DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOYMENT_URL"
+          test -n "$PRODUCTION_URL"
+          test -n "$VERCEL_TOKEN"
+          npm exec vercel alias set -- "$DEPLOYMENT_URL" "$PRODUCTION_URL" --token="$VERCEL_TOKEN"
+
+  telegram:
+    needs: [promote]
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Telegram webhook
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_URL"
+          test -n "$SETUP_TOKEN"
+          test -n "$TELEGRAM_BOT_TOKEN"
+          curl --fail --silent --show-error --request POST \
+            --header "Content-Type: application/json" \
+            --header "Authorization: Bearer $SETUP_TOKEN" \
+            --data "{\"webhookUrl\":\"$PRODUCTION_URL/api/telegram/webhook\"}" \
+            "$PRODUCTION_URL/api/telegram/setup"
+          curl --fail --silent --show-error "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"

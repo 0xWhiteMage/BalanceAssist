@@ -63,12 +63,12 @@ Apply the full incremental migration chain in order, from `001_initial_schema.sq
 
 ### 2. Connect Vercel
 
-1. Import the GitHub repo at https://vercel.com/new
-2. Framework preset: **Next.js**
-3. Add every environment variable from `.env.example`
-4. Click **Deploy**
+1. Import the GitHub repo at https://vercel.com/new with the **Next.js** preset.
+2. Add every runtime environment variable from `.env.example`.
+3. In Vercel project settings, disable Git-based production deployments. This dashboard setting is required so a push cannot bypass GitHub release gates. Preview deployments may remain enabled.
+4. Configure the production domain alias, but do not deploy it manually.
 
-Vercel auto-deploys on every push to `main`. GitHub Actions, not Vercel Cron, schedules authenticated handoff dispatches.
+GitHub Actions, not Vercel Cron, schedules authenticated workers and is the only production deployment path.
 
 ### 3. Configure GitHub secrets
 
@@ -80,16 +80,22 @@ In **Settings → Secrets and variables → Actions** add:
 | `SETUP_TOKEN` | Same value as in Vercel env |
 | `CRON_SECRET` | Authenticates GitHub Actions calls to `/api/internal/handoff-dispatch`; also set the same value in Vercel runtime environment variables |
 | `TELEGRAM_BOT_TOKEN` | Same as in Vercel env |
+| `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `production` environment only; immutable Vercel deploy and alias promotion |
+| `PRODUCTION_DATABASE_URL` | `production-migrations` environment only; never repository configuration |
+
+Create GitHub environments named `production` and `production-migrations`, with required reviewer approval. Manually dispatch `Production release` with an immutable commit SHA. It reruns lint, typecheck, unit, local Supabase migration/integration, build, E2E, audit, and diff gates; deploys that SHA to an immutable Vercel URL; smokes `/api/health`; waits for approved production migration; promotes the immutable deployment to the production alias; then configures Telegram. Missing Vercel, URL, setup-token, or Telegram-token configuration fails the release.
+
+Production migrations are forward-only and run only in the protected `production-migrations` job after disposable-stack validation and immutable-deployment smoke, before alias promotion. The runner records applied versions in `public.schema_migrations` and prints the final schema version. Never put the production database credential in `.env` or run it outside the approved workflow.
 
 The `Handoff dispatch` workflow runs every five minutes and can be started with `workflow_dispatch`. This is a best-effort cadence: GitHub scheduled workflows can be delayed, especially during high load, so it does not guarantee dispatch exactly every five minutes. Dispatch retries wait at least one five-minute scheduler window. A fourth failed dispatch evaluation escalates pending handoffs at or after 15 minutes, subject to scheduler delay.
 
 Enable GitHub Actions failure notifications for repository administrators and monitor failed `Handoff dispatch` runs, `handoff_failed`/`handoff_escalated` events, and pending or escalated `handoff_outbox` rows. A failed workflow needs investigation or a manual `workflow_dispatch` run; it does not prove a handoff was delivered.
 
-GitHub automatically disables scheduled workflows after 60 days without repository activity on public repositories. Failed-run notifications do not detect this silent disablement. Alert when no `Handoff dispatch` run starts within 15 minutes or when the oldest pending `handoff_outbox` row exceeds 15 minutes. An administrator must inspect the workflow's run history, re-enable scheduling by editing and committing the workflow's `schedule` entry, then verify that the next scheduled run starts and that the oldest pending row is processed.
+Workers record authenticated heartbeats after successful runs. `Scheduler health` runs on the existing five-minute cadence and fails alert-ready when a worker misses a heartbeat for 20 minutes, the oldest pending `handoff_outbox` row exceeds 15 minutes, or expired sessions remain. GitHub schedules can be delayed; the heartbeat allowance covers latency without masking the handoff SLA. GitHub can disable schedules after 60 days without repository activity. On a failed or missing monitor run, inspect Actions history, re-enable scheduling by editing and committing a schedule entry, manually dispatch all scheduler workflows, and confirm healthy monitoring plus an empty backlog.
 
 ### 4. Verify the webhook
 
-After the first deploy, the GitHub Action calls `/api/telegram/setup` to point the bot at your production URL. To check manually:
+After immutable smoke and alias promotion, the protected release job calls `/api/telegram/setup` to point the bot at the production URL. To check manually:
 
 ```bash
 curl -X POST https://your-domain.com/api/telegram/setup \

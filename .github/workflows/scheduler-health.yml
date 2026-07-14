@@ -1,0 +1,30 @@
+name: Scheduler health
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: scheduler-health
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Fail alert-ready when scheduler work is overdue
+        shell: bash
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_URL"
+          test -n "$CRON_SECRET"
+          curl --fail --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "${PRODUCTION_URL}/api/internal/scheduler-health"
