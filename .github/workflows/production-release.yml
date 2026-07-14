@@ -27,6 +27,7 @@ jobs:
           RELEASE_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-release.yml@refs/heads/main"
           [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
           git init --quiet release
           cd release
@@ -43,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout validated release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.validate.outputs.sha }}
         env:
@@ -59,11 +60,11 @@ jobs:
           now="$(date -u +%s)"
           test "$audited_at" -le "$now"
           test $((now - audited_at)) -le $((90 * 24 * 60 * 60))
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 20
           cache: npm
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
@@ -86,12 +87,12 @@ jobs:
       deployment_url: ${{ steps.deploy.outputs.deployment_url }}
     steps:
       - name: Checkout validated release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.validate.outputs.sha }}
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 20
           cache: npm
@@ -109,9 +110,9 @@ jobs:
           test -n "$VERCEL_TOKEN"
           GITHUB_SHA="$(git rev-parse HEAD)"
           test "$GITHUB_SHA" = "$RELEASE_SHA"
-          npm exec vercel pull -- --yes --environment=production --token="$VERCEL_TOKEN"
-          npm exec vercel build -- --token="$VERCEL_TOKEN"
-          deployment_url="$(npx vercel deploy --prebuilt --token="$VERCEL_TOKEN" --meta githubCommitSha="$GITHUB_SHA")"
+          ./node_modules/.bin/vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          ./node_modules/.bin/vercel build --token="$VERCEL_TOKEN"
+          deployment_url="$(./node_modules/.bin/vercel deploy --prebuilt --token="$VERCEL_TOKEN" --meta githubCommitSha="$GITHUB_SHA")"
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
 
   smoke:
@@ -143,12 +144,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout validated release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.validate.outputs.sha }}
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 20
           cache: npm
@@ -181,7 +182,7 @@ jobs:
           test -n "$RELEASE_SHA"
           test -n "$PRODUCTION_URL"
           test -n "$VERCEL_TOKEN"
-          npm exec vercel alias set -- "$DEPLOYMENT_URL" "$PRODUCTION_URL" --token="$VERCEL_TOKEN"
+          ./node_modules/.bin/vercel alias set "$DEPLOYMENT_URL" "$PRODUCTION_URL" --token="$VERCEL_TOKEN"
       - name: Smoke promoted production alias
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}

@@ -19,6 +19,7 @@ describe('production release workflows', () => {
   it('deploys only a manually selected validated commit through protected promotion', async () => {
     const release = await workflow('production-release.yml');
     const source = await readFile(resolve(process.cwd(), '.github/workflows/production-release.yml'), 'utf8');
+    const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
     const jobs = release.jobs ?? {};
 
     expect(release.on).toEqual({ workflow_dispatch: { inputs: { ref: { description: 'Immutable commit SHA to release', required: true, type: 'string' } } } });
@@ -46,6 +47,7 @@ describe('production release workflows', () => {
     }
     const validate = jobs.validate?.steps?.find((step) => step.name === 'Validate release commit');
     expect(validate?.env?.RELEASE_REF).toBe('${{ inputs.ref }}');
+    expect(validate?.run).toContain('test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-release.yml@refs/heads/main"');
     expect(validate?.run).toContain('^[0-9a-f]{40}$');
     expect(validate?.run).toContain('git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main');
     expect(validate?.run).toContain('git merge-base --is-ancestor "$RELEASE_REF" origin/main');
@@ -81,6 +83,15 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain('node scripts/apply-production-migrations.mjs');
     expect(migrate?.run).toContain('expand-only');
     expect(migrate?.run).not.toContain('secrets.');
+    for (const [, action] of source.matchAll(/^\s*uses:\s+([^\s]+)$/gm)) {
+      expect(action).toMatch(/@[0-9a-f]{40}$/);
+    }
+    expect(packageJson.devDependencies.vercel).toBe('56.1.0');
+    expect(source).toContain('./node_modules/.bin/vercel pull');
+    expect(source).toContain('./node_modules/.bin/vercel build');
+    expect(source).toContain('./node_modules/.bin/vercel deploy');
+    expect(source).toContain('./node_modules/.bin/vercel alias set');
+    expect(source).not.toMatch(/(?:npx|npm exec) vercel/);
     expect(JSON.stringify(release)).not.toContain('schedule');
     expect(JSON.stringify(release)).not.toContain('push');
   });

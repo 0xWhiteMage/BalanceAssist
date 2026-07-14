@@ -1,9 +1,33 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { assertExpandOnlyMigration } from '../../scripts/apply-production-migrations.mjs';
+import * as productionMigrations from '../../scripts/apply-production-migrations.mjs';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+const { assertExpandOnlyMigration } = productionMigrations;
 
 describe('production migration policy', () => {
+  it('exposes a cleanup migration preflight policy', () => {
+    expect(productionMigrations.assertReviewedCleanupMigrationsRecorded).toBeTypeOf('function');
+  });
+
+  it('allows reviewed cleanup migrations only when every version is already recorded', () => {
+    const recordedVersions = ['038', '039', '040', '041', '042'];
+
+    expect(() => productionMigrations.assertReviewedCleanupMigrationsRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedCleanupMigrationsRecorded(recordedVersions.filter((version) => version !== '040')))
+      .toThrow('040 is pending; run Production cleanup migrations before this release');
+  });
+
+  it('queries the migration tracker before evaluating production migration files', async () => {
+    const source = await readFile(resolve(process.cwd(), 'scripts/apply-production-migrations.mjs'), 'utf8');
+
+    expect(source).toContain("await client.query('SELECT version FROM public.schema_migrations')");
+    expect(source.indexOf("await client.query('SELECT version FROM public.schema_migrations')"))
+      .toBeLessThan(source.indexOf('for (const migration of migrations)'));
+  });
+
   it('rejects destructive schema and data operations from protected releases', () => {
     expect(() => assertExpandOnlyMigration('DROP TABLE public.sessions;', '999_cleanup.sql')).toThrow('expand-only');
     expect(() => assertExpandOnlyMigration('ALTER TABLE public.sessions DROP COLUMN draft;', '999_cleanup.sql')).toThrow('expand-only');

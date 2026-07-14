@@ -2,8 +2,18 @@ import { applyMigrations, getIncrementalMigrations } from './apply-test-migratio
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Client } from 'pg';
 
 const policyBaseline = 37n;
+const reviewedCleanupVersions = ['038', '039', '040', '041', '042'];
+
+export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
+  const recorded = new Set(recordedVersions);
+  const pending = reviewedCleanupVersions.filter((version) => !recorded.has(version));
+  if (pending.length) {
+    throw new Error(`${pending.join(', ')} is pending; run Production cleanup migrations before this release.`);
+  }
+}
 
 export function assertExpandOnlyMigration(source, filename) {
   if (/^0(?:38|39|40|41|42)_/.test(filename)) {
@@ -29,14 +39,28 @@ export function assertExpandOnlyMigration(source, filename) {
   }
 }
 
+async function getRecordedMigrationVersions(connectionString) {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    const { rows } = await client.query('SELECT version FROM public.schema_migrations');
+    return rows.map((row) => String(row.version));
+  } finally {
+    await client.end();
+  }
+}
+
 export async function applyProductionMigrations(connectionString = process.env.PRODUCTION_DATABASE_URL) {
   if (!connectionString) {
     throw new Error('PRODUCTION_DATABASE_URL is required in the protected production-migrations environment.');
   }
 
+  const recordedVersions = await getRecordedMigrationVersions(connectionString);
+  assertReviewedCleanupMigrationsRecorded(recordedVersions);
+
   const migrations = getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations'));
   for (const migration of migrations) {
-    if (BigInt(migration.version) > policyBaseline) {
+    if (BigInt(migration.version) > policyBaseline && !reviewedCleanupVersions.includes(migration.version)) {
       assertExpandOnlyMigration(readFileSync(migration.path, 'utf8'), migration.filename);
     }
   }
