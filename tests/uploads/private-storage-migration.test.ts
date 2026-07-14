@@ -111,7 +111,7 @@ describe('private attachment storage migration', () => {
       '034_private_attachment_effective_attestation.sql',
     ]) {
       const source = readFileSync(resolve(process.cwd(), `supabase/migrations/${filename}`), 'utf8').trim();
-      const section = bundle.match(new RegExp(`-- BEGIN ${filename}\\n(?:-- =+\\n)?([\\s\\S]*?)\\n-- END ${filename}`))?.[1];
+      const section = bundle.match(new RegExp(`-- BEGIN ${filename}\\r?\\n(?:-- =+\\r?\\n)?([\\s\\S]*?)\\r?\\n-- END ${filename}`))?.[1];
 
       expect(section?.trimEnd()).toBe(source);
       for (const pattern of storageMutationPatterns) expect(section).not.toMatch(pattern);

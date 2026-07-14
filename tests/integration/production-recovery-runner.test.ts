@@ -58,7 +58,7 @@ afterEach(async () => {
 describe('production recovery runner', () => {
   it('keeps the SQL Editor fallback transactional, source-verified, and storage-neutral', async () => {
     const artifact = await readFile(resolve(process.cwd(), 'supabase/production-recovery-019-037.sql'), 'utf8');
-    const documentation = await readFile(resolve(process.cwd(), 'docs/private-attachment-storage.md'), 'utf8');
+    const documentation = (await readFile(resolve(process.cwd(), 'docs/private-attachment-storage.md'), 'utf8')).replace(/\r\n/g, '\n');
     const migrations = (await import(pathToFileURL(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs')).href))
       .getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')) as Migration[];
     const recoveryMigrations = migrations.filter(({ version }) => BigInt(version) >= 19n && BigInt(version) <= 37n);

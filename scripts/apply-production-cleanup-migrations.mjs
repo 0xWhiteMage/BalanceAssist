@@ -37,7 +37,8 @@ export function selectCleanupMigrations(migrations) {
 
 function assertReviewedSource(migration) {
   const expectedHash = reviewedCleanupMigrations.get(migration.version).sha256;
-  const sourceHash = createHash('sha256').update(readFileSync(migration.path)).digest('hex');
+  const source = readFileSync(migration.path, 'utf8').replace(/\r\n/g, '\n');
+  const sourceHash = createHash('sha256').update(source).digest('hex');
   if (sourceHash !== expectedHash) {
     throw new Error(`cleanup migration ${migration.filename} does not match its reviewed source`);
   }
