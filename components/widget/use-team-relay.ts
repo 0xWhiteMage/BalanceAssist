@@ -90,9 +90,29 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false); setMessages([]);
   }, []);
 
+  const stop = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    setRequested(false);
+    setWaitingForReply(false);
+  }, []);
+
+  const clearRequests = useCallback(() => {
+    setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false);
+  }, []);
+
+  const markUploadPending = useCallback(() => {
+    setWaitingForReply(false); setStatus('pending');
+  }, []);
+
+  const markUploadFailed = useCallback(() => {
+    setWaitingForReply(false); setStatus('requested');
+  }, []);
+
+  const markRequested = useCallback(() => setStatus('requested'), []);
+
   return {
     requested, status, isTeamConnected, waitingForReply, fileRequestOpen, fileRequestNote, scheduleRequestOpen, messages,
-    setRequested, setStatus, setIsTeamConnected, setWaitingForReply, setFileRequestOpen, setFileRequestNote, setScheduleRequestOpen,
-    requestHandoff, send, poll, reset
+    requestHandoff, send, poll, reset, stop, clearRequests, markUploadPending, markUploadFailed, markRequested
   };
 }

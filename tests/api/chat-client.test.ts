@@ -83,6 +83,15 @@ describe('chatRequest client', () => {
     expect(result).toBeNull();
   });
 
+  test('rejects malformed reply text before it reaches the widget', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ messages: ['valid', 42], draftUpdates: {}, briefReady: false }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    await expect(chatRequest({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeNull();
+  });
+
   test('chatRequest only posts browser user messages to /api/chat', async () => {
     const requestBodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
 

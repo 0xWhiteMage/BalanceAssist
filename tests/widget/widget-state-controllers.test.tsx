@@ -78,9 +78,48 @@ describe('useWidgetSessionDraft', () => {
 
     expect(result.current.isSessionExpired).toBe(true);
   });
+
+  test('does not reuse an expired session and creates a fresh one', async () => {
+    const createSession = vi.fn(async () => ({ sessionId: 'fresh-session', status: 'new', sourceUrl: '', persisted: true, expiresAt: '2026-07-15T10:00:00.000Z' }));
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession,
+      getCurrentSession: vi.fn(async () => ({ sessionId: 'expired-session', status: 'open', sourceUrl: '', expiresAt: '2026-07-13T10:00:00.000Z' })),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+
+    await act(async () => { await result.current.loadOrCreateSession(); });
+
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(result.current.sessionId).toBe('fresh-session');
+    expect(result.current.isSessionExpired).toBe(false);
+  });
 });
 
 describe('useTeamRelay', () => {
+  test('returns a rejected relay send to the requested retryable state', async () => {
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: vi.fn(), relayUserMessage: vi.fn(async () => false)
+    }));
+    act(() => result.current.requestHandoff());
+    await act(async () => { await result.current.send('Hello'); });
+
+    expect(result.current.status).toBe('requested');
+    expect(result.current.waitingForReply).toBe(false);
+  });
+
+  test('stops controller polling when closed', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn(async () => ({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result } = renderHook(() => useTeamRelay({ sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn() }));
+    act(() => result.current.requestHandoff());
+    act(() => result.current.stop());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+    expect(poll).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   test('continues polling after an empty response and marks connected only after a team reply', async () => {
     vi.useFakeTimers();
     const poll = vi.fn()

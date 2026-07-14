@@ -29,10 +29,12 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
+  const expiresAtRef = useRef<string | null>(null);
   const draftVersionRef = useRef(0);
   const bootstrapRef = useRef<Promise<string | null> | null>(null);
   const approveInFlightRef = useRef(false);
-  const isSessionExpired = expiresAt !== null && Date.parse(expiresAt) <= Date.now();
+  const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
+  const isSessionExpired = isExpired(expiresAt);
 
   const applyCanonicalDraft = useCallback((values: Record<string, string>, version: number) => {
     const nextDraft = { ...createDefaultLeadDraft(), ...values } as LeadDraft;
@@ -45,6 +47,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
 
   const setActiveSession = useCallback((session: SessionResponse) => {
     sessionIdRef.current = session.sessionId;
+    expiresAtRef.current = session.expiresAt ?? null;
     setSessionId(session.sessionId);
     setExpiresAt(session.expiresAt ?? null);
     setSessionUnavailable(false);
@@ -58,7 +61,13 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }, [applyCanonicalDraft, dependencies]);
 
   const ensureSession = useCallback(async () => {
-    if (sessionIdRef.current) return sessionIdRef.current;
+    if (sessionIdRef.current && !isExpired(expiresAtRef.current)) return sessionIdRef.current;
+    if (sessionIdRef.current) {
+      sessionIdRef.current = null;
+      expiresAtRef.current = null;
+      setSessionId(null);
+      setExpiresAt(null);
+    }
     if (!noticeConsent || typeof window === 'undefined') return null;
     const session = await dependencies.createSession({
       sourceUrl: window.location.href,
@@ -81,7 +90,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     const bootstrap = (async () => {
       try {
         const current = await dependencies.getCurrentSession();
-        if (current?.sessionId) {
+        if (current?.sessionId && !isExpired(current.expiresAt)) {
           setActiveSession(current);
           await hydrateDraft(current.sessionId);
           return current.sessionId;
@@ -138,6 +147,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
 
   const reset = useCallback(() => {
     sessionIdRef.current = null;
+    expiresAtRef.current = null;
     draftVersionRef.current = 0;
     approveInFlightRef.current = false;
     setSessionId(null);

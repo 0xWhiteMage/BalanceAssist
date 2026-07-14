@@ -154,7 +154,7 @@ export function WidgetOverlay({
   const sessionDraft = useWidgetSessionDraft({ createSession, getCurrentSession, fetchProjectDraft, updateProjectDraft, resetProject, requestProjectDeletion });
   const {
     draft, setDraft, noticeConsent, setNoticeConsent, hasProjectIntent, setHasProjectIntent,
-    briefApproved, setBriefApproved, sessionId, setSessionId, sessionUnavailable,
+    briefApproved, setBriefApproved, sessionId, sessionUnavailable, isSessionExpired,
     draftVersion, setDraftVersion
   } = sessionDraft;
   const [isTyping, setIsTyping] = useState(false);
@@ -163,12 +163,9 @@ export function WidgetOverlay({
   const [hasStarted, setHasStarted] = useState(false);
   const teamRelay = useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage });
   const {
-    isTeamConnected, setIsTeamConnected, requested: humanRequested, setRequested: setHumanRequested,
-    status: humanStatus, setStatus: setHumanStatus, waitingForReply: teamWaitingForReply,
-    setWaitingForReply: setTeamWaitingForReply, fileRequestOpen: humanFileRequestOpen,
-    setFileRequestOpen: setHumanFileRequestOpen, fileRequestNote: humanFileRequestNote,
-    setFileRequestNote: setHumanFileRequestNote, scheduleRequestOpen: humanScheduleRequestOpen,
-    setScheduleRequestOpen: setHumanScheduleRequestOpen
+    isTeamConnected, requested: humanRequested, status: humanStatus, waitingForReply: teamWaitingForReply,
+    fileRequestOpen: humanFileRequestOpen, fileRequestNote: humanFileRequestNote,
+    scheduleRequestOpen: humanScheduleRequestOpen
   } = teamRelay;
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
   const [railMode, setRailMode] = useState<'essentials' | 'summary'>('essentials');
@@ -178,15 +175,9 @@ export function WidgetOverlay({
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
-  const sessionIdRef = useRef<string | null>(null);
-  const lastTeamMessageIdRef = useRef<number>(0);
-  const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isPollingRef = useRef<boolean>(false);
-  const seenTeamMessageIdsRef = useRef<Set<number>>(new Set());
   const submitInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollImmediateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionBootstrapPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -205,7 +196,6 @@ export function WidgetOverlay({
   draftVersionRef.current = draftVersion;
   stepRef.current = currentStep;
   teamRef.current = isTeamConnected;
-  sessionIdRef.current = sessionId;
   humanFileRequestOpenRef.current = humanFileRequestOpen;
   humanFileRequestNoteRef.current = humanFileRequestNote;
   humanScheduleRequestOpenRef.current = humanScheduleRequestOpen;
@@ -213,7 +203,6 @@ export function WidgetOverlay({
   const applyCanonicalDraftState = sessionDraft.applyCanonicalDraft;
   const hydrateCanonicalDraft = sessionDraft.hydrateDraft;
 
-  const pollTeamMessages = teamRelay.poll;
 
   useEffect(() => {
     const delivered = teamRelay.messages.filter(
@@ -226,6 +215,10 @@ export function WidgetOverlay({
     messagesRef.current = next;
     setMessages(next);
   }, [teamRelay.messages]);
+
+  useEffect(() => {
+    teamRelay.reset();
+  }, [sessionId, teamRelay.reset]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -413,19 +406,14 @@ export function WidgetOverlay({
   }, [advanceStep, hasStarted, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
   function handleClose() {
-    if (sessionIdRef.current) {
-      void logEvent({ sessionId: sessionIdRef.current, eventName: 'widget_closed' });
+    if (sessionId) {
+      void logEvent({ sessionId, eventName: 'widget_closed' });
     }
     cancelRef.current = true;
     cleanupAttachmentPreviews(messagesRef.current);
     setIsOpen(false);
-    setHumanFileRequestOpen(false);
-    setHumanFileRequestNote(null);
-    setHumanScheduleRequestOpen(false);
-    if (pollIntervalRef.current) {
-      clearTimeout(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
+    teamRelay.clearRequests();
+    teamRelay.stop();
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
@@ -433,10 +421,6 @@ export function WidgetOverlay({
     if (resetTimerRef.current) {
       clearTimeout(resetTimerRef.current);
       resetTimerRef.current = null;
-    }
-    if (pollImmediateTimerRef.current) {
-      clearTimeout(pollImmediateTimerRef.current);
-      pollImmediateTimerRef.current = null;
     }
   }
 
@@ -447,8 +431,7 @@ export function WidgetOverlay({
 
   function handleReset() {
     sessionDraft.reset();
-    setSessionId(null);
-    sessionIdRef.current = null;
+    teamRelay.reset();
     cancelRef.current = true;
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
@@ -458,24 +441,11 @@ export function WidgetOverlay({
       clearTimeout(resetTimerRef.current);
       resetTimerRef.current = null;
     }
-    if (pollImmediateTimerRef.current) {
-      clearTimeout(pollImmediateTimerRef.current);
-      pollImmediateTimerRef.current = null;
-    }
     cleanupAttachmentPreviews(messagesRef.current);
     messagesRef.current = [];
     setMessages([]);
-    setDraft(createDefaultLeadDraft());
-    setDraftVersion(0);
-    setHasProjectIntent(false);
-    setBriefApproved(false);
     setCurrentStep('intro');
     setHasStarted(false);
-    setIsTeamConnected(false);
-    setHumanStatus('idle');
-    setHumanFileRequestOpen(false);
-    setHumanFileRequestNote(null);
-    setHumanScheduleRequestOpen(false);
     setRailMode('essentials');
     setReferenceLinks([]);
     setReferenceFiles([]);
@@ -505,7 +475,7 @@ export function WidgetOverlay({
         context: {
           step: stepRef.current,
           isTeamConnected: teamRef.current,
-          sessionId: sessionIdRef.current ?? undefined,
+          sessionId: sessionId ?? undefined,
           capturedFields
         }
       });
@@ -553,8 +523,8 @@ export function WidgetOverlay({
           setCurrentStep(nextStep);
         }
         // The chat route persists authenticated updates. Replace optimistic values with its canonical version.
-        if (sessionIdRef.current) {
-          await hydrateCanonicalDraft(sessionIdRef.current);
+        if (sessionId) {
+          await hydrateCanonicalDraft(sessionId);
         }
       }
 
@@ -626,7 +596,7 @@ export function WidgetOverlay({
       setCurrentStep(nextStep);
     }
 
-    const activeSessionId = sessionIdRef.current;
+    const activeSessionId = sessionId;
     if (!activeSessionId) {
       return;
     }
@@ -683,14 +653,14 @@ export function WidgetOverlay({
     setTelegramBroadcastStatus('pending');
 
     try {
-      await ensureSession();
-      if (!sessionIdRef.current) {
+      const activeSessionId = await ensureSession();
+      if (!activeSessionId) {
         sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
         return;
       }
 
-      if (!await recordProducerTransferConsent(sessionIdRef.current)) {
+      if (!await recordProducerTransferConsent(activeSessionId)) {
         sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');
         await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
@@ -699,7 +669,7 @@ export function WidgetOverlay({
 
       const result = scoreLead(draftRef.current);
       const payload = {
-        sessionId: sessionIdRef.current,
+        sessionId: activeSessionId,
         qualificationStatus: result.status,
         score: result.score,
         recommendedNextStep: result.recommendedNextStep,
@@ -796,9 +766,9 @@ export function WidgetOverlay({
       await ensureSession();
     }
 
-    if (sessionIdRef.current && nextStepId) {
+    if (sessionId && nextStepId) {
       void logEvent({
-        sessionId: sessionIdRef.current,
+        sessionId,
         eventName: 'step_advanced',
         properties: { from: currentStep, to: nextStepId }
       });
@@ -847,7 +817,7 @@ export function WidgetOverlay({
       const memoryResetPattern = /forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i;
       if (!isTeamConnected && memoryResetPattern.test(trimmed)) {
         appendUserMessage(trimmed);
-        const activeSessionId = sessionIdRef.current ?? await loadOrCreateSession();
+        const activeSessionId = sessionId ?? await loadOrCreateSession();
         const cleared = activeSessionId ? await resetProject(activeSessionId) : false;
 
         if (!cleared) {
@@ -869,7 +839,7 @@ export function WidgetOverlay({
       const deletionPattern = /delete.*(this )?(project|data)|erase.*(this )?(project|data)|remove.*my.*data/i;
       if (!isTeamConnected && deletionPattern.test(trimmed)) {
         appendUserMessage(trimmed);
-        const activeSessionId = sessionIdRef.current ?? await loadOrCreateSession();
+        const activeSessionId = sessionId ?? await loadOrCreateSession();
         const deletionResult = activeSessionId ? await requestProjectDeletion(activeSessionId) : { ok: false };
 
         if (!deletionResult.ok) {
@@ -890,7 +860,7 @@ export function WidgetOverlay({
 
       if (humanRequested) {
         await ensureSession();
-        const id = sessionIdRef.current;
+        const id = sessionId;
         appendUserMessage(trimmed);
         if (!id) {
           return;
@@ -902,13 +872,7 @@ export function WidgetOverlay({
           return;
         }
 
-        if (pollImmediateTimerRef.current) {
-          clearTimeout(pollImmediateTimerRef.current);
-        }
-        pollImmediateTimerRef.current = setTimeout(() => {
-          pollImmediateTimerRef.current = null;
-          pollTeamMessages().catch(() => undefined);
-        }, 500);
+        void teamRelay.poll();
         return;
       }
 
@@ -1015,7 +979,7 @@ export function WidgetOverlay({
 
     if (isTeamConnected) {
       await ensureSession();
-      const id = sessionIdRef.current;
+      const id = sessionId;
       if (!id) return;
 
       const confirmed =
@@ -1045,13 +1009,11 @@ export function WidgetOverlay({
       }
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
-      setTeamWaitingForReply(false);
-      setHumanStatus('pending');
+      teamRelay.markUploadPending();
 
       const uploadResult = await uploadRequestedFiles(id, files);
       if (!uploadResult.ok) {
-        setTeamWaitingForReply(false);
-        setHumanStatus('requested');
+        teamRelay.markUploadFailed();
         await botSay(uploadResult.error ?? 'Sorry, the files could not be quarantined for review. Please try again.');
       } else {
         await botSay('Your files are quarantined pending review. They have not been shared with the Balance team yet.');
@@ -1088,7 +1050,7 @@ export function WidgetOverlay({
     e.target.value = '';
   }
 
-  const canInteract = hasStarted || isTeamConnected;
+  const canInteract = !isSessionExpired && (hasStarted || isTeamConnected);
   const showNoticeGate = !noticeConsent;
   const showStartChoices = noticeConsent !== null && !canInteract && messages.length === 0;
   const showAttachmentButton = false;
@@ -1131,7 +1093,7 @@ export function WidgetOverlay({
               url={calendlyUrl}
               onBack={() => setView('chat')}
               onScheduled={async () => {
-              setHumanStatus('requested');
+                teamRelay.markRequested();
                 setView('chat');
                 await botSay(
                   "Your booking looks complete. We're still verifying that the Balance team received it."
@@ -1283,6 +1245,11 @@ export function WidgetOverlay({
                     {sessionUnavailable && (
                       <p role="status" style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.warmGold }}>
                         Session service is temporarily unavailable. Please try again.
+                      </p>
+                    )}
+                    {isSessionExpired && (
+                      <p role="status" style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.warmGold }}>
+                        This temporary session expired. Start again to create a fresh private session.
                       </p>
                     )}
                     <button

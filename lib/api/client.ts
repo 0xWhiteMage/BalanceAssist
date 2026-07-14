@@ -109,6 +109,7 @@ export async function getCurrentSession(): Promise<SessionResponse | null> {
         status?: string;
         source_url?: string;
         created_at?: string;
+        expires_at?: string;
       };
     };
 
@@ -120,7 +121,8 @@ export async function getCurrentSession(): Promise<SessionResponse | null> {
       sessionId: data.session.id,
       status: data.session.status,
       sourceUrl: data.session.source_url,
-      createdAt: data.session.created_at
+      createdAt: data.session.created_at,
+      expiresAt: data.session.expires_at
     };
   } catch {
     return null;
@@ -428,6 +430,17 @@ export type ChatResponse = {
   sharedWork: ChatSharedWork | null;
 };
 
+const chatResponseSchema = z.object({
+  message: z.string().optional(),
+  messages: z.array(z.string()).optional(),
+  draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(),
+  briefReady: z.boolean().optional(),
+  sharedWork: z.object({ entries: z.array(z.object({
+    title: z.string(), url: z.string(), description: z.string().optional(), image_url: z.string().optional(),
+    category: z.enum(['reference', 'mood', 'pitch']).optional(), slug: z.string(), clients: z.string().optional(), year: z.number().nullable().optional()
+  })) }).optional()
+});
+
 export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResponse | null> {
   const sanitizedPayload = {
     ...payload,
@@ -436,14 +449,10 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
     )
   };
 
-  const data = await postJson<{
-    message?: string;
-    messages?: string[];
-    draftUpdates?: Record<string, string | boolean>;
-    briefReady?: boolean;
-    sharedWork?: ChatSharedWork;
-  }>('/api/chat', sanitizedPayload);
-  if (!data) return null;
+  const response = await postJson<unknown>('/api/chat', sanitizedPayload);
+  const parsed = chatResponseSchema.safeParse(response);
+  if (!parsed.success) return null;
+  const data = parsed.data;
 
   const textChunks: string[] = (() => {
     if (Array.isArray(data.messages) && data.messages.length > 0) {
@@ -462,3 +471,4 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
     sharedWork: data.sharedWork ?? null
   };
 }
+import { z } from 'zod';
