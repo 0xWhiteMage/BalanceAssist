@@ -849,6 +849,7 @@ function BriefRowEditor({
       <input
         type="text"
         value={value}
+        aria-label={row.label}
         autoFocus
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {

@@ -189,7 +189,7 @@ describe('ProjectBriefCard', () => {
     const projectScopeRow = screen.getByText('Project scope').closest('[data-testid="brief-row"]') as HTMLElement;
     const editButton = within(projectScopeRow).getByRole('button', { name: /edit project scope/i });
     fireEvent.click(editButton);
-    const input = within(projectScopeRow).getByRole('textbox');
+    const input = within(projectScopeRow).getByRole('textbox', { name: 'Project scope' });
     expect(input).toBeInTheDocument();
     expect((input as HTMLInputElement).value).toBe('30s launch animation');
   });
