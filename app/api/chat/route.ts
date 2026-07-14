@@ -451,12 +451,21 @@ async function persistAuthenticatedDraftState(
     changed = true;
   }
 
-  await state.supabase
-    .from('sessions')
-    .update(changed
-      ? { draft: nextDraft, draft_version: state.draftVersion + 1, last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() }
-      : { last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
-    .eq('id', state.sessionId);
+  if (changed) {
+    const fields = Object.entries(nextDraft)
+      .filter(([field, entry]) => state.versionedDraft[field]?.value !== entry.value || state.versionedDraft[field]?.provenance !== entry.provenance)
+      .map(([field, entry]) => ({ field, value: entry.value, provenance: entry.provenance }));
+    await state.supabase.rpc('update_session_draft', {
+      p_session_id: state.sessionId,
+      p_expected_draft_version: state.draftVersion,
+      p_fields: fields
+    });
+  } else {
+    await state.supabase
+      .from('sessions')
+      .update({ last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
+      .eq('id', state.sessionId);
+  }
 }
 
 function buildLlmContext(context: ChatContext, promptDraft: Record<string, string>, priorDraft: Partial<LeadDraft>) {

@@ -51,6 +51,7 @@ describe('POST /api/chat', () => {
       ok: true,
       auth: { sessionId: 'test-session', capability: 'test-session.secret' },
       supabase: {
+        rpc: async () => ({ data: [], error: null }),
         from: () => ({
           select: () => ({
             eq: () => ({
@@ -123,6 +124,21 @@ describe('POST /api/chat', () => {
     const sessionUpdates: Array<Record<string, unknown>> = [];
 
     const supabase = {
+      rpc(name: string, args: { p_session_id: string; p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) {
+        expect(name).toBe('update_session_draft');
+        expect(args.p_session_id).toBe(state.id);
+        if (args.p_expected_draft_version !== state.draft_version) {
+          return Promise.resolve({ data: [{ draft: structuredClone(state.draft), draft_version: state.draft_version, conflict: true }], error: null });
+        }
+        const draft = structuredClone(state.draft) as Record<string, unknown>;
+        for (const field of args.p_fields) {
+          draft[field.field] = { value: field.value, provenance: field.provenance, updatedAt: new Date().toISOString() };
+        }
+        state.draft = draft;
+        state.draft_version += 1;
+        sessionUpdates.push({ draft, draft_version: state.draft_version });
+        return Promise.resolve({ data: [{ draft: structuredClone(draft), draft_version: state.draft_version, conflict: false }], error: null });
+      },
       from(table: string) {
         if (table !== 'sessions') {
           throw new Error(`Unexpected table ${table}`);
@@ -607,8 +623,6 @@ describe('POST /api/chat', () => {
     expect(harness.sessionUpdates).toHaveLength(1);
     expect(harness.sessionUpdates[0]).toMatchObject({
       draft_version: 4,
-      last_activity_at: expect.any(String),
-      draft_expires_at: expect.any(String),
       draft: {
         projectScope: {
           value: 'Launch film',

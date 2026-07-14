@@ -27,6 +27,19 @@ function createRouteSupabase(session: SessionRow) {
   const events: Array<Record<string, unknown>> = [];
 
   const supabase = {
+    rpc: async (name: string, args: { p_session_id: string; p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) => {
+      expect(name).toBe('update_session_draft');
+      if (args.p_expected_draft_version !== state.draft_version) {
+        return { data: [{ draft: structuredClone(state.draft), draft_version: state.draft_version, conflict: true }], error: null };
+      }
+      const draft = structuredClone(state.draft) as Record<string, unknown>;
+      for (const field of args.p_fields) {
+        draft[field.field] = { value: field.provenance === 'cleared' ? '' : field.value, provenance: field.provenance, updatedAt: new Date().toISOString() };
+      }
+      state.draft = draft;
+      state.draft_version += 1;
+      return { data: [{ draft: structuredClone(state.draft), draft_version: state.draft_version, conflict: false }], error: null };
+    },
     from(table: string) {
       if (table === 'sessions') {
         return {
@@ -153,6 +166,7 @@ describe('draft route', () => {
     requireSessionMock.mockResolvedValue(authorizedSession('session-2', harness.supabase));
 
     const res = await callDraftPut('session-2', {
+      expectedDraftVersion: 2,
       fields: [
         { field: 'contactName', value: 'Jayden', provenance: 'confirmed' },
         { field: 'service', value: '', provenance: 'cleared' }
@@ -161,19 +175,11 @@ describe('draft route', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(harness.sessionUpdates).toHaveLength(1);
-    expect(harness.sessionUpdates[0]).toMatchObject({
-      draft_version: 3,
-      draft: {
-        service: {
-          value: '',
-          provenance: 'cleared'
-        },
-        contactName: {
-          value: 'Jayden',
-          provenance: 'confirmed'
-        }
-      }
+    expect(harness.sessionUpdates).toHaveLength(0);
+    expect(harness.state.draft_version).toBe(3);
+    expect(harness.state.draft).toMatchObject({
+      service: { value: '', provenance: 'cleared' },
+      contactName: { value: 'Jayden', provenance: 'confirmed' }
     });
     expect(data.draftVersion).toBe(3);
     expect(data.draft.contactName.value).toBe('Jayden');

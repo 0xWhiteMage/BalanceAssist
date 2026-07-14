@@ -23,6 +23,8 @@ export type FinalizeLeadResponse = {
   delivered?: boolean;
   retryable?: boolean;
   handoffId?: string;
+  score?: number | null;
+  recommendedNextStep?: string | null;
 };
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -137,13 +139,7 @@ export async function logEvent(payload: {
   return postJson<EventResponse>('/api/events', payload);
 }
 
-export async function finalizeLead(payload: {
-  sessionId: string;
-  qualificationStatus: 'qualified' | 'needs_review' | 'misfit' | 'unqualified';
-  score?: number;
-  recommendedNextStep?: string;
-  leadDraft?: Record<string, unknown>;
-}): Promise<FinalizeLeadResponse | null> {
+export async function finalizeLead(payload: { sessionId: string }): Promise<FinalizeLeadResponse | null> {
   return postJson<FinalizeLeadResponse>('/api/leads/finalize', payload);
 }
 

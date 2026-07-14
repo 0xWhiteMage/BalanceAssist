@@ -26,26 +26,7 @@ export const eventPayloadSchema = z.object({
 });
 
 export const finalizeLeadPayloadSchema = z.object({
-  sessionId: z.string().min(1),
-  qualificationStatus: z.enum(['qualified', 'needs_review', 'misfit', 'unqualified']),
-  score: z.number().int().optional(),
-  recommendedNextStep: z.string().optional(),
-  leadDraft: z
-    .object({
-      service: z.string().optional(),
-      projectType: z.string().optional(),
-      projectScope: z.string().optional(),
-      scopePolished: z.string().optional(),
-      timelineBand: z.string().optional(),
-      budgetBand: z.string().optional(),
-      contactName: z.string().optional(),
-      contactEmail: z.string().optional(),
-      contactCompany: z.string().optional(),
-      referenceLinks: z.array(z.unknown()).optional(),
-      referenceFiles: z.array(z.unknown()).optional()
-    })
-    .passthrough()
-    .optional()
+  sessionId: z.string().min(1)
 });
 
 export const chatResponsePayloadSchema = z

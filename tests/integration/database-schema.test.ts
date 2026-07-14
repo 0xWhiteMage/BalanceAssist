@@ -223,7 +223,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         '032_legacy_cleanup_record_remediation.sql',
         '033_private_attachment_live_attestation.sql',
         '034_private_attachment_effective_attestation.sql',
-        '035_schema_migrations_tracker_hardening.sql'
+         '035_schema_migrations_tracker_hardening.sql',
+         '036_atomic_mutations.sql'
     ]);
   });
 
@@ -703,7 +704,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           '032:032_legacy_cleanup_record_remediation.sql',
           '033:033_private_attachment_live_attestation.sql',
           '034:034_private_attachment_effective_attestation.sql',
-          '035:035_schema_migrations_tracker_hardening.sql'
+           '035:035_schema_migrations_tracker_hardening.sql',
+           '036:036_atomic_mutations.sql'
     ]);
   });
 
@@ -775,6 +777,101 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       await expect(client!.query('update public.session_consents set granted = true where id = $1', [ledger.rows[0].id])).rejects.toThrow('append-only');
       await expect(client!.query('delete from public.session_consents where id = $1', [ledger.rows[0].id])).rejects.toThrow('append-only');
     } finally {
+      await client!.query('delete from public.sessions where id = $1', [sessionId]);
+    }
+  });
+
+  it('finalizes a session exactly once across concurrent retries using server-calculated qualification', async () => {
+    const session = await client!.query(
+      `insert into public.sessions (source_url, draft, draft_expires_at)
+       values ('https://atomic-finalize.example.test', $1::jsonb, now() + interval '1 hour') returning id`,
+      [JSON.stringify({
+        service: { value: 'production', provenance: 'confirmed' },
+        projectScope: { value: 'A detailed launch film for a new product.', provenance: 'confirmed' },
+        timelineBand: { value: '1-2 months', provenance: 'confirmed' },
+        budgetBand: { value: '20k-50k', provenance: 'confirmed' },
+        contactName: { value: 'Sam', provenance: 'confirmed' },
+        contactEmail: { value: 'sam@example.test', provenance: 'confirmed' }
+      })]
+    );
+    const sessionId = session.rows[0].id;
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    const { Client } = await import('pg');
+    const retryClient = new Client({ connectionString: grantConnectionString });
+    await retryClient.connect();
+
+    try {
+      const [first, second] = await Promise.all([
+        client!.query('select * from public.finalize_session_lead($1)', [sessionId]),
+        retryClient.query('select * from public.finalize_session_lead($1)', [sessionId])
+      ]);
+      const persisted = await client!.query(
+        `select
+           (select count(*) from public.leads where session_id = $1) as leads,
+           (select count(*) from public.handoff_outbox where session_id = $1 and idempotency_key = 'finalize:' || $1::text) as approvals,
+           (select status from public.sessions where id = $1) as status`,
+        [sessionId]
+      );
+
+      expect(first.rows[0]).toMatchObject({ persisted: true, qualification_status: 'qualified', score: 10 });
+      expect(second.rows[0]).toMatchObject({ persisted: true, qualification_status: 'qualified', score: 10 });
+      expect(persisted.rows).toEqual([{ leads: '1', approvals: '1', status: 'completed' }]);
+    } finally {
+      await retryClient.end();
+      await client!.query('delete from public.sessions where id = $1', [sessionId]);
+    }
+  });
+
+  it('compares canonical draft versions atomically and returns the winning draft on conflict', async () => {
+    const session = await client!.query("insert into public.sessions (source_url) values ('https://atomic-draft.example.test') returning id");
+    const sessionId = session.rows[0].id;
+    const { Client } = await import('pg');
+    const competingClient = new Client({ connectionString: grantConnectionString });
+    await competingClient.connect();
+
+    try {
+      const [first, second] = await Promise.all([
+        client!.query("select * from public.update_session_draft($1, 0, '[{\"field\":\"service\",\"value\":\"production\",\"provenance\":\"confirmed\"}]'::jsonb)", [sessionId]),
+        competingClient.query("select * from public.update_session_draft($1, 0, '[{\"field\":\"service\",\"value\":\"animation\",\"provenance\":\"confirmed\"}]'::jsonb)", [sessionId])
+      ]);
+      const results = [first.rows[0], second.rows[0]];
+      const applied = results.find((row) => row.conflict === false);
+      const conflict = results.find((row) => row.conflict === true);
+
+      expect(applied).toMatchObject({ draft_version: 1, conflict: false });
+      expect(conflict).toMatchObject({ draft_version: 1, conflict: true, draft: applied!.draft });
+    } finally {
+      await competingClient.end();
+      await client!.query('delete from public.sessions where id = $1', [sessionId]);
+    }
+  });
+
+  it('persists relay messages and their outbox rows atomically by request identity, not text', async () => {
+    const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://atomic-relay.example.test', now() + interval '1 hour') returning id");
+    const sessionId = session.rows[0].id;
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    const { Client } = await import('pg');
+    const retryClient = new Client({ connectionString: grantConnectionString });
+    await retryClient.connect();
+
+    try {
+      const [first, retry] = await Promise.all([
+        client!.query("select * from public.relay_human_message($1, 'request-a', 'Same text')", [sessionId]),
+        retryClient.query("select * from public.relay_human_message($1, 'request-a', 'Same text')", [sessionId])
+      ]);
+      const secondMessage = await client!.query("select * from public.relay_human_message($1, 'request-b', 'Same text')", [sessionId]);
+      const persisted = await client!.query(
+        `select
+           (select count(*) from public.human_messages where session_id = $1) as messages,
+           (select count(*) from public.handoff_outbox where session_id = $1 and payload->>'messageId' is not null) as handoffs`,
+        [sessionId]
+      );
+
+      expect(first.rows[0].message_id).toBe(retry.rows[0].message_id);
+      expect(secondMessage.rows[0].message_id).not.toBe(first.rows[0].message_id);
+      expect(persisted.rows).toEqual([{ messages: '2', handoffs: '2' }]);
+    } finally {
+      await retryClient.end();
       await client!.query('delete from public.sessions where id = $1', [sessionId]);
     }
   });

@@ -26,7 +26,6 @@ import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from
 import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
-import { scoreLead } from '@/lib/qualification/score';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import type { ConsentRecord } from '@/lib/privacy/notice';
@@ -618,20 +617,7 @@ export function WidgetOverlay({
         return;
       }
 
-      const result = scoreLead(draftRef.current);
-      const payload = {
-        sessionId: activeSessionId,
-        qualificationStatus: result.status,
-        score: result.score,
-        recommendedNextStep: result.recommendedNextStep,
-        leadDraft: {
-          ...draftRef.current,
-          referenceLinks,
-          referenceFiles
-        }
-      } as const;
-
-      const finalizeResponse = await finalizeLead(payload);
+      const finalizeResponse = await finalizeLead({ sessionId: activeSessionId });
       if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
         sessionDraft.finishApproval(false);
         setTelegramBroadcastStatus('unconfigured');

@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { jsonWithCors } from '@/lib/api/route-helpers';
-import { clearField, normalizeVersionedDraft, updateField, type VersionedDraft } from '@/lib/conversation/draft-versioning';
+import { normalizeVersionedDraft, type VersionedDraft } from '@/lib/conversation/draft-versioning';
 import { requireSession } from '@/lib/api/require-session';
 import { extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
-import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
 
 const updateFieldSchema = z.object({
   field: z.string().min(1).max(100),
@@ -13,7 +12,7 @@ const updateFieldSchema = z.object({
 });
 
 const updateDraftSchema = z.object({
-  expectedDraftVersion: z.number().int().min(0).optional(),
+  expectedDraftVersion: z.number().int().min(0),
   fields: z.array(updateFieldSchema).min(1).max(20)
 });
 
@@ -117,41 +116,23 @@ export async function PUT(
     );
   }
 
-  const draftState = await loadSessionDraft(session.supabase as never, sessionId);
-  if (draftState.error) {
-    return jsonWithCors({ error: draftState.error }, { status: 404 });
+  const { data, error } = await session.supabase.rpc('update_session_draft', {
+    p_session_id: sessionId,
+    p_expected_draft_version: parsed.data.expectedDraftVersion,
+    p_fields: parsed.data.fields
+  });
+  const result = Array.isArray(data) ? data[0] as { draft?: unknown; draft_version?: number; conflict?: boolean } : null;
+  if (error || !result || typeof result.draft_version !== 'number') {
+    return jsonWithCors({ error: 'project_draft_update_failed' }, { status: 500 });
   }
-
-  if (
-    typeof parsed.data.expectedDraftVersion === 'number' &&
-    parsed.data.expectedDraftVersion !== draftState.draftVersion
-  ) {
+  const updatedDraft = normalizeVersionedDraft(result.draft);
+  if (result.conflict) {
     return jsonWithCors({
       error: 'Draft version conflict. Reload the latest canonical draft before saving.',
-      draft: draftState.draft,
-      draftVersion: draftState.draftVersion,
-      fieldCount: Object.keys(draftState.draft).length
+      draft: updatedDraft,
+      draftVersion: result.draft_version,
+      fieldCount: Object.keys(updatedDraft).length
     }, { status: 409 });
-  }
-
-  let updatedDraft = { ...draftState.draft };
-
-  for (const { field, value, provenance } of parsed.data.fields) {
-    if (provenance === 'cleared') {
-      updatedDraft = clearField(updatedDraft, field);
-    } else {
-      updatedDraft = updateField(updatedDraft, field, value, provenance);
-    }
-  }
-
-  const nextDraftVersion = draftState.draftVersion + 1;
-  const { error } = await session.supabase
-    .from('sessions')
-    .update({ draft: updatedDraft, draft_version: nextDraftVersion, last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
-    .eq('id', sessionId);
-
-  if (error) {
-    return jsonWithCors({ error: 'project_draft_update_failed' }, { status: 500 });
   }
 
   for (const { field, provenance } of parsed.data.fields) {
@@ -161,7 +142,7 @@ export async function PUT(
   return jsonWithCors({
     sessionId,
     draft: updatedDraft,
-    draftVersion: nextDraftVersion,
+    draftVersion: result.draft_version,
     fieldCount: Object.keys(updatedDraft).length
   });
 }
