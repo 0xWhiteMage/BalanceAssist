@@ -37,6 +37,18 @@ service-role operations remain the only upload path.
 5. Verify migration records, application-owned functions and tables, bucket
    privacy, no browser policies, and fail-closed browser access.
 
+## SQL Editor Fallback
+
+The direct database hostname is IPv6-only and the implementation environment has
+no IPv6 route. Provide a SQL Editor artifact for this case. It wraps migrations
+`019-037` and their exact tracker records in one transaction, rejects an existing
+record in that range, and excludes `038-043` entirely. It is generated from the
+same corrected source as the normal recovery runner.
+
+The artifact must not create the bucket. After a successful SQL Editor run, the
+operator creates the non-public bucket in the Supabase Storage dashboard and
+performs the documented read-only verification query.
+
 ## Failure Handling
 
 Any schema or verification failure rolls back the database transaction and leaves
