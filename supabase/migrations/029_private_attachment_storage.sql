@@ -31,15 +31,3 @@ CREATE INDEX IF NOT EXISTS uploaded_files_stored_expiry_idx
 
 ALTER TABLE public.uploaded_files ENABLE ROW LEVEL SECURITY;
 REVOKE ALL PRIVILEGES ON TABLE public.uploaded_files FROM PUBLIC;
-
-DO $$
-BEGIN
-  IF to_regclass('storage.objects') IS NOT NULL THEN
-    EXECUTE 'ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY';
-  END IF;
-  IF to_regclass('storage.buckets') IS NOT NULL THEN
-    INSERT INTO storage.buckets (id, name, public)
-    VALUES ('temporary-attachments', 'temporary-attachments', false)
-    ON CONFLICT (id) DO UPDATE SET public = false;
-  END IF;
-END $$;

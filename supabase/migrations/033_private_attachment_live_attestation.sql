@@ -7,15 +7,15 @@ RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_catal
     AND to_regclass('storage.buckets') IS NOT NULL
     AND to_regclass('storage.objects') IS NOT NULL
     AND EXISTS (SELECT 1 FROM storage.buckets WHERE id = p_bucket AND public = false)
+    AND EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'storage' AND c.relname = 'objects' AND c.relrowsecurity
+    )
     AND NOT EXISTS (
       SELECT 1 FROM pg_policies
       WHERE schemaname = 'storage' AND tablename = 'objects'
         AND roles && ARRAY['public'::name, 'anon'::name, 'authenticated'::name]
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM information_schema.role_table_grants
-      WHERE table_schema = 'storage' AND table_name = 'objects'
-        AND grantee IN ('PUBLIC', 'anon', 'authenticated')
     );
 $$;
 

@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 describe('private attachment storage migration', () => {
-  test('adds private lifecycle fields, constraints, RLS, and guarded bucket provisioning', () => {
+  test('adds private lifecycle fields, constraints, indexes, and RLS', () => {
     const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/029_private_attachment_storage.sql'), 'utf8');
 
     expect(migration).toMatch(/object_key text/i);
@@ -13,13 +13,11 @@ describe('private attachment storage migration', () => {
     expect(migration).toMatch(/status.*stored.*pending_delivery.*sent.*suppressed.*failed.*expired/is);
     expect(migration).toMatch(/idempotency_key uuid/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
-    expect(migration).toMatch(/storage\.buckets/i);
-    expect(migration).toMatch(/storage\.objects.*ENABLE ROW LEVEL SECURITY/is);
-    expect(migration).toMatch(/public = false/i);
-    expect(migration).toMatch(/to_regclass\('storage\.buckets'\)/i);
+    expect(migration).toMatch(/uploaded_files_idempotency_key_idx/i);
+    expect(migration).toMatch(/uploaded_files_object_key_idx/i);
   });
 
-  test('creates opaque orphan cleanup storage and fails closed when Storage policy management is unavailable', () => {
+  test('creates opaque cleanup metadata, fails closed, and retains the purge function', () => {
     const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/030_private_attachment_retention.sql'), 'utf8');
 
     expect(migration).toMatch(/CREATE TABLE IF NOT EXISTS public\.private_attachment_cleanup/i);
@@ -31,43 +29,62 @@ describe('private attachment storage migration', () => {
     const cleanupTable = migration.match(/CREATE TABLE IF NOT EXISTS public\.private_attachment_cleanup \([\s\S]*?\n\);/i)?.[0] ?? '';
     expect(cleanupTable).not.toMatch(/filename|session_id/i);
     expect(migration).toMatch(/private_attachment_storage_readiness/i);
-    expect(migration).toMatch(/storage schema is unavailable/i);
-    expect(migration).toMatch(/DROP POLICY IF EXISTS/i);
-    expect(migration).toMatch(/anon|authenticated/i);
-    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM anon, authenticated/i);
+    expect(migration).toMatch(/'temporary-attachments', 'unavailable'/i);
+    expect(migration).toMatch(/purge_expired_temporary_sessions/i);
   });
 
-  test('hardens legacy key cleanup and proves policy safety without policy-text heuristics', () => {
+  test('hardens legacy key cleanup and records unavailable readiness', () => {
     const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/031_private_attachment_cleanup_hardening.sql'), 'utf8');
 
     expect(migration).toMatch(/cleanup_required_at timestamptz/i);
     expect(migration).toMatch(/object_key ~ '\^\[0-9a-f\]\{8\}/i);
     expect(migration).toMatch(/INSERT INTO public\.uploaded_files/i);
     expect(migration).toMatch(/DELETE FROM public\.private_attachment_cleanup/i);
-    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM PUBLIC/i);
-    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM anon/i);
-    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE storage\.objects FROM authenticated/i);
-    expect(migration).toMatch(/DROP POLICY IF EXISTS/i);
-    expect(migration).toMatch(/roles && ARRAY\['public'::name, 'anon'::name, 'authenticated'::name\]/i);
-    expect(migration).not.toMatch(/ILIKE|~\*.*temporary-attachments/i);
-    expect(migration).toMatch(/CASE WHEN .* THEN 'ready' ELSE 'unavailable' END/is);
+    expect(migration).toMatch(/'temporary-attachments', 'unavailable'/i);
   });
 
   test('remediates deleted-session legacy cleanup records without retaining their object keys', () => {
     const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/032_legacy_cleanup_record_remediation.sql'), 'utf8');
 
-    expect(migration).toMatch(/DELETE FROM storage\.objects/i);
     expect(migration).toMatch(/DELETE FROM public\.private_attachment_cleanup/i);
-    expect(migration).toMatch(/to_regclass\('storage\.objects'\)/i);
+    expect(migration).toMatch(/object_key ~ '\^\[0-9a-f\]\{8\}/i);
   });
 
-  test('attests effective browser-role policy access using name[] roles and recursive membership', () => {
-    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/034_private_attachment_effective_attestation.sql'), 'utf8');
+  test('uses read-only catalog checks for private bucket, Storage RLS, and browser policies', () => {
+    const liveAttestation = readFileSync(resolve(process.cwd(), 'supabase/migrations/033_private_attachment_live_attestation.sql'), 'utf8');
+    const effectiveAttestation = readFileSync(resolve(process.cwd(), 'supabase/migrations/034_private_attachment_effective_attestation.sql'), 'utf8');
 
-    expect(migration).toMatch(/WITH RECURSIVE/i);
-    expect(migration).toMatch(/pg_auth_members/i);
-    expect(migration).toMatch(/role_names/i);
-    expect(migration).toMatch(/role_name = ANY\(p\.roles\)/i);
-    expect(migration).not.toMatch(/r\.oid = ANY\(p\.roles\)|m\.roleid = ANY\(p\.roles\)/i);
+    for (const migration of [liveAttestation, effectiveAttestation]) {
+      expect(migration).toMatch(/SECURITY DEFINER SET search_path = public, pg_catalog/i);
+      expect(migration).toMatch(/storage\.buckets.*public = false/is);
+      expect(migration).toMatch(/pg_class.*relrowsecurity/is);
+      expect(migration).toMatch(/pg_policies/i);
+      expect(migration).toMatch(/'public'::name/i);
+      expect(migration).toMatch(/'anon'::name/i);
+      expect(migration).toMatch(/'authenticated'::name/i);
+      expect(migration).toMatch(/REVOKE ALL ON FUNCTION/i);
+      expect(migration).toMatch(/GRANT EXECUTE ON FUNCTION.*service_role/i);
+      expect(migration).not.toMatch(/information_schema\.role_table_grants|has_table_privilege/i);
+    }
+  });
+
+  test('never mutates Supabase Storage relations', () => {
+    const migrations = ['029', '030', '031', '032', '033', '034'].map((version) =>
+      readFileSync(resolve(process.cwd(), `supabase/migrations/${version}_${[
+        'private_attachment_storage',
+        'private_attachment_retention',
+        'private_attachment_cleanup_hardening',
+        'legacy_cleanup_record_remediation',
+        'private_attachment_live_attestation',
+        'private_attachment_effective_attestation',
+      ][Number(version) - 29]}.sql`), 'utf8'),
+    );
+
+    for (const migration of migrations) {
+      expect(migration).not.toMatch(/ALTER TABLE storage\.(objects|buckets)/i);
+      expect(migration).not.toMatch(/(?:INSERT|UPDATE|DELETE)\s+(?:INTO\s+)?storage\./i);
+      expect(migration).not.toMatch(/(?:CREATE|DROP) POLICY[\s\S]*?storage\.objects/i);
+      expect(migration).not.toMatch(/REVOKE[\s\S]*?storage\.objects/i);
+    }
   });
 });

@@ -17,40 +17,9 @@ ALTER TABLE public.private_attachment_cleanup ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.private_attachment_storage_readiness ENABLE ROW LEVEL SECURITY;
 REVOKE ALL PRIVILEGES ON TABLE public.private_attachment_cleanup, public.private_attachment_storage_readiness FROM PUBLIC;
 
-DO $$
-DECLARE policy_row record; bucket_private boolean;
-BEGIN
-  IF to_regclass('storage.buckets') IS NULL OR to_regclass('storage.objects') IS NULL THEN
-    INSERT INTO public.private_attachment_storage_readiness (bucket, status)
-    VALUES ('temporary-attachments', 'unavailable')
-    ON CONFLICT (bucket) DO UPDATE SET status = EXCLUDED.status;
-    RAISE NOTICE 'private attachment Storage schema is unavailable; uploads remain fail-closed';
-  ELSE
-    INSERT INTO storage.buckets (id, name, public)
-    VALUES ('temporary-attachments', 'temporary-attachments', false)
-    ON CONFLICT (id) DO UPDATE SET public = false;
-    EXECUTE 'ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY';
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon')
-      AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-      EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE storage.objects FROM anon, authenticated';
-    END IF;
-    FOR policy_row IN
-      SELECT policyname FROM pg_policies
-      WHERE schemaname = 'storage' AND tablename = 'objects'
-        AND (roles && ARRAY['anon'::name, 'authenticated'::name] OR roles && ARRAY['public'::name])
-        AND (coalesce(qual, '') ILIKE '%temporary-attachments%'
-          OR coalesce(with_check, '') ILIKE '%temporary-attachments%'
-          OR coalesce(qual, '') ~* '(^|[^a-z])true([^a-z]|$)'
-          OR coalesce(with_check, '') ~* '(^|[^a-z])true([^a-z]|$)')
-    LOOP
-      EXECUTE format('DROP POLICY IF EXISTS %I ON storage.objects', policy_row.policyname);
-    END LOOP;
-    SELECT NOT public INTO bucket_private FROM storage.buckets WHERE id = 'temporary-attachments';
-    INSERT INTO public.private_attachment_storage_readiness (bucket, status)
-    VALUES ('temporary-attachments', CASE WHEN bucket_private THEN 'ready' ELSE 'unavailable' END)
-    ON CONFLICT (bucket) DO UPDATE SET status = EXCLUDED.status;
-  END IF;
-END $$;
+INSERT INTO public.private_attachment_storage_readiness (bucket, status)
+VALUES ('temporary-attachments', 'unavailable')
+ON CONFLICT (bucket) DO UPDATE SET status = EXCLUDED.status;
 
 DROP FUNCTION IF EXISTS public.purge_expired_temporary_sessions();
 CREATE OR REPLACE FUNCTION public.purge_expired_temporary_sessions(p_deferred_session_ids uuid[] DEFAULT '{}')
