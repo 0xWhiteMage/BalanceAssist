@@ -37,6 +37,10 @@ export function assertRecoveryRecords(records, migrations) {
   }
 }
 
+export function serializeRecoveryError() {
+  return JSON.stringify({ error: { message: 'Production migration recovery failed.' } });
+}
+
 export async function recoverProductionMigrations({
   connectionString = process.env.PRODUCTION_DATABASE_URL,
   migrationsDir = resolve(process.cwd(), 'supabase/migrations'),
@@ -99,10 +103,8 @@ export async function recoverProductionMigrations({
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   recoverProductionMigrations().then(
     (result) => console.log(JSON.stringify(result)),
-    (error) => {
-      const message = String(error?.message || 'Production migration recovery failed.');
-      const connectionString = process.env.PRODUCTION_DATABASE_URL;
-      console.error(connectionString ? message.replaceAll(connectionString, '[redacted]') : message);
+    () => {
+      console.error(serializeRecoveryError());
       process.exitCode = 1;
     }
   );

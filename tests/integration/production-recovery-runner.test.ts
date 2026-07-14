@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,6 +21,7 @@ type RecoveryRunner = {
   recoveryMigrationVersions: string[];
   selectRecoveryMigrations(migrations: Migration[]): Migration[];
   assertRecoveryRangeIsEmpty(recordedVersions: string[]): void;
+  serializeRecoveryError(error: unknown): string;
   recoverProductionMigrations(options: {
     connectionString: string;
     migrationsDir: string;
@@ -55,6 +56,36 @@ afterEach(async () => {
 });
 
 describe('production recovery runner', () => {
+  it('labels the production bundle as source evidence while preserving every source section', async () => {
+    const bundle = await readFile(resolve(process.cwd(), 'supabase/production-migrations-019-043.sql'), 'utf8');
+    const migrations = (await import(pathToFileURL(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs')).href))
+      .getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')) as Migration[];
+
+    expect(bundle).toContain('source-evidence bundle, NOT a production recovery command');
+    expect(bundle).toContain('scripts/recover-production-migrations.mjs');
+    expect(bundle).toContain('approved 019-037');
+    expect(bundle).toContain('038-043 require their protected workflow');
+    for (const migration of migrations.filter(({ version }) => BigInt(version) >= 19n && BigInt(version) <= 43n)) {
+      const source = await readFile(migration.path, 'utf8');
+      const section = new RegExp(
+        `-- BEGIN ${migration.filename.replace('.', '\\.')}\\r?\\n-- =+\\r?\\n([\\s\\S]*?)\\r?\\n-- END ${migration.filename.replace('.', '\\.')}\\r?\\n`
+      ).exec(bundle);
+
+      expect(section?.[1].trimEnd()).toBe(source.trimEnd());
+    }
+  });
+
+  it('serializes failures as safe JSON without error details', async () => {
+    const runner = await loadRunner();
+    const secret = 'postgres://operator:super-secret@db.example.test:5432/app?password=super-secret';
+
+    const output = runner.serializeRecoveryError(new Error(`connection failed: ${secret}`));
+
+    expect(JSON.parse(output)).toEqual({ error: { message: 'Production migration recovery failed.' } });
+    expect(output).not.toContain(secret);
+    expect(output).not.toContain('super-secret');
+  });
+
   it('selects precisely the approved 019 through 037 range', async () => {
     const migrationsDir = await createMigrationsDir();
     const runner = await loadRunner();

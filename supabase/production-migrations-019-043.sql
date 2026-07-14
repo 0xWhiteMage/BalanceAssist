@@ -1,6 +1,6 @@
--- Balance Assist production migration bundle: 019-043.
--- Run only after a current database backup and schema audit.
--- Migrations 038-043 are destructive cleanup migrations: use the protected cleanup workflow or an equivalent approved maintenance window.
+-- Balance Assist production migration source-evidence bundle, NOT a production recovery command: 019-043.
+-- For approved 019-037 recovery, run scripts/recover-production-migrations.mjs after a current database backup and schema audit.
+-- Migrations 038-043 require their protected workflow.
 -- Do not run this bundle against a database that has not completed the verified 001-018 baseline.
 
 -- ============================================================================
