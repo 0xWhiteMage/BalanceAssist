@@ -154,7 +154,7 @@ Do not point `TEST_DATABASE_URL` at production data.
 
 ## Release proof
 
-CI installs the Supabase CLI and starts a disposable local Docker stack. The repository's ordered migration runner applies the full incremental chain, excluding legacy `000_full_schema.sql`, against Supabase's local PostgreSQL database. This includes storage schema, bucket policies, and RPCs before the release journey runs against Supabase HTTP/PostgREST. The journey starts a production Next server and a local fake Telegram HTTP boundary, then invokes session, consent, canonical-draft, finalize, authenticated dispatch, webhook, and polling routes. It uses locally generated credentials only in that test process and never logs them.
+CI installs the Supabase CLI and starts a disposable local Docker stack. The repository's ordered migration runner applies the full incremental chain, excluding legacy `000_full_schema.sql`, against Supabase's local PostgreSQL database. This includes storage schema, bucket policies, and RPCs before the release journey runs against Supabase HTTP/PostgREST. The journey serves the production build in-process with an explicitly installed test transport, then drives session, analysis and producer-transfer consent, private attachment upload, canonical draft, finalize, authenticated dispatch, webhook, and polling routes. Its local fake Telegram boundary records JSON fields and multipart document metadata only, never attachment content. Production Telegram calls always use Telegram's fixed API origin; no environment variable can redirect them. `test:supabase` also runs the isolated handler-level journey after the HTTP proof.
 
 For an optional local run, install Docker and the Supabase CLI, then run one command:
 

@@ -1,7 +1,11 @@
 // @vitest-environment node
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { HANDOFF_SEND_TIMEOUT_MS, sendTelegramMessage } from '@/lib/telegram';
+import {
+  HANDOFF_SEND_TIMEOUT_MS,
+  installTelegramTransportForTests,
+  sendTelegramMessage
+} from '@/lib/telegram';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -10,29 +14,32 @@ afterEach(() => {
 });
 
 describe('sendTelegramMessage', () => {
-  test('uses the configured HTTP boundary for Telegram sends', async () => {
+  test('uses a test-installed transport for Telegram sends', async () => {
     vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
     vi.stubEnv('TELEGRAM_CHAT_ID', '123');
-    vi.stubEnv('TELEGRAM_API_BASE_URL', 'http://127.0.0.1:4010/');
-    vi.stubEnv('ALLOW_TEST_TELEGRAM_TRANSPORT', '1');
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ ok: true, result: { message_id: 7, chat: { id: 123 } } })
     }) as unknown as Response);
-    vi.stubGlobal('fetch', fetchMock);
+    const uninstall = installTelegramTransportForTests(fetchMock);
 
-    await expect(sendTelegramMessage('hello')).resolves.toEqual({ messageId: 7 });
+    try {
+      await expect(sendTelegramMessage('hello')).resolves.toEqual({ messageId: 7 });
+    } finally {
+      uninstall();
+    }
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:4010/bottest-token/sendMessage',
+      'https://api.telegram.org/bottest-token/sendMessage',
       expect.objectContaining({ method: 'POST' })
     );
   });
 
-  test('does not redirect bot traffic without explicit loopback test mode', async () => {
+  test('cannot redirect bot traffic with deployment environment configuration', async () => {
     vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
     vi.stubEnv('TELEGRAM_CHAT_ID', '123');
     vi.stubEnv('TELEGRAM_API_BASE_URL', 'https://attacker.example');
+    vi.stubEnv('ALLOW_TEST_TELEGRAM_TRANSPORT', '1');
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, result: { message_id: 7, chat: { id: 123 } } }) }) as unknown as Response);
     vi.stubGlobal('fetch', fetchMock);
 

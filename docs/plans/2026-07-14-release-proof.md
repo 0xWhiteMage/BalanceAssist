@@ -4,7 +4,7 @@
 
 **Goal:** Prove a critical persisted-session-to-Telegram-reply journey in CI using real route handlers and disposable PostgreSQL.
 
-**Architecture:** Extend the current database job and migration runner rather than adding a separate test stack. A TEST_DATABASE_URL-gated Vitest journey invokes production handlers with a test-only PostgreSQL-backed Supabase adapter; `TELEGRAM_API_BASE_URL` redirects the production Telegram client to a local fake HTTP server. Playwright retains its production build/start command and gains failure artifacts.
+**Architecture:** This historical plan is superseded for Telegram transport by `2026-07-14-release-proof-boundaries.md`: release proof now uses an explicit test-installed transport while production always uses Telegram's fixed API origin. Playwright retains its production build/start command and gains failure artifacts.
 
 **Tech Stack:** Next.js route handlers, Vitest, `pg`, PostgreSQL 16, Playwright, GitHub Actions.
 
@@ -18,7 +18,7 @@
 
 **Step 1: Write the failing test**
 
-Add a test that sets `TELEGRAM_API_BASE_URL` to a local URL and asserts `sendTelegramMessage` POSTs to its `/bot<token>/sendMessage` endpoint without changing the production default.
+Superseded: prove an explicit test-installed transport receives Telegram requests while deployment environment values cannot redirect the fixed Telegram API origin.
 
 **Step 2: Run test to verify it fails**
 
@@ -27,7 +27,7 @@ Expected: FAIL because the request still targets `https://api.telegram.org`.
 
 **Step 3: Write minimal implementation**
 
-Resolve the Telegram API origin from `TELEGRAM_API_BASE_URL` when configured, stripping a trailing slash, otherwise use `https://api.telegram.org`; use it for `sendTelegramMessage`.
+Superseded: retain Telegram's fixed production API origin and route test calls only through the scoped test transport installer.
 
 **Step 4: Run test to verify it passes**
 

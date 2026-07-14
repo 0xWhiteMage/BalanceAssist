@@ -69,11 +69,19 @@ if (cli.error || cli.status !== 0) {
         if (test.status !== 0) {
           process.exitCode = test.status ?? 1;
         } else {
-          const serviceRole = run('npm', ['run', 'test:supabase:service-role'], {
+          const supplemental = run('npm', ['run', 'test:db'], {
             stdio: 'inherit',
             env: testEnvironment
           });
-          process.exitCode = serviceRole.status ?? 1;
+          if (supplemental.status !== 0) {
+            process.exitCode = supplemental.status ?? 1;
+          } else {
+            const serviceRole = run('npm', ['run', 'test:supabase:service-role'], {
+              stdio: 'inherit',
+              env: testEnvironment
+            });
+            process.exitCode = serviceRole.status ?? 1;
+          }
         }
       } catch (error) {
         console.error(error instanceof Error ? error.message : 'Local Supabase release journey failed.');

@@ -1,7 +1,9 @@
 // @vitest-environment node
 
 import { createServer } from 'node:http';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createHash, randomUUID } from 'node:crypto';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { installTelegramTransportForTests } from '@/lib/telegram';
 
 const { createServerSupabaseClientMock, hasSupabaseServerConfigMock } = vi.hoisted(() => ({
   createServerSupabaseClientMock: vi.fn(),
@@ -22,10 +24,14 @@ import { POST as receiveWebhook } from '@/app/api/telegram/webhook/route';
 import { GET as pollMessages } from '@/app/api/telegram/messages/route';
 
 const connectionString = process.env.TEST_DATABASE_URL;
-const origin = 'https://www.balancestudio.tv';
+const runId = `release-proof-${randomUUID()}`;
+const origin = `https://${runId}.example.test`;
+const clientIp = `198.18.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+const updateId = Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 1_000_000);
 let client: import('pg').Client | undefined;
 let telegramServer: ReturnType<typeof createServer> | undefined;
 let telegramUrl = '';
+let uninstallTelegramTransport: (() => void) | undefined;
 const telegramRequests: Array<{ path?: string; body?: Record<string, unknown> }> = [];
 
 function result(data: unknown, error: unknown = null) {
@@ -126,12 +132,11 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     createServerSupabaseClientMock.mockImplementation(() => databaseSupabase(client!));
     process.env.TRUSTED_CLIENT_IP_HEADER = 'x-vercel-forwarded-for';
     process.env.ALLOWED_ORIGINS = origin;
-    process.env.CRON_SECRET = 'release-proof-cron';
-    process.env.TELEGRAM_BOT_TOKEN = 'release-proof-bot';
+    process.env.CRON_SECRET = `${runId}-cron`;
+    process.env.TELEGRAM_BOT_TOKEN = `${runId}-bot`;
     process.env.TELEGRAM_CHAT_ID = '-100123';
-    process.env.TELEGRAM_WEBHOOK_SECRET = 'release-proof-webhook';
+    process.env.TELEGRAM_WEBHOOK_SECRET = `${runId}-webhook`;
     process.env.TELEGRAM_ALLOWED_USERNAMES = 'producer';
-    process.env.ALLOW_TEST_TELEGRAM_TRANSPORT = '1';
     telegramServer = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -141,17 +146,31 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     });
     await new Promise<void>((resolve) => telegramServer!.listen(0, '127.0.0.1', resolve));
     telegramUrl = `http://127.0.0.1:${(telegramServer.address() as import('node:net').AddressInfo).port}`;
-    process.env.TELEGRAM_API_BASE_URL = telegramUrl;
+    uninstallTelegramTransport = installTelegramTransportForTests((input, init) => {
+      const telegramRequest = new URL(typeof input === 'string' ? input : input.toString());
+      return fetch(new URL(telegramRequest.pathname, telegramUrl), init);
+    });
+  });
+
+  afterEach(async () => {
+    await client?.query('delete from public.processed_telegram_updates where update_id = $1', [updateId]);
+    await client?.query('delete from public.api_rate_limits where key_hash = $1', [
+      createHash('sha256').update(`session-create:${clientIp}`).digest('hex')
+    ]);
+    await client?.query('delete from public.handoff_outbox where session_id in (select id from public.sessions where source_url = $1)', [origin]);
+    await client?.query('delete from public.sessions where source_url = $1', [origin]);
+    telegramRequests.length = 0;
   });
 
   afterAll(async () => {
+    uninstallTelegramTransport?.();
     await new Promise<void>((resolve, reject) => telegramServer?.close((error) => error ? reject(error) : resolve()));
     await client?.end();
   });
 
   it('persists a capability, transfers a consented canonical draft, dispatches it, and returns a signed reply', async () => {
     const sessionResponse = await createSession(new Request(`${origin}/api/sessions`, {
-      method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-vercel-forwarded-for': '203.0.113.8' },
+      method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-vercel-forwarded-for': clientIp },
       body: JSON.stringify({ sourceUrl: origin, consentVersion: '1.0', consentedAt: '2026-07-14T00:00:00.000Z' })
     }));
     const session = await sessionResponse.json() as { sessionId: string };
@@ -175,16 +194,15 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     expect((await final.json()).queued).toBe(true);
     await expect(client!.query('select state from public.handoff_outbox where session_id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [{ state: 'pending' }] });
-    const dispatched = await dispatchHandoffs(new Request(`${origin}/api/internal/handoff-dispatch`, { method: 'POST', headers: { authorization: 'Bearer release-proof-cron' } }));
+    const dispatched = await dispatchHandoffs(new Request(`${origin}/api/internal/handoff-dispatch`, { method: 'POST', headers: { authorization: `Bearer ${runId}-cron` } }));
     expect((await dispatched.json()).results).toEqual([expect.objectContaining({ status: 'sent' })]);
     await expect(client!.query('select state from public.handoff_outbox where session_id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [{ state: 'sent' }] });
-    expect(telegramRequests).toContainEqual(expect.objectContaining({ path: '/botrelease-proof-bot/createForumTopic', body: expect.objectContaining({ chat_id: '-100123' }) }));
-    expect(telegramRequests).toContainEqual(expect.objectContaining({ path: '/botrelease-proof-bot/sendMessage', body: expect.objectContaining({ chat_id: '-100123', message_thread_id: 77 }) }));
-    const webhook = await receiveWebhook(new Request(`${origin}/api/telegram/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'release-proof-webhook' }, body: JSON.stringify({ update_id: Date.now(), message: { message_id: 322, message_thread_id: 77, chat: { id: -100123, type: 'supergroup' }, from: { id: 2, username: 'producer', first_name: 'Pat' }, text: 'We will follow up.' } }) }));
+    expect(telegramRequests).toContainEqual(expect.objectContaining({ path: `/bot${runId}-bot/createForumTopic`, body: expect.objectContaining({ chat_id: '-100123' }) }));
+    expect(telegramRequests).toContainEqual(expect.objectContaining({ path: `/bot${runId}-bot/sendMessage`, body: expect.objectContaining({ chat_id: '-100123', message_thread_id: 77 }) }));
+    const webhook = await receiveWebhook(new Request(`${origin}/api/telegram/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': `${runId}-webhook` }, body: JSON.stringify({ update_id: updateId, message: { message_id: 322, message_thread_id: 77, chat: { id: -100123, type: 'supergroup' }, from: { id: 2, username: 'producer', first_name: 'Pat' }, text: 'We will follow up.' } }) }));
     expect(webhook.status).toBe(200);
     const polled = await pollMessages(new Request(`${origin}/api/telegram/messages?sessionId=${session.sessionId}`, { headers: { 'x-session-capability': capability } }));
     await expect(polled.json()).resolves.toMatchObject({ messages: [expect.objectContaining({ text: 'Pat: We will follow up.' })] });
-    await client!.query('delete from public.sessions where id = $1', [session.sessionId]);
   });
 });
