@@ -8,6 +8,7 @@ type SchedulerHealth = {
   oldest_pending_outbox_seconds: number | null;
   expired_session_backlog: number;
   oldest_pending_deletion_seconds: number | null;
+  pending_deletion_count: number;
 };
 
 export async function GET(request: Request) {
@@ -24,7 +25,8 @@ export async function GET(request: Request) {
     staleWorkers: Array.isArray(health.stale_workers) ? health.stale_workers : [],
     oldestPendingOutboxSeconds: typeof health.oldest_pending_outbox_seconds === 'number' ? health.oldest_pending_outbox_seconds : null,
     expiredSessionBacklog: typeof health.expired_session_backlog === 'number' ? health.expired_session_backlog : 0,
-    oldestPendingDeletionSeconds: typeof health.oldest_pending_deletion_seconds === 'number' ? health.oldest_pending_deletion_seconds : null
+    oldestPendingDeletionSeconds: typeof health.oldest_pending_deletion_seconds === 'number' ? health.oldest_pending_deletion_seconds : null,
+    pendingDeletionCount: typeof health.pending_deletion_count === 'number' ? health.pending_deletion_count : 0
   };
   return NextResponse.json(body, { status: body.ok ? 200 : 503 });
 }

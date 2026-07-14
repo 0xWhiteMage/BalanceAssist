@@ -16,7 +16,11 @@ export async function POST(request: Request) {
   const claimed = await db.rpc('claim_deletion_job', { p_lease_seconds: 300 });
   const job = claimed.data as DeletionJob | null;
   if (claimed.error) return NextResponse.json({ ok: false, error: 'Deletion claim failed' }, { status: 503 });
-  if (!job?.id || !job.session_id || !job.lease_token) return NextResponse.json({ ok: true, processed: false });
+  if (!job?.id || !job.lease_token) return NextResponse.json({ ok: true, processed: false });
+  if (!job.session_id) {
+    const completed = await db.rpc('complete_orphaned_deletion_job', { p_job_id: job.id, p_lease_token: job.lease_token });
+    return NextResponse.json({ ok: completed.data === true, processed: completed.data === true, status: completed.data === true ? 'completed' : 'deferred' }, { status: completed.data === true ? 200 : 503 });
+  }
 
   const fail = async () => {
     await db.rpc('fail_deletion_job', { p_job_id: job.id, p_lease_token: job.lease_token });
@@ -32,6 +36,15 @@ export async function POST(request: Request) {
       const removed = await db.storage.from(bucket).remove([file.object_key]);
       if (removed.error) return fail();
       const deleted = await db.from('uploaded_files').delete().eq('id', file.id);
+      if (deleted.error) return fail();
+    }
+    const recovery = await db.from('private_attachment_cleanup').select('id, object_key').eq('status', 'pending_cleanup').eq('bucket', bucket);
+    if (recovery.error) return fail();
+    for (const record of recovery.data ?? []) {
+      if (!record.id || !record.object_key) return fail();
+      const removed = await db.storage.from(bucket).remove([record.object_key]);
+      if (removed.error) return fail();
+      const deleted = await db.from('private_attachment_cleanup').delete().eq('id', record.id);
       if (deleted.error) return fail();
     }
     const deletedSession = await db.rpc('delete_session_for_deletion_job', { p_job_id: job.id, p_lease_token: job.lease_token });

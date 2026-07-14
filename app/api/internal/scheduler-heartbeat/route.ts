@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { validateAdminRequestAny } from '@/lib/security/config';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 
-const workers = new Set(['handoff-dispatch', 'session-expiry']);
+const workers = new Set(['handoff-dispatch', 'session-expiry', 'deletion-worker']);
 
 export async function POST(request: Request) {
   const auth = validateAdminRequestAny(request, ['CRON_SECRET', 'INTERNAL_DISPATCH_SECRET']);

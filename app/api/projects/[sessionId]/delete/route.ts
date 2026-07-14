@@ -28,13 +28,10 @@ export async function POST(
     return jsonWithCors({ error: 'Session mismatch' }, { status: 403 });
   }
 
-  const { data: job, error } = await session.supabase
-    .from('deletion_jobs')
-    .upsert({ session_id: sessionId, state: 'requested' }, { onConflict: 'session_id', ignoreDuplicates: true })
-    .select('id, state, requested_at, attempts')
-    .single();
+  const { data, error } = await session.supabase.rpc('request_deletion_job', { p_session_id: sessionId });
+  const job = data as { id: string; state: string; requested_at: string } | null;
 
-  if (error) {
+  if (error || !job) {
     return jsonWithCors({ error: 'project_delete_failed' }, { status: 500 });
   }
 

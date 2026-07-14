@@ -7,5 +7,6 @@ test('deletion worker is scheduled by GitHub every five minutes and records a he
   expect(workflow).toContain("cron: '*/5 * * * *'");
   expect(workflow).toContain('/api/internal/deletion-worker');
   expect(workflow).toContain('"worker":"deletion-worker"');
+  expect(workflow).toContain('seq 1 25');
   expect(workflow).not.toMatch(/vercel/i);
 });

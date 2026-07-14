@@ -28,7 +28,11 @@ function createRouteSupabase(session: SessionRow) {
   const deletionJobs: Array<Record<string, unknown>> = [];
 
   const supabase = {
-    rpc: async (name: string, args: { p_session_id: string; p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) => {
+    rpc: async (name: string, args: any) => {
+      if (name === 'request_deletion_job') {
+        deletionJobs.push(args);
+        return { data: { id: 'job-1', state: 'requested', requested_at: '2026-07-14T00:00:00.000Z', attempts: 0 }, error: null };
+      }
       expect(name).toBe('update_session_draft');
       if (args.p_expected_draft_version !== state.draft_version) {
         return { data: [{ draft: structuredClone(state.draft), draft_version: state.draft_version, conflict: true }], error: null };
@@ -74,21 +78,6 @@ function createRouteSupabase(session: SessionRow) {
           insert: async (payload: Record<string, unknown>) => {
             events.push(payload);
             return { error: null };
-          }
-        };
-      }
-
-      if (table === 'deletion_jobs') {
-        return {
-          upsert(payload: Record<string, unknown>) {
-            deletionJobs.push(payload);
-            return {
-              select() {
-                return {
-                  single: async () => ({ data: { id: 'job-1', state: 'requested', requested_at: '2026-07-14T00:00:00.000Z', attempts: 0 }, error: null })
-                };
-              }
-            };
           }
         };
       }
@@ -276,7 +265,7 @@ describe('delete route', () => {
     expect(data.message).toMatch(/recorded your deletion request/i);
     expect(data.message).not.toMatch(/has been deleted/i);
     expect(data.requestedAt).toBeTruthy();
-    expect(harness.deletionJobs).toEqual([{ session_id: 'session-4', state: 'requested' }]);
+    expect(harness.deletionJobs).toEqual([{ p_session_id: 'session-4' }]);
     expect(harness.events).toHaveLength(0);
   });
 

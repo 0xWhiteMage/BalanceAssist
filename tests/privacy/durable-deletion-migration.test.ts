@@ -17,4 +17,11 @@ describe('durable deletion jobs migration', () => {
     expect(migration).toMatch(/delete_session_for_deletion_job.*DELETE FROM public.sessions/is);
     expect(migration).not.toMatch(/draft|contact|payload|object_key|error_message/i);
   });
+
+  test('associates recovery obligations with sessions and completes a nulled-session job safely', () => {
+    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/040_deletion_recovery_lifecycle.sql'), 'utf8');
+    expect(migration).toMatch(/complete_orphaned_deletion_job/is);
+    expect(migration).toMatch(/pending_cleanup/);
+    expect(migration).not.toMatch(/ALTER TABLE public\.private_attachment_cleanup ADD COLUMN session_id/i);
+  });
 });
