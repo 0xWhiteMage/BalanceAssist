@@ -3,6 +3,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+const storageMutationPatterns = [
+  /\bALTER\s+TABLE\s+storage\.(?:objects|buckets)\b/i,
+  /\bDROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+storage\.(?:objects|buckets)\b/i,
+  /\bTRUNCATE(?:\s+TABLE)?\s+(?:ONLY\s+)?storage\.(?:objects|buckets)\b/i,
+  /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:ONLY\s+)?storage\.(?:objects|buckets)\b/i,
+  /\b(?:GRANT|REVOKE)\b[\s\S]*?\bON\s+(?:TABLE\s+)?storage\.(?:objects|buckets)\b/i,
+  /\b(?:CREATE|DROP)\s+POLICY\b[\s\S]*?\bON\s+storage\.objects\b/i,
+];
+
 describe('private attachment storage migration', () => {
   test('adds private lifecycle fields, constraints, indexes, and RLS', () => {
     const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/029_private_attachment_storage.sql'), 'utf8');
@@ -43,11 +52,11 @@ describe('private attachment storage migration', () => {
     expect(migration).toMatch(/'temporary-attachments', 'unavailable'/i);
   });
 
-  test('remediates deleted-session legacy cleanup records without retaining their object keys', () => {
+  test('keeps legacy orphan cleanup obligations for the service-role worker', () => {
     const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/032_legacy_cleanup_record_remediation.sql'), 'utf8');
 
-    expect(migration).toMatch(/DELETE FROM public\.private_attachment_cleanup/i);
-    expect(migration).toMatch(/object_key ~ '\^\[0-9a-f\]\{8\}/i);
+    expect(migration).not.toMatch(/DELETE\s+FROM\s+public\.private_attachment_cleanup/i);
+    expect(migration).toMatch(/service-role cleanup worker[\s\S]*?delete.*object,[\s\S]*?then.*cleanup/i);
   });
 
   test('uses read-only catalog checks for private bucket, Storage RLS, and browser policies', () => {
@@ -86,10 +95,7 @@ describe('private attachment storage migration', () => {
     );
 
     for (const migration of migrations) {
-      expect(migration).not.toMatch(/ALTER TABLE storage\.(objects|buckets)/i);
-      expect(migration).not.toMatch(/(?:INSERT|UPDATE|DELETE)\s+(?:INTO\s+)?storage\./i);
-      expect(migration).not.toMatch(/(?:CREATE|DROP) POLICY[\s\S]*?storage\.objects/i);
-      expect(migration).not.toMatch(/REVOKE[\s\S]*?storage\.objects/i);
+      for (const pattern of storageMutationPatterns) expect(migration).not.toMatch(pattern);
     }
   });
 
@@ -108,10 +114,7 @@ describe('private attachment storage migration', () => {
       const section = bundle.match(new RegExp(`-- BEGIN ${filename}\\n(?:-- =+\\n)?([\\s\\S]*?)\\n-- END ${filename}`))?.[1];
 
       expect(section?.trimEnd()).toBe(source);
-      expect(section).not.toMatch(/ALTER TABLE storage\.(objects|buckets)/i);
-      expect(section).not.toMatch(/(?:INSERT|UPDATE|DELETE)\s+(?:INTO\s+)?storage\./i);
-      expect(section).not.toMatch(/(?:CREATE|DROP) POLICY[\s\S]*?storage\.objects/i);
-      expect(section).not.toMatch(/REVOKE[\s\S]*?storage\.objects/i);
+      for (const pattern of storageMutationPatterns) expect(section).not.toMatch(pattern);
     }
   });
 });
