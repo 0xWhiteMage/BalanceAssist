@@ -23,6 +23,14 @@ type EventName =
   | 'temporary_sessions_expired';
 
 type EventSchemaVersion = 1;
+const SAFE_REASON_CODES = [
+  'attachment_invalid',
+  'handoff_processing_failed',
+  'handoff_type_invalid',
+  'producer_transfer_revoked',
+  'session_unavailable',
+  'telegram_send_failed'
+] as const;
 
 const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: readonly string[] }> = {
   consent_granted: { version: 1, fields: ['sessionId', 'consentVersion'] },
@@ -55,7 +63,7 @@ export function emitEvent(
   const schema = EVENT_SCHEMAS[eventName];
   if (!schema) return;
 
-  const redacted = sanitizeObservabilityData(data, schema.fields);
+  const redacted = sanitizeObservabilityData(data, schema.fields, SAFE_REASON_CODES);
 
   const entry = {
     ts: new Date().toISOString(),

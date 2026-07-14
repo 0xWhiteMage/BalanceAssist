@@ -28,6 +28,10 @@
     - The workflow is scheduled every five minutes and can be manually run with `workflow_dispatch`. GitHub cron is best effort and may be delayed, so do not treat this as an exact five-minute SLA.
     - Review failed workflow runs and GitHub Actions notifications. Monitor `handoff_failed` and `handoff_escalated` events and pending/escalated `handoff_outbox` rows.
 
+## Internal Upload Inspection
+
+`GET /api/internal/uploads` requires `Authorization: Bearer <SETUP_TOKEN>`. Its response contains filenames, session identifiers, contact name/company metadata, and one-hour signed download URLs. Use it only from an authenticated operator session; do not put the response, URLs, or file metadata in tickets, chat, analytics, or logs. Download only when necessary, keep the material in approved storage, and allow URLs to expire instead of forwarding them.
+
 ## Handoff Retry Timing
 
 - A failed handoff is eligible for its next attempt no sooner than five minutes later; actual dispatch depends on the next GitHub Actions run and may be later.

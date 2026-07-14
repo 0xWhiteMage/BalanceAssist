@@ -27,7 +27,7 @@ export async function getSessionConsent(client: ConsentLedgerClient, sessionId: 
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true });
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error('session_consent_query_failed');
 
   const state: SessionConsentState = { analysis: false, producerTransfer: false };
   for (const transition of [...(data ?? [])].sort((a, b) =>

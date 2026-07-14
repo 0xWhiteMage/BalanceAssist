@@ -123,7 +123,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     expect(response.status).toBe(200);
     expect(emitEventMock).toHaveBeenCalledWith(
       'handoff_escalated',
-      { handoffId: 'ho-2', reason: 'Telegram send failed' },
+      { handoffId: 'ho-2', reason: 'telegram_send_failed' },
       'rid-dispatch'
     );
   });
@@ -205,5 +205,28 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     await expect(response.json()).resolves.toMatchObject({ results: [{ id: 'ho-revoked', status: 'suppressed' }] });
     expect(reserveHandoffSendMock).not.toHaveBeenCalled();
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
+  });
+
+  test('persists and emits a stable code when a sender throws a raw error', async () => {
+    claimNextHandoffMock
+      .mockResolvedValueOnce({
+        id: 'ho-error',
+        session_id: 'sess-error',
+        created_at: '2026-07-11T11:59:00.000Z',
+        claim_token: '55555555-5555-4555-8555-555555555555',
+        payload: { sessionId: 'sess-error', type: 'approval', summary: 'Hello' },
+        resolution: 'claimed'
+      })
+      .mockResolvedValueOnce(null);
+    sendTelegramMessageMock.mockRejectedValue(new Error('Bearer private-token for user@example.com'));
+
+    const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
+    await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
+      method: 'POST',
+      headers: { authorization: 'Bearer cron-secret', 'x-request-id': 'rid-error' }
+    }));
+
+    expect(markFailedMock).toHaveBeenCalledWith(expect.anything(), 'ho-error', '55555555-5555-4555-8555-555555555555', 'handoff_processing_failed', expect.anything());
+    expect(emitEventMock).toHaveBeenCalledWith('handoff_failed', { handoffId: 'ho-error', reason: 'handoff_processing_failed' }, 'rid-error');
   });
 });

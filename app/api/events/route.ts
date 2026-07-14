@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     .insert({ session_id: sessionId, event_name: eventName, properties: properties ?? null });
 
   if (error) {
-    return jsonWithCors({ ok: false, error: error.message }, { status: 500 }, request);
+    return jsonWithCors({ ok: false, error: 'event_persist_failed' }, { status: 500 }, request);
   }
 
   return jsonWithCors({ ok: true, eventName });

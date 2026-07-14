@@ -66,4 +66,25 @@ describe('createLogger', () => {
     });
     spy.mockRestore();
   });
+
+  test('redacts neutral-key strings that contain phone numbers, credentials, or capabilities', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logger = createLogger('test', 'rid-neutral');
+
+    logger.info('safe status', {
+      status: 'retrying',
+      detail: 'Call +65 8123 4567',
+      providerDetail: 'Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature',
+      correlation: 'cap_abc123def456ghi789'
+    });
+
+    const entry = spy.mock.calls[0][2] as Record<string, unknown>;
+    expect(entry).toMatchObject({
+      status: 'retrying',
+      detail: '[redacted]',
+      providerDetail: '[redacted]',
+      correlation: '[redacted]'
+    });
+    spy.mockRestore();
+  });
 });

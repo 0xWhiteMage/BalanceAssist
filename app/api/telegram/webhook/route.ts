@@ -238,8 +238,8 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    logger.error('Failed to insert team message', { error: error.message });
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    logger.error('Failed to insert team message', { error: 'team_message_persist_failed' });
+    return NextResponse.json({ ok: false, error: 'team_message_persist_failed' }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, sessionId });

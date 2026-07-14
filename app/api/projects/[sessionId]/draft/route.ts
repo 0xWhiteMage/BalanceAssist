@@ -30,7 +30,7 @@ async function loadSessionDraft(supabase: { from: (table: string) => { select: (
     .maybeSingle();
 
   if (error) {
-    return { error: error.message, draft: {} as VersionedDraft, draftVersion: 0 };
+    return { error: 'project_draft_load_failed', draft: {} as VersionedDraft, draftVersion: 0 };
   }
 
   if (!data) {
@@ -151,7 +151,7 @@ export async function PUT(
     .eq('id', sessionId);
 
   if (error) {
-    return jsonWithCors({ error: error.message }, { status: 500 });
+    return jsonWithCors({ error: 'project_draft_update_failed' }, { status: 500 });
   }
 
   for (const { field, provenance } of parsed.data.fields) {

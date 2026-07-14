@@ -17,6 +17,18 @@ export type HandoffPayload = {
   threadId?: number | null;
 };
 
+export type HandoffFailureCode =
+  | 'handoff_processing_failed'
+  | 'handoff_type_invalid'
+  | 'producer_transfer_revoked'
+  | 'telegram_send_failed';
+
+function normalizeFailureCode(value: string): HandoffFailureCode {
+  return value === 'handoff_type_invalid' || value === 'producer_transfer_revoked' || value === 'telegram_send_failed'
+    ? value
+    : 'handoff_processing_failed';
+}
+
 export function generateIdempotencyKey(sessionId: string, type: string, summary: string): string {
   const hash = createHash('sha256')
     .update(`${sessionId}:${type}:${summary}`)
@@ -69,7 +81,7 @@ export async function enqueueHandoff(
   if (error) {
     console.error('[handoff] Failed to enqueue', {
       sessionId: payload.sessionId,
-      error: error.message
+      error: 'handoff_enqueue_failed'
     });
     return {
       persisted: false,
@@ -109,7 +121,7 @@ export async function markFailed(
   supabase: SupabaseServerClient,
   handoffId: string,
   claimToken: string,
-  error: string,
+  error: HandoffFailureCode | string,
   sla?: HandoffSLA
 ): Promise<{ shouldRetry: boolean; escalated: boolean; retryDelayMs: number; applied: boolean }> {
   const maxRetries = getMaxRetries(sla);
@@ -134,7 +146,7 @@ export async function markFailed(
     .from('handoff_outbox')
     .update({
       state: escalated ? 'escalated' : shouldRetry ? 'pending' : 'failed',
-      last_error: error,
+      last_error: normalizeFailureCode(error),
       attempts: currentAttempts,
       updated_at: now.toISOString(),
       next_attempt_at: nextAttemptAt,

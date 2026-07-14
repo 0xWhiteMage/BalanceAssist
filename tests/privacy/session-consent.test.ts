@@ -60,6 +60,6 @@ describe('getSessionConsent', () => {
       }))
     };
 
-    await expect(getSessionConsent(client as never, 'session-1')).rejects.toThrow('unavailable');
+    await expect(getSessionConsent(client as never, 'session-1')).rejects.toThrow('session_consent_query_failed');
   });
 });

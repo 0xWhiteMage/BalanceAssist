@@ -196,14 +196,14 @@ describe('handoff/outbox', () => {
         }
       ]);
 
-      const outcome = await markFailed(harness.supabase as never, 'ho-1', 'claim-token', 'Telegram send failed');
+      const outcome = await markFailed(harness.supabase as never, 'ho-1', 'claim-token', 'telegram_send_failed');
       const row = harness.byId.get('ho-1');
 
       expect(outcome).toEqual({ shouldRetry: true, escalated: false, retryDelayMs: 300_000, applied: true });
       expect(row).toMatchObject({
         state: 'pending',
         attempts: 1,
-        last_error: 'Telegram send failed'
+        last_error: 'telegram_send_failed'
       });
       expect(row?.next_attempt_at).toBe('2026-07-11T12:05:00.000Z');
     });
@@ -223,14 +223,14 @@ describe('handoff/outbox', () => {
         }
       ]);
 
-      const outcome = await markFailed(harness.supabase as never, 'ho-2', 'claim-token', 'still failing');
+      const outcome = await markFailed(harness.supabase as never, 'ho-2', 'claim-token', 'telegram_send_failed');
       const row = harness.byId.get('ho-2');
 
       expect(outcome).toEqual({ shouldRetry: false, escalated: false, retryDelayMs: 0, applied: true });
       expect(row).toMatchObject({
         state: 'failed',
         attempts: 4,
-        last_error: 'still failing'
+        last_error: 'telegram_send_failed'
       });
     });
 
@@ -333,7 +333,7 @@ describe('handoff/outbox', () => {
       expect(row).toMatchObject({
         state: 'escalated',
         attempts: 1,
-        last_error: 'timed out'
+        last_error: 'handoff_processing_failed'
       });
     });
   });

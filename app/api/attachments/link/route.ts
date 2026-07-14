@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    return jsonWithCors({ ok: false, persisted: false, error: error.message }, { status: 500 }, request);
+    return jsonWithCors({ ok: false, persisted: false, error: 'attachment_link_persist_failed' }, { status: 500 }, request);
   }
 
   return jsonWithCors({ ok: true, persisted: true }, undefined, request);

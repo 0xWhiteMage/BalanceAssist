@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     .limit(200);
 
   if (error) {
-    return jsonWithCors({ ok: false, error: error.message }, { status: 500 });
+    return jsonWithCors({ ok: false, error: 'uploads_query_failed' }, { status: 500 });
   }
 
   const rows = (data ?? []) as Array<{

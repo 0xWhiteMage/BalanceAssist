@@ -42,7 +42,7 @@ export async function POST(
     });
 
   if (error) {
-    return jsonWithCors({ error: error.message }, { status: 500 });
+    return jsonWithCors({ error: 'project_delete_failed' }, { status: 500 });
   }
 
   emitEvent('deletion_requested', { sessionId }, requestId);

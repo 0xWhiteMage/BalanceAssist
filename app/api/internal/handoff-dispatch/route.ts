@@ -89,14 +89,14 @@ export async function POST(request: Request) {
           emitEvent('handoff_delivered', { handoffId: handoff.id, durationMs }, requestId);
           results.push({ id: handoff.id, status: 'sent' });
         } else {
-          const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, 'Telegram send failed', sla);
+          const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, 'telegram_send_failed', sla);
           if (!outcome.applied) {
             results.push({ id: handoff.id, status: 'stale' });
             continue;
           }
           emitEvent(
             outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
-            { handoffId: handoff.id, reason: 'Telegram send failed' },
+            { handoffId: handoff.id, reason: 'telegram_send_failed' },
             requestId
           );
           logger.warn('Send failed', {
@@ -113,14 +113,14 @@ export async function POST(request: Request) {
           });
         }
       } else {
-        const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, `Unknown handoff type: ${payload.type}`, sla);
+        const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, 'handoff_type_invalid', sla);
         if (!outcome.applied) {
           results.push({ id: handoff.id, status: 'stale' });
           continue;
         }
         emitEvent(
           outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
-          { handoffId: handoff.id, reason: `Unknown handoff type: ${payload.type}` },
+          { handoffId: handoff.id, reason: 'handoff_type_invalid' },
           requestId
         );
         logger.warn('Unknown type', {
@@ -136,20 +136,19 @@ export async function POST(request: Request) {
         });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      const outcome = await markFailed(supabase, handoff.id, handoff.claim_token ?? '', message, sla);
+      const outcome = await markFailed(supabase, handoff.id, handoff.claim_token ?? '', 'handoff_processing_failed', sla);
       if (!outcome.applied) {
         results.push({ id: handoff.id, status: 'stale' });
         continue;
       }
       emitEvent(
         outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
-        { handoffId: handoff.id, reason: message },
+        { handoffId: handoff.id, reason: 'handoff_processing_failed' },
         requestId
       );
       logger.error('Error processing handoff', {
         handoffId: handoff.id,
-        error: message,
+        error: 'handoff_processing_failed',
         escalated: outcome.escalated,
       });
       results.push({

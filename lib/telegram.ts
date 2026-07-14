@@ -177,8 +177,7 @@ export async function sendDocument(
       body: form
     });
   } catch (error) {
-    const description = error instanceof Error ? error.message : 'Network error contacting Telegram';
-    return { ok: false, description };
+    return { ok: false, description: 'telegram_network_error' };
   }
 
   if (!response.ok) {
@@ -189,12 +188,11 @@ export async function sendDocument(
   try {
     data = (await response.json()) as SendDocumentResponse;
   } catch (error) {
-    const description = error instanceof Error ? error.message : 'Failed to parse Telegram response';
-    return { ok: false, description };
+    return { ok: false, description: 'telegram_response_invalid' };
   }
 
   if (!data.ok) {
-    return { ok: false, description: data.description ?? 'Telegram reported an error' };
+    return { ok: false, description: 'telegram_api_error' };
   }
 
   const fileId = data.result?.document?.file_id ?? null;

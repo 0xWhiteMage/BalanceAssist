@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 
   for (const threadId of threadIds) {
     const deleted = await deleteForumTopic(threadId).catch((error: Error) => {
-      results.push({ threadId, deleted: false, error: error.message });
+      results.push({ threadId, deleted: false, error: 'telegram_topic_cleanup_failed' });
       return false;
     });
 

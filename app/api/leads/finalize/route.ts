@@ -134,13 +134,13 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    logger.error('Failed to insert lead', { sessionId, error: error.message });
+    logger.error('Failed to insert lead', { sessionId, error: 'lead_persist_failed' });
     return jsonWithCors({
       ok: false,
       sessionId,
       qualificationStatus,
       persisted: false,
-      error: error.message
+      error: 'lead_persist_failed'
     }, { status: 500 }, request);
   }
 
@@ -258,7 +258,7 @@ export async function POST(request: Request) {
   } catch (error) {
     logger.error('Telegram topic update failed', {
       sessionId,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: 'telegram_topic_update_failed'
     });
   }
 

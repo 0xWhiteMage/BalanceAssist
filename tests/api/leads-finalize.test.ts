@@ -446,7 +446,7 @@ describe('POST /api/leads/finalize Telegram notifications', () => {
     const data = await res.json();
     expect(data.ok).toBe(false);
     expect(data.persisted).toBe(false);
-    expect(data.error).toContain('insert failed');
+    expect(data.error).toBe('lead_persist_failed');
     expect(enqueueHandoffMock).not.toHaveBeenCalled();
   });
 

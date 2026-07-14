@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     const { data, error } = await readSessionSnapshot(authResult.supabase, authResult.auth.sessionId);
 
     if (error) {
-      return jsonWithCors({ ok: false, error: error.message }, { status: 500 }, request);
+      return jsonWithCors({ ok: false, error: 'session_inspect_failed' }, { status: 500 }, request);
     }
 
     if (!data) {
@@ -64,7 +64,7 @@ export async function GET(request: Request) {
   const { data, error } = await readSessionSnapshot(supabase, sessionId);
 
   if (error) {
-    return jsonWithCors({ ok: false, error: error.message }, { status: 500 }, request);
+    return jsonWithCors({ ok: false, error: 'session_inspect_failed' }, { status: 500 }, request);
   }
 
   if (!data) {

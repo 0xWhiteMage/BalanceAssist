@@ -34,7 +34,7 @@ export async function POST(
     .maybeSingle();
 
   if (error) {
-    return jsonWithCors({ ok: false, error: error.message }, { status: 500 }, request);
+    return jsonWithCors({ ok: false, error: 'project_reset_failed' }, { status: 500 }, request);
   }
 
   if (!data) {

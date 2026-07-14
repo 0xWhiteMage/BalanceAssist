@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    return jsonWithCors({ error: error.message }, { status: 500 });
+    return jsonWithCors({ error: 'telegram_simulation_failed' }, { status: 500 });
   }
 
   return jsonWithCors({ ok: true });

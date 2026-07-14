@@ -225,7 +225,7 @@ async function callOpenAICompatible(
         } catch (error) {
           logger.warn('record_brief_updates tool arguments failed to parse as JSON', {
             sessionId: options?.sessionId,
-            message: error instanceof Error ? error.message : 'unknown'
+            message: 'tool_arguments_invalid'
           });
         }
       } else if (functionName === SHARE_WORK_TOOL_NAME) {
@@ -238,7 +238,7 @@ async function callOpenAICompatible(
         } catch (error) {
           logger.warn('share_work tool arguments failed to parse as JSON', {
             sessionId: options?.sessionId,
-            message: error instanceof Error ? error.message : 'unknown'
+            message: 'tool_arguments_invalid'
           });
         }
       }
@@ -378,7 +378,7 @@ async function loadAuthenticatedDraftState(session: Awaited<ReturnType<typeof re
       draftVersion: 0,
       promptDraft: emptyPromptDraft,
       priorDraft: emptyPriorDraft,
-      response: jsonWithCors({ error: error.message }, { status: 500 })
+      response: jsonWithCors({ error: 'chat_session_load_failed' }, { status: 500 })
     };
   }
 
@@ -645,7 +645,7 @@ export async function POST(request: Request) {
       truncated
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
+    const message = 'chat_provider_failed';
     return jsonWithCors({ error: 'Chat service error', detail: message }, { status: 500 });
   }
 }

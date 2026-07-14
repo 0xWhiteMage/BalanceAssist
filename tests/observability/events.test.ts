@@ -55,17 +55,17 @@ describe('emitEvent', () => {
     spy.mockRestore();
   });
 
-  test('redacts sensitive fields in allowed data', () => {
+  test('drops non-enumerated reason strings from events', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     emitEvent('attachment_quarantined', {
       sessionId: 'abc-123',
-      reason: 'Invalid MIME type',
+      reason: 'Invalid MIME type from private-brief.pdf',
       originalName: 'file.pdf',
     });
     const jsonStr = spy.mock.calls[0][1] as string;
     const parsed = JSON.parse(jsonStr);
     expect(parsed.sessionId).toBe('abc-123');
-    expect(parsed.reason).toBe('Invalid MIME type');
+    expect(parsed.reason).toBeUndefined();
     expect(parsed.originalName).toBeUndefined();
     spy.mockRestore();
   });
@@ -80,21 +80,20 @@ describe('emitEvent', () => {
     spy.mockRestore();
   });
 
-  test('truncates long strings', () => {
+  test('emits allowlisted reason codes', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     emitEvent('attachment_quarantined', {
       sessionId: 'abc',
-      reason: 'x'.repeat(300),
+      reason: 'telegram_send_failed',
       originalName: 'file.pdf',
     });
     const jsonStr = spy.mock.calls[0][1] as string;
     const parsed = JSON.parse(jsonStr);
-    expect(parsed.reason.length).toBeLessThan(300);
-    expect(parsed.reason).toContain('...');
+    expect(parsed.reason).toBe('telegram_send_failed');
     spy.mockRestore();
   });
 
-  test('recursively redacts allowed event data that contains sensitive values', () => {
+  test('drops event reasons that are not stable safe codes', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     emitEvent('attachment_quarantined', {
       sessionId: 'abc',
@@ -103,10 +102,8 @@ describe('emitEvent', () => {
     });
 
     const parsed = JSON.parse(spy.mock.calls[0][1] as string);
-    expect(parsed).toMatchObject({
-      sessionId: 'abc',
-      reason: { error: '[redacted]', url: '[redacted]' }
-    });
+    expect(parsed.sessionId).toBe('abc');
+    expect(parsed.reason).toBeUndefined();
     expect(parsed.originalName).toBeUndefined();
     spy.mockRestore();
   });

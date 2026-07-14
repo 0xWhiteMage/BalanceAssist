@@ -16,7 +16,7 @@ AI assistant widget for Balance Studio. It captures project briefs and answers g
 - `/` — landing page
 - `/widget` — full reference board (design preview)
 - `/preview` — real Balance Studio site with the widget overlaid
-- `/internal/uploads` — admin-only inspection route for private attachment metadata (requires `SETUP_TOKEN`)
+- `/internal/uploads` — privileged upload-inspection route (requires `SETUP_TOKEN`)
 
 ## API endpoints
 
@@ -37,7 +37,7 @@ Public (called by the widget):
 Admin (require `SETUP_TOKEN`):
 
 - `POST /api/telegram/setup` — one-call bot verification + webhook setup
-- `GET /api/internal/uploads` — list uploaded files with signed download URLs
+- `GET /api/internal/uploads` — returns filenames, session/contact metadata, and one-hour signed download URLs. Treat this response as restricted data: use only over an authenticated operator session, do not copy it to tickets or logs, and let signed URLs expire rather than sharing them.
 - `GET /api/sessions/inspect` — inspect a session by id
 - `GET /api/telegram/list-topics` — list Telegram forum topics
 - `POST /api/telegram/cleanup-topics` — close stale Telegram forum topics
