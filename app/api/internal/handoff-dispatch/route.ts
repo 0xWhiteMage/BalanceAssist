@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { claimNextHandoff, markDelivered, markFailed, persistTelegramMessageDelivery, reserveHandoffSend } from '@/lib/handoff/outbox';
+import { claimNextHandoff, deferTelegramReceiptPersistence, markDelivered, markFailed, persistTelegramMessageDelivery, recordTelegramReceipt, renewHandoffSend, reserveHandoffSend } from '@/lib/handoff/outbox';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
 import { ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
@@ -72,6 +72,32 @@ export async function POST(request: Request) {
       }
 
       if (payload.type === 'approval' || payload.type === 'relay') {
+        if (typeof payload.telegramMessageId === 'number' && typeof payload.telegramThreadId === 'number') {
+          const persisted = payload.type !== 'relay' || (
+            typeof payload.messageId === 'number' &&
+            await persistTelegramMessageDelivery(supabase, payload.messageId, payload.telegramThreadId, payload.telegramMessageId)
+          );
+          if (!persisted) {
+            const deferred = await deferTelegramReceiptPersistence(supabase, handoff.id, handoff.claim_token);
+            logger.warn('Telegram receipt persistence deferred', { handoffId: handoff.id, deferred });
+            results.push({ id: handoff.id, status: deferred ? 'retry_scheduled' : 'stale' });
+            continue;
+          }
+
+          const applied = await markDelivered(supabase, handoff.id, handoff.claim_token);
+          if (!applied) {
+            logger.warn('Skipped stale receipt completion', { handoffId: handoff.id });
+            results.push({ id: handoff.id, status: 'stale' });
+            continue;
+          }
+          const durationMs = handoff.created_at
+            ? Math.max(0, Date.now() - new Date(handoff.created_at).getTime())
+            : 0;
+          emitEvent('handoff_delivered', { handoffId: handoff.id, durationMs }, requestId);
+          results.push({ id: handoff.id, status: 'sent' });
+          continue;
+        }
+
         const threadId = await ensureTelegramTopic(
           supabase,
           handoff.session_id,
@@ -105,37 +131,31 @@ export async function POST(request: Request) {
           continue;
         }
 
+        if (!await renewHandoffSend(supabase, handoff.id, handoff.claim_token)) {
+          logger.info('Skipped stale handoff after topic resolution', { handoffId: handoff.id });
+          results.push({ id: handoff.id, status: 'stale' });
+          continue;
+        }
+
         const result = await sendTelegramMessage(payload.summary, {
           threadId
         });
 
         if (result) {
+          const receiptPayload = { ...payload, telegramMessageId: result.messageId, telegramThreadId: threadId };
+          if (!await recordTelegramReceipt(supabase, handoff.id, handoff.claim_token, receiptPayload)) {
+            logger.warn('Telegram receipt ownership lost', { handoffId: handoff.id });
+            results.push({ id: handoff.id, status: 'stale' });
+            continue;
+          }
+
           if (payload.type === 'relay' && (
             typeof payload.messageId !== 'number' ||
             !await persistTelegramMessageDelivery(supabase, payload.messageId, threadId, result.messageId)
           )) {
-            const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, 'telegram_delivery_persist_failed', sla);
-            if (!outcome.applied) {
-              results.push({ id: handoff.id, status: 'stale' });
-              continue;
-            }
-            emitEvent(
-              outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
-              { handoffId: handoff.id, reason: 'telegram_delivery_persist_failed' },
-              requestId
-            );
-            logger.warn('Telegram delivery persistence failed', {
-              handoffId: handoff.id,
-              escalated: outcome.escalated,
-              shouldRetry: outcome.shouldRetry,
-              retryDelayMs: outcome.retryDelayMs,
-            });
-            results.push({
-              id: handoff.id,
-              status: outcome.escalated ? 'escalated' : outcome.shouldRetry ? 'retry_scheduled' : 'failed',
-              escalated: outcome.escalated,
-              retryDelayMs: outcome.retryDelayMs,
-            });
+            const deferred = await deferTelegramReceiptPersistence(supabase, handoff.id, handoff.claim_token);
+            logger.warn('Telegram receipt persistence deferred', { handoffId: handoff.id, deferred });
+            results.push({ id: handoff.id, status: deferred ? 'retry_scheduled' : 'stale' });
             continue;
           }
 

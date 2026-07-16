@@ -16,6 +16,8 @@ export type HandoffPayload = {
   summary: string;
   threadId?: number | null;
   messageId?: number | null;
+  telegramMessageId?: number | null;
+  telegramThreadId?: number | null;
 };
 
 export type HandoffFailureCode =
@@ -130,6 +132,66 @@ export async function persistTelegramMessageDelivery(
     .from('human_messages')
     .update({ telegram_thread_id: threadId, telegram_message_id: telegramMessageId })
     .eq('id', messageId)
+    .select('id')
+    .maybeSingle();
+  return !error && Boolean(data);
+}
+
+export async function renewHandoffSend(
+  supabase: SupabaseServerClient,
+  handoffId: string,
+  claimToken: string
+): Promise<boolean> {
+  const now = new Date();
+  const { data, error } = await supabase
+    .from('handoff_outbox')
+    .update({ claim_expires_at: new Date(now.getTime() + 90_000).toISOString(), updated_at: now.toISOString() })
+    .eq('id', handoffId)
+    .eq('state', 'sending')
+    .eq('claim_token', claimToken)
+    .gt('claim_expires_at', now.toISOString())
+    .select('id')
+    .maybeSingle();
+  return !error && Boolean(data);
+}
+
+export async function recordTelegramReceipt(
+  supabase: SupabaseServerClient,
+  handoffId: string,
+  claimToken: string,
+  payload: HandoffPayload
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('handoff_outbox')
+    .update({ payload, updated_at: new Date().toISOString() })
+    .eq('id', handoffId)
+    .eq('state', 'sending')
+    .eq('claim_token', claimToken)
+    .gt('claim_expires_at', new Date().toISOString())
+    .select('id')
+    .maybeSingle();
+  return !error && Boolean(data);
+}
+
+export async function deferTelegramReceiptPersistence(
+  supabase: SupabaseServerClient,
+  handoffId: string,
+  claimToken: string
+): Promise<boolean> {
+  const now = new Date();
+  const { data, error } = await supabase
+    .from('handoff_outbox')
+    .update({
+      state: 'pending',
+      last_error: 'telegram_delivery_persist_failed',
+      next_attempt_at: new Date(now.getTime() + 300_000).toISOString(),
+      claim_expires_at: null,
+      updated_at: now.toISOString()
+    })
+    .eq('id', handoffId)
+    .eq('state', 'sending')
+    .eq('claim_token', claimToken)
+    .gt('claim_expires_at', new Date().toISOString())
     .select('id')
     .maybeSingle();
   return !error && Boolean(data);

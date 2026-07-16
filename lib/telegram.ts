@@ -28,6 +28,7 @@ export type TelegramUpdate = {
 };
 
 export const HANDOFF_SEND_TIMEOUT_MS = 45_000;
+export const TOPIC_CREATE_TIMEOUT_MS = 45_000;
 
 let testTelegramTransport: typeof fetch | undefined;
 
@@ -215,7 +216,7 @@ export async function sendDocument(
 
 export async function createForumTopic(
   name: string,
-  options?: { iconColor?: number }
+  options?: { iconColor?: number; timeoutMs?: number }
 ): Promise<{ threadId: number; name: string } | null> {
   const config = getTelegramConfig();
 
@@ -232,28 +233,33 @@ export async function createForumTopic(
     body.icon_color = options.iconColor;
   }
 
-  const response = await telegramFetch(`https://api.telegram.org/bot${config.botToken}/createForumTopic`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options?.timeoutMs ?? TOPIC_CREATE_TIMEOUT_MS);
+  try {
+    const response = await telegramFetch(`https://api.telegram.org/bot${config.botToken}/createForumTopic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
 
-  if (!response.ok) {
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as TelegramResponse & {
+      result?: { message_thread_id?: number; name?: string };
+    };
+
+    if (!data.ok || !data.result?.message_thread_id) return null;
+
+    return {
+      threadId: data.result.message_thread_id,
+      name: data.result.name ?? name
+    };
+  } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const data = (await response.json()) as TelegramResponse & {
-    result?: { message_thread_id?: number; name?: string };
-  };
-
-  if (!data.ok || !data.result?.message_thread_id) {
-    return null;
-  }
-
-  return {
-    threadId: data.result.message_thread_id,
-    name: data.result.name ?? name
-  };
 }
 
 export async function editForumTopic(

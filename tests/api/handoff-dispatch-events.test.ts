@@ -6,9 +6,12 @@ const {
   createServerSupabaseClientMock,
   claimNextHandoffMock,
   reserveHandoffSendMock,
+  renewHandoffSendMock,
   markDeliveredMock,
   markFailedMock,
   persistTelegramMessageDeliveryMock,
+  recordTelegramReceiptMock,
+  deferTelegramReceiptPersistenceMock,
   sendTelegramMessageMock,
   ensureTelegramTopicMock,
   getSessionConsentMock,
@@ -19,9 +22,12 @@ const {
   createServerSupabaseClientMock: vi.fn(() => ({})),
   claimNextHandoffMock: vi.fn(),
   reserveHandoffSendMock: vi.fn(),
+  renewHandoffSendMock: vi.fn(),
   markDeliveredMock: vi.fn(),
   markFailedMock: vi.fn(),
   persistTelegramMessageDeliveryMock: vi.fn(),
+  recordTelegramReceiptMock: vi.fn(),
+  deferTelegramReceiptPersistenceMock: vi.fn(),
   sendTelegramMessageMock: vi.fn(),
   ensureTelegramTopicMock: vi.fn(),
   getSessionConsentMock: vi.fn(),
@@ -37,9 +43,12 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/handoff/outbox', () => ({
   claimNextHandoff: claimNextHandoffMock,
   reserveHandoffSend: reserveHandoffSendMock,
+  renewHandoffSend: renewHandoffSendMock,
   markDelivered: markDeliveredMock,
   markFailed: markFailedMock,
-  persistTelegramMessageDelivery: persistTelegramMessageDeliveryMock
+  persistTelegramMessageDelivery: persistTelegramMessageDeliveryMock,
+  recordTelegramReceipt: recordTelegramReceiptMock,
+  deferTelegramReceiptPersistence: deferTelegramReceiptPersistenceMock
 }));
 
 vi.mock('@/lib/telegram', () => ({
@@ -63,18 +72,24 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
   beforeEach(() => {
     claimNextHandoffMock.mockReset();
     reserveHandoffSendMock.mockReset();
+    renewHandoffSendMock.mockReset();
     markDeliveredMock.mockReset();
     markFailedMock.mockReset();
     persistTelegramMessageDeliveryMock.mockReset();
+    recordTelegramReceiptMock.mockReset();
+    deferTelegramReceiptPersistenceMock.mockReset();
     sendTelegramMessageMock.mockReset();
     ensureTelegramTopicMock.mockReset();
     getSessionConsentMock.mockReset();
     emitEventMock.mockReset();
     validateAdminRequestAnyMock.mockReturnValue({ ok: true });
     reserveHandoffSendMock.mockResolvedValue(true);
+    renewHandoffSendMock.mockResolvedValue(true);
     markDeliveredMock.mockResolvedValue(true);
     markFailedMock.mockResolvedValue({ shouldRetry: false, escalated: false, retryDelayMs: 0, applied: true });
     persistTelegramMessageDeliveryMock.mockResolvedValue(true);
+    recordTelegramReceiptMock.mockResolvedValue(true);
+    deferTelegramReceiptPersistenceMock.mockResolvedValue(true);
     ensureTelegramTopicMock.mockResolvedValue(77);
     getSessionConsentMock.mockResolvedValue({ analysis: false, producerTransfer: true });
   });
@@ -185,6 +200,62 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
 
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
     expect(markFailedMock).toHaveBeenCalledWith(expect.anything(), 'ho-topic-failed', '77777777-7777-4777-8777-777777777777', 'telegram_topic_unavailable', expect.anything());
+  });
+
+  test('does not send when ownership expires while resolving a Telegram topic', async () => {
+    claimNextHandoffMock
+      .mockResolvedValueOnce({
+        id: 'ho-topic-stale',
+        session_id: 'sess-topic-stale',
+        claim_token: '88888888-8888-4888-8888-888888888888',
+        payload: { sessionId: 'sess-topic-stale', type: 'relay', messageId: 44, summary: 'Private user message' },
+        resolution: 'claimed'
+      })
+      .mockResolvedValueOnce(null);
+    renewHandoffSendMock.mockResolvedValue(false);
+
+    const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
+    await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
+      method: 'POST',
+      headers: { authorization: 'Bearer cron-secret' }
+    }));
+
+    expect(renewHandoffSendMock).toHaveBeenCalledWith(expect.anything(), 'ho-topic-stale', '88888888-8888-4888-8888-888888888888');
+    expect(ensureTelegramTopicMock.mock.invocationCallOrder[0]).toBeLessThan(renewHandoffSendMock.mock.invocationCallOrder[0]);
+    expect(sendTelegramMessageMock).not.toHaveBeenCalled();
+  });
+
+  test('retries receipt persistence without sending a second Telegram message', async () => {
+    const claimToken = '99999999-9999-4999-8999-999999999999';
+    claimNextHandoffMock
+      .mockResolvedValueOnce({
+        id: 'ho-receipt', session_id: 'sess-receipt', claim_token: claimToken,
+        payload: { sessionId: 'sess-receipt', type: 'relay', messageId: 45, summary: 'Private user message' }, resolution: 'claimed'
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'ho-receipt', session_id: 'sess-receipt', claim_token: claimToken,
+        payload: {
+          sessionId: 'sess-receipt', type: 'relay', messageId: 45, summary: 'Private user message',
+          telegramMessageId: 502, telegramThreadId: 77
+        }, resolution: 'claimed'
+      })
+      .mockResolvedValueOnce(null);
+    sendTelegramMessageMock.mockResolvedValue({ messageId: 502 });
+    persistTelegramMessageDeliveryMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
+    await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
+      method: 'POST', headers: { authorization: 'Bearer cron-secret' }
+    }));
+    await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
+      method: 'POST', headers: { authorization: 'Bearer cron-secret' }
+    }));
+
+    expect(recordTelegramReceiptMock).toHaveBeenCalledWith(expect.anything(), 'ho-receipt', claimToken, expect.objectContaining({ telegramMessageId: 502, telegramThreadId: 77 }));
+    expect(deferTelegramReceiptPersistenceMock).toHaveBeenCalledWith(expect.anything(), 'ho-receipt', claimToken);
+    expect(sendTelegramMessageMock).toHaveBeenCalledTimes(1);
+    expect(markDeliveredMock).toHaveBeenCalledWith(expect.anything(), 'ho-receipt', claimToken);
   });
 
   test('does not send a handoff suppressed at claim time for an expired or revoked session', async () => {
