@@ -102,6 +102,31 @@ describe('WidgetOverlay accessibility', () => {
     expect(dialog.contains(focusedElement)).toBe(true);
   });
 
+  test('entry actions remain native enabled buttons in both disclosure states', () => {
+    stubFetch();
+    const { getByRole } = render(<WidgetOverlay autoOpen={true} />);
+
+    const initialActions = ['Build a brief with AI', 'Talk to the team without AI', 'Leave'];
+    for (const name of initialActions) {
+      const action = getByRole('button', { name });
+      expect(action.tagName).toBe('BUTTON');
+      expect(action).toBeEnabled();
+      expect(action).toHaveAttribute('type', 'button');
+      expect(action).toHaveClass('balance-entry-action');
+    }
+
+    fireEvent.click(getByRole('button', { name: 'Build a brief with AI' }));
+
+    const disclosedActions = ['Continue with AI', 'Talk to the team without AI', 'Leave'];
+    for (const name of disclosedActions) {
+      const action = getByRole('button', { name });
+      expect(action.tagName).toBe('BUTTON');
+      expect(action).toBeEnabled();
+      expect(action).toHaveAttribute('type', 'button');
+      expect(action).toHaveClass('balance-entry-action');
+    }
+  });
+
   test('Tab key cycles focus within the widget (focus trap)', async () => {
     stubFetch();
     const { container } = render(<WidgetOverlay autoOpen={true} />);

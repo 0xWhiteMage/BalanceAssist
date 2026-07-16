@@ -1,9 +1,35 @@
 import { describe, expect, test, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
+import { brandTokens } from '@/lib/brand-tokens';
 import { DATA_USE_NOTICE_COPY, CONSENT_VERSION } from '@/lib/privacy/notice';
 
 describe('DataUseNotice', () => {
+  const entryActionContract = {
+    width: '100%',
+    minHeight: '44px',
+    padding: '10px 16px',
+    borderRadius: '20px',
+    background: 'transparent',
+    fontWeight: '600'
+  };
+
+  function expectEqualEntryActions(names: string[]) {
+    const actions = names.map((name) => screen.getByRole('button', { name }));
+
+    for (const action of actions) {
+      expect(action).toHaveClass('balance-entry-action');
+      expect(action).toBeEnabled();
+      expect(action.tagName).toBe('BUTTON');
+      expect(action).toHaveAttribute('type', 'button');
+      expect(action.style).toMatchObject(entryActionContract);
+    }
+
+    expect(new Set(actions.map((action) => action.className))).toEqual(new Set(['balance-entry-action']));
+    expect(new Set(actions.map((action) => action.style.cssText))).toHaveLength(1);
+    expect(actions[0].style.border).toBe(`1px solid ${brandTokens.colors.border}`);
+  }
+
   test('renders the data use notice with the correct body text', () => {
     render(<DataUseNotice onConsent={() => {}} />);
     expect(screen.getByText(DATA_USE_NOTICE_COPY.body)).toBeInTheDocument();
@@ -14,13 +40,19 @@ describe('DataUseNotice', () => {
     expect(screen.getByText(DATA_USE_NOTICE_COPY.title)).toBeInTheDocument();
   });
 
-  test('offers equal AI, human, and leave choices before AI consent', () => {
+  test('gives initial AI, human, and leave actions one exact visual contract', () => {
     render(<DataUseNotice onConsent={() => {}} />);
 
-    expect(screen.getByRole('button', { name: 'Build a brief with AI' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Leave' })).toBeVisible();
+    expectEqualEntryActions(['Build a brief with AI', 'Talk to the team without AI', 'Leave']);
     expect(screen.queryByRole('button', { name: /I understand/i })).not.toBeInTheDocument();
+  });
+
+  test('keeps the exact visual contract after opening the AI disclosure', () => {
+    render(<DataUseNotice onConsent={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
+
+    expectEqualEntryActions(['Continue with AI', 'Talk to the team without AI', 'Leave']);
   });
 
   test('records AI consent only after Continue with AI', () => {

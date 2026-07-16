@@ -61,6 +61,49 @@ test('human recovery persists on mobile when session creation fails', async ({ p
   expect(requests.some((pathname) => ['/api/chat', '/api/telegram/relay', '/api/telegram/messages'].includes(pathname))).toBe(false);
 });
 
+test('equal entry actions have mobile bounds, visible keyboard focus, and keyboard activation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/api/sessions/inspect', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, exists: false })
+  }));
+  await page.route('**/api/sessions', (route) => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: false, code: 'session_unavailable' })
+  }));
+  await page.goto('/preview');
+
+  const names = ['Build a brief with AI', 'Talk to the team without AI', 'Leave'];
+  await page.getByRole('link', { name: /privacy/i }).focus();
+  for (const name of names) {
+    const action = page.getByRole('button', { name, exact: true });
+    const bounds = await action.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.width).toBeGreaterThanOrEqual(44);
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+
+    await page.keyboard.press('Tab');
+    await expect(action).toBeFocused();
+    const focusStyle = await action.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        outlineStyle: style.outlineStyle,
+        outlineWidth: Number.parseFloat(style.outlineWidth),
+        outlineOffset: Number.parseFloat(style.outlineOffset)
+      };
+    });
+    expect(focusStyle.outlineStyle).not.toBe('none');
+    expect(focusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
+    expect(focusStyle.outlineOffset).toBeGreaterThanOrEqual(2);
+  }
+
+  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
+});
+
 test('restores focus after closing its nested reference dialog without force clicks', async ({ page }) => {
   await page.route('**/api/sessions/inspect', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, exists: false }) });

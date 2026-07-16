@@ -18,3 +18,8 @@ body {
 a {
   color: inherit;
 }
+
+.balance-entry-action:focus-visible {
+  outline: 2px solid #dbb580;
+  outline-offset: 2px;
+}

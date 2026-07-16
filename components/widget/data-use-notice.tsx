@@ -71,32 +71,35 @@ export function DataUseNotice({
           <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.lightText }}>
             {DATA_USE_NOTICE_COPY.aiDisclosure}
           </p>
-          <button type="button" onClick={handleAcknowledge} style={primaryButtonStyle}>
+          <button type="button" className="balance-entry-action" onClick={handleAcknowledge} style={entryActionStyle}>
             Continue with AI
           </button>
-          <button type="button" onClick={onHuman} style={secondaryButtonStyle}>
+          <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>
             Talk to the team without AI
           </button>
-          <button type="button" onClick={onLeave} style={secondaryButtonStyle}>Leave</button>
+          <button type="button" className="balance-entry-action" onClick={onLeave} style={entryActionStyle}>Leave</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 8 }}>
-          <button type="button" onClick={() => setShowAiDisclosure(true)} style={primaryButtonStyle}>Build a brief with AI</button>
-          <button type="button" onClick={onHuman} style={secondaryButtonStyle}>Talk to the team without AI</button>
-          <button type="button" onClick={onLeave} style={secondaryButtonStyle}>Leave</button>
+          <button type="button" className="balance-entry-action" onClick={() => setShowAiDisclosure(true)} style={entryActionStyle}>Build a brief with AI</button>
+          <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>Talk to the team without AI</button>
+          <button type="button" className="balance-entry-action" onClick={onLeave} style={entryActionStyle}>Leave</button>
         </div>
       )}
     </div>
   );
 }
 
-const primaryButtonStyle = {
-  padding: '8px 16px', borderRadius: '20px', border: 'none',
-  background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-  color: '#101010', fontSize: '12px', fontWeight: 600, fontFamily: brandTokens.typography.ui, cursor: 'pointer'
-};
-
-const secondaryButtonStyle = {
-  ...primaryButtonStyle,
-  background: 'transparent', border: `1px solid ${brandTokens.colors.border}`, color: brandTokens.colors.lightText
+const entryActionStyle = {
+  width: '100%',
+  minHeight: '44px',
+  padding: '10px 16px',
+  borderRadius: '20px',
+  border: `1px solid ${brandTokens.colors.border}`,
+  background: 'transparent',
+  color: brandTokens.colors.lightText,
+  fontSize: '12px',
+  fontWeight: 600,
+  fontFamily: brandTokens.typography.ui,
+  cursor: 'pointer'
 };
