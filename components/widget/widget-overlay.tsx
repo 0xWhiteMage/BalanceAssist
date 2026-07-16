@@ -180,7 +180,7 @@ export function WidgetOverlay({
   const submitInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sessionBootstrapPromiseRef = useRef<Promise<string | null> | null>(null);
+  const bootstrapGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -295,6 +295,7 @@ export function WidgetOverlay({
 
   useEffect(() => {
     return () => {
+      bootstrapGenerationRef.current += 1;
       cancelRef.current = true;
       if (advanceTimerRef.current) {
         clearTimeout(advanceTimerRef.current);
@@ -389,6 +390,7 @@ export function WidgetOverlay({
   }, [advanceStep, hasStarted, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
   function handleClose() {
+    bootstrapGenerationRef.current += 1;
     if (sessionId) {
       void logEvent({ sessionId, eventName: 'widget_closed' });
     }
@@ -417,6 +419,7 @@ export function WidgetOverlay({
   useDialogFocus({ active: attachmentOpen, dialogRef: attachmentDialogRef, onDismiss: () => setAttachmentOpen(false) });
 
   function handleReset() {
+    bootstrapGenerationRef.current += 1;
     sessionDraft.reset();
     teamRelay.reset();
     cancelRef.current = true;
@@ -538,18 +541,23 @@ export function WidgetOverlay({
 
   async function handleTeamConnect() {
     if (humanRequested || !noticeConsent) return;
+    const bootstrapGeneration = bootstrapGenerationRef.current;
+    const bootstrapIsCurrent = () =>
+      bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
     const activeSessionId = await loadOrCreateSession();
-    if (!activeSessionId) {
-      return;
-    }
-    if (!await recordHumanContactConsent(activeSessionId)) {
+    if (!bootstrapIsCurrent() || !activeSessionId) return;
+    const consentRecorded = await recordHumanContactConsent(activeSessionId);
+    if (!bootstrapIsCurrent()) return;
+    if (!consentRecorded) {
       await botSay('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.');
       return;
     }
 
+    if (!bootstrapIsCurrent()) return;
     if (!teamRelay.requestHandoff()) return;
     setCurrentStep('free-chat');
 
+    if (!bootstrapIsCurrent()) return;
     void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
 
     const connectMsg: ChatMessage = {

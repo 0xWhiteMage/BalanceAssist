@@ -34,6 +34,14 @@ function makeFetchRecorder(handlers: Array<(req: RecordedRequest) => Response | 
   }) as unknown as typeof fetch;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 async function continueWithAi() {
   fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
@@ -372,6 +380,98 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(JSON.stringify(consentRequest?.body)).not.toContain('producer_transfer');
   });
 
+  test('does not continue a human bootstrap after the widget closes', async () => {
+    const requestLog: RecordedRequest[] = [];
+    const pendingSession = deferred<Response>();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      requestLog.push({ url, method: init?.method, body });
+      if (url.includes('/api/sessions/inspect')) {
+        return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      }
+      if (url.includes('/api/sessions') && init?.method === 'POST') return pendingSession.promise;
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await chooseHumanPath();
+    await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toBe(true));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    await act(async () => {
+      pendingSession.resolve(new Response(JSON.stringify({ sessionId: 'late-session', persisted: true }), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(false);
+    expect(requestLog.some((entry) => entry.url.includes('/api/events'))).toBe(false);
+    expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
+  });
+
+  test('does not revive a stale human bootstrap when reopened before it resolves', async () => {
+    const requestLog: RecordedRequest[] = [];
+    const pendingSession = deferred<Response>();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      requestLog.push({ url, method: init?.method, body });
+      if (url.includes('/api/sessions/inspect')) {
+        return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      }
+      if (url.includes('/api/sessions') && init?.method === 'POST') return pendingSession.promise;
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
+
+    await chooseHumanPath();
+    await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toBe(true));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    await act(async () => {
+      pendingSession.resolve(new Response(JSON.stringify({ sessionId: 'late-reopened-session', persisted: true }), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(screen.queryByPlaceholderText(/message the team request|type a message/i)).toBeNull();
+    expect(screen.getByRole('link', { name: /email the team/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
+    expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(false);
+    expect(requestLog.some((entry) => entry.url.includes('/api/events'))).toBe(false);
+    expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
+  });
+
+  test('does not activate the relay when the widget closes during consent persistence', async () => {
+    const requestLog: RecordedRequest[] = [];
+    const pendingConsent = deferred<Response>();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      requestLog.push({ url, method: init?.method, body });
+      if (url.includes('/api/sessions/inspect')) {
+        return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      }
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ sessionId: 'consent-session', persisted: true }), { status: 200 });
+      }
+      if (url.includes('/consent')) return pendingConsent.promise;
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
+
+    await chooseHumanPath();
+    await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(true));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    await act(async () => {
+      pendingConsent.resolve(new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+
+    expect(screen.queryByPlaceholderText(/message the team request|type a message/i)).toBeNull();
+    expect(requestLog.some((entry) => entry.url.includes('/api/events') && (entry.body as { eventName?: string })?.eventName === 'human_handoff')).toBe(false);
+    expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
+  });
+
   test('keeps human recovery persistent when human session creation fails', async () => {
     const requestLog: RecordedRequest[] = [];
     global.fetch = makeFetchRecorder([
@@ -382,7 +482,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
         return null;
       }
     ]);
-    const { rerender } = render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
+    render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
 
     await chooseHumanPath();
     const unavailable = await screen.findByText('The private relay could not start. You can still contact the team directly.');
@@ -405,8 +505,9 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(email).toBeVisible();
     expect(unavailable).toBeVisible();
 
-    rerender(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
     expect(screen.getByRole('link', { name: /email the team/i })).toBeVisible();
     expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
     expect(screen.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
