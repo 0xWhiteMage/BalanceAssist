@@ -238,7 +238,7 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('queued');
   });
 
-  test('accepts a team reply while the current send is pending', async () => {
+  test('keeps the current send pending when an uncorrelated team reply arrives', async () => {
     const pendingSend = deferred<{ persisted: boolean; queued: boolean; delivered: boolean }>();
     const poll = vi.fn(async () => ({
       outgoingStatus: 'delivered' as const,
@@ -254,13 +254,17 @@ describe('useTeamRelay', () => {
     let sendPromise!: Promise<'persisted' | 'failed' | 'invalidated'>;
     act(() => { sendPromise = result.current.send('Hello'); });
     await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe('replied');
+    expect(result.current.status).toBe('sending');
+    expect(result.current.waitingForReply).toBe(true);
+    expect(result.current.isTeamConnected).toBe(true);
+    expect(result.current.messages.map((message) => message.text)).toEqual(['Reply']);
 
     await act(async () => {
       pendingSend.resolve({ persisted: true, queued: true, delivered: false });
       await sendPromise;
     });
-    expect(result.current.status).toBe('replied');
+    expect(result.current.status).toBe('queued');
+    expect(result.current.waitingForReply).toBe(true);
   });
 
   test('does not let an older poll promote or leak into a newer send', async () => {
@@ -482,7 +486,7 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('queued');
   });
 
-  test('promotes queued to delivered only from polling and then to replied', async () => {
+  test('promotes queued to delivered without attributing an incoming reply to the send', async () => {
     const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
     const poll = vi.fn()
       .mockResolvedValueOnce({ outgoingStatus: 'queued', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
@@ -500,15 +504,15 @@ describe('useTeamRelay', () => {
     await act(async () => { await result.current.poll(); });
     expect(result.current.status).toBe('delivered');
     await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe('replied');
+    expect(result.current.status).toBe('delivered');
+    expect(result.current.waitingForReply).toBe(true);
+    expect(result.current.isTeamConnected).toBe(true);
   });
 
-  test('tracks a second send independently after the first reply', async () => {
+  test('keeps send B queued and waiting when a delayed reply to send A arrives', async () => {
     const poll = vi.fn()
       .mockResolvedValueOnce({ outgoingStatus: 'delivered' as const, messages: [{ id: 1, sender: 'team' as const, text: 'First reply', createdAt: '2026-07-16T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
-      .mockResolvedValueOnce({ outgoingStatus: 'queued' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
-      .mockResolvedValueOnce({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
-      .mockResolvedValueOnce({ outgoingStatus: 'delivered' as const, messages: [{ id: 2, sender: 'team' as const, text: 'Second reply', createdAt: '2026-07-16T10:01:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+      .mockResolvedValueOnce({ outgoingStatus: 'queued' as const, messages: [{ id: 2, sender: 'team' as const, text: 'Delayed reply to A', createdAt: '2026-07-16T10:01:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
     const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
     const { result } = renderHook(() => useTeamRelay({
       sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: relay
@@ -516,21 +520,17 @@ describe('useTeamRelay', () => {
 
     await act(async () => { await result.current.send('First message'); });
     await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe('replied');
-
-    let secondSend!: Promise<'persisted' | 'failed' | 'invalidated'>;
-    act(() => { secondSend = result.current.send('Second message'); });
-    expect(result.current.status).toBe('sending');
-    await act(async () => { await secondSend; });
-    expect(result.current.status).toBe('queued');
-    await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe('queued');
-    await act(async () => { await result.current.poll(); });
     expect(result.current.status).toBe('delivered');
+    expect(result.current.isTeamConnected).toBe(true);
+
+    await act(async () => { await result.current.send('Second message'); });
+    expect(result.current.status).toBe('queued');
     await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe('replied');
-    expect(result.current.messages.map((message) => message.text)).toEqual(['First reply', 'Second reply']);
-    expect(poll.mock.calls.map(([, sinceId]) => sinceId)).toEqual([0, 1, 1, 1]);
+    expect(result.current.status).toBe('queued');
+    expect(result.current.waitingForReply).toBe(true);
+    expect(result.current.isTeamConnected).toBe(true);
+    expect(result.current.messages.map((message) => message.text)).toEqual(['First reply', 'Delayed reply to A']);
+    expect(poll.mock.calls.map(([, sinceId]) => sinceId)).toEqual([0, 1]);
   });
 
   test('reports terminal outgoing delivery as unavailable', async () => {
@@ -595,7 +595,7 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('queued');
   });
 
-  test('keeps replied after later outgoing delivery evidence', async () => {
+  test('keeps incoming response evidence separate from later outgoing delivery evidence', async () => {
     const poll = vi.fn()
       .mockResolvedValueOnce({ outgoingStatus: 'queued', messages: [{ id: 1, sender: 'team' as const, text: 'Reply', createdAt: '2026-07-16T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
       .mockResolvedValueOnce({ outgoingStatus: 'delivered', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
@@ -604,9 +604,11 @@ describe('useTeamRelay', () => {
     }));
 
     await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe('replied');
+    expect(result.current.status).toBe('queued');
+    expect(result.current.isTeamConnected).toBe(true);
     await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe('replied');
+    expect(result.current.status).toBe('delivered');
+    expect(result.current.isTeamConnected).toBe(true);
   });
 
   test('returns a rejected relay send to the requested retryable state', async () => {
@@ -670,7 +672,7 @@ describe('useTeamRelay', () => {
 
     expect(poll).toHaveBeenCalledTimes(2);
     expect(result.current.isTeamConnected).toBe(true);
-    expect(result.current.status).toBe('replied');
+    expect(result.current.status).toBe('requested');
     unmount();
     vi.useRealTimers();
   });

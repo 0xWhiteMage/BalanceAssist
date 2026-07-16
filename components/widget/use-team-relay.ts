@@ -13,7 +13,7 @@ type SendResult = 'persisted' | 'failed' | 'invalidated';
 
 export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }: Dependencies) {
   const [requested, setRequested] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable' | 'replied'>('idle');
+  const [status, setStatus] = useState<'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable'>('idle');
   const [isTeamConnected, setIsTeamConnected] = useState(false);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [fileRequestOpen, setFileRequestOpen] = useState(false);
@@ -59,7 +59,6 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
       setScheduleRequestOpen(next.scheduleRequestOpen);
       if (!suppressOutgoingStatus) {
         setStatus((current) => {
-          if (current === 'replied') return current;
           if (next.outgoingStatus === 'unavailable') return 'unavailable';
           if (next.outgoingStatus === 'delivered') return 'delivered';
           if (next.outgoingStatus === 'queued' && current !== 'delivered') return 'queued';
@@ -73,9 +72,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
           return [...existing, ...next.messages.filter((message) => !known.has(message.id))];
         });
         if (next.messages.some((message) => message.sender === 'team')) {
-          setWaitingForReply(false);
           setIsTeamConnected(true);
-          setStatus('replied');
         }
       }
     } finally {
@@ -102,7 +99,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const requestHandoff = useCallback(() => {
     if (requested) return false;
     setRequested(true);
-    setStatus((current) => current === 'replied' ? current : 'requested');
+    setStatus('requested');
     return true;
   }, [requested]);
 
@@ -127,13 +124,13 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     if (sent) {
       retryRef.current = null;
       setStatus((current) => {
-        if (current === 'replied' || current === 'delivered') return current;
+        if (current === 'delivered') return current;
         return typeof result === 'boolean' || result.queued ? 'queued' : 'saved';
       });
     }
     else {
       setWaitingForReply(false);
-      setStatus((current) => current === 'replied' || current === 'delivered' ? current : 'requested');
+      setStatus((current) => current === 'delivered' ? current : 'requested');
     }
     return sent ? 'persisted' : 'failed';
   }, [identity, relayUserMessage, sessionId]);
@@ -166,14 +163,14 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   }, []);
 
   const markUploadPending = useCallback(() => {
-    setWaitingForReply(false); setStatus((current) => current === 'replied' ? current : 'queued');
+    setWaitingForReply(false); setStatus('queued');
   }, []);
 
   const markUploadFailed = useCallback(() => {
-    setWaitingForReply(false); setStatus((current) => current === 'replied' ? current : 'requested');
+    setWaitingForReply(false); setStatus('requested');
   }, []);
 
-  const markRequested = useCallback(() => setStatus((current) => current === 'replied' ? current : 'requested'), []);
+  const markRequested = useCallback(() => setStatus('requested'), []);
 
   return {
     requested, status, isTeamConnected, waitingForReply, fileRequestOpen, fileRequestNote, scheduleRequestOpen, messages,

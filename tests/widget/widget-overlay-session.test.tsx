@@ -440,6 +440,26 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(createCalls).toBe(2);
   }, 10_000);
 
+  test('enables AI interaction before delayed intro output completes', async () => {
+    global.fetch = makeFetchRecorder([
+      ({ url, method }) => {
+        if (url.includes('/api/sessions/inspect')) {
+          return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+        }
+        if (url.includes('/api/sessions') && method === 'POST') {
+          return new Response(JSON.stringify({ sessionId: 'ready-ai-session', persisted: true }), { status: 200 });
+        }
+        return null;
+      }
+    ]);
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+
+    expect(await findChatInput()).toBeEnabled();
+    expect(screen.getByRole('status', { name: 'Balance Assist is typing' })).toBeVisible();
+  });
+
   test('invalidates a pending AI restore on close and restarts cleanly on reopen', async () => {
     const pendingRestore = deferred<Response>();
     let inspectCalls = 0;

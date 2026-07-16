@@ -19,4 +19,12 @@ describe('human relay public status', () => {
     expect(screen.getByRole('link', { name: 'Book a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
     expect(screen.queryByText(/provider|telegram|private provider failure/i)).toBeNull();
   });
+
+  test('reports queued delivery separately from visible team response evidence', () => {
+    render(<HumanFooter isTeamConnected={true} hasTeamReply={true} humanStatus="queued" onConnect={vi.fn()} />);
+
+    expect(screen.getByText('Queued for the Balance team')).toBeVisible();
+    expect(screen.getByText('Team response received')).toBeVisible();
+    expect(screen.queryByText('Replied by team')).toBeNull();
+  });
 });

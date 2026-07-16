@@ -262,11 +262,13 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
 
 export function HumanFooter({
   isTeamConnected,
+  hasTeamReply = false,
   humanStatus,
   onConnect
 }: {
   isTeamConnected: boolean;
-  humanStatus: 'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable' | 'replied';
+  hasTeamReply?: boolean;
+  humanStatus: 'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable';
   onConnect: () => void;
 }) {
   return (
@@ -328,24 +330,11 @@ export function HumanFooter({
               textTransform: 'uppercase',
               letterSpacing: '0.1em',
               color:
-                humanStatus === 'replied'
-                  ? '#4ade80'
-                  : humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested'
+                humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested'
                     ? brandTokens.colors.warmGold
                     : brandTokens.colors.mutedText
             }}
           >
-            {humanStatus === 'replied' && (
-              <span
-                style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: '#4ade80',
-                  display: 'inline-block'
-                }}
-              />
-            )}
             {(humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested') && (
               <span
                 style={{
@@ -357,9 +346,7 @@ export function HumanFooter({
                 }}
               />
             )}
-            {humanStatus === 'replied'
-              ? 'Replied by team'
-              : humanStatus === 'requested'
+            {humanStatus === 'requested'
                 ? 'Team contact requested'
                 : humanStatus === 'sending'
                   ? 'Sending message'
@@ -373,6 +360,12 @@ export function HumanFooter({
                   ? 'Message delivery unavailable'
                   : 'Connected to team'}
           </div>
+          {hasTeamReply && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4ade80', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />
+              Team response received
+            </div>
+          )}
         </div>
       )}
     </div>

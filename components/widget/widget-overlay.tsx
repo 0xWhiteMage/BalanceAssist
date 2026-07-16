@@ -183,6 +183,7 @@ export function WidgetOverlay({
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapGenerationRef = useRef(0);
   const aiBootstrapInFlightGenerationRef = useRef<number | null>(null);
+  const aiBootstrapCompletedRef = useRef(false);
   const humanBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
@@ -389,7 +390,7 @@ export function WidgetOverlay({
   const loadOrCreateSession = sessionDraft.loadOrCreateSession;
 
   const startConversation = useCallback(async () => {
-    if (hasStarted || isTeamConnected || !noticeConsent) return;
+    if (aiBootstrapCompletedRef.current || isTeamConnected || !noticeConsent) return;
     const bootstrapGeneration = bootstrapGenerationRef.current;
     if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
     aiBootstrapInFlightGenerationRef.current = bootstrapGeneration;
@@ -405,18 +406,20 @@ export function WidgetOverlay({
         return;
       }
 
+      setHasStarted(true);
       await advanceStep('intro', createDefaultLeadDraft(), bootstrapIsCurrent);
-      if (bootstrapIsCurrent()) setHasStarted(true);
+      if (bootstrapIsCurrent()) aiBootstrapCompletedRef.current = true;
     } finally {
       if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) {
         aiBootstrapInFlightGenerationRef.current = null;
       }
     }
-  }, [advanceStep, hasStarted, isTeamConnected, loadOrCreateSession, noticeConsent]);
+  }, [advanceStep, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
   function handleClose() {
     bootstrapGenerationRef.current += 1;
     sessionDraft.invalidateBootstrap();
+    if (!aiBootstrapCompletedRef.current) setHasStarted(false);
     if (sessionId) {
       void logEvent({ sessionId, eventName: 'widget_closed' });
     }
@@ -439,7 +442,7 @@ export function WidgetOverlay({
     cancelRef.current = false;
     teamRelay.resume();
     setIsOpen(true);
-    if (entryPath === 'ai' && noticeConsent && !hasStarted) void startConversation();
+    if (entryPath === 'ai' && noticeConsent && !aiBootstrapCompletedRef.current) void startConversation();
   }
 
   useDialogFocus({ active: isOpen, dialogRef: widgetContainerRef, onDismiss: handleClose });
@@ -447,6 +450,7 @@ export function WidgetOverlay({
 
   function handleReset() {
     bootstrapGenerationRef.current += 1;
+    aiBootstrapCompletedRef.current = false;
     sessionDraft.reset();
     teamRelay.reset();
     cancelRef.current = true;
@@ -1563,7 +1567,7 @@ export function WidgetOverlay({
                 </button>
               </div>
 
-              <HumanFooter isTeamConnected={humanRequested} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+              <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} onConnect={handleTeamConnect} />
               {humanRequested && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} deliveryUnavailable={humanStatus === 'unavailable'} />}
             </>
           )}
