@@ -213,6 +213,21 @@ describe('POST /api/chat', () => {
     return { res, data: await res.json() };
   }
 
+  function safelySerializeLogCalls(calls: unknown[][]): string {
+    const seen = new WeakSet<object>();
+    return JSON.stringify(calls, (_key, value: unknown) => {
+      if (typeof value === 'bigint') return String(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: value.message, stack: value.stack };
+      }
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) return '[Circular]';
+        seen.add(value);
+      }
+      return value;
+    }) ?? '';
+  }
+
   test('rejects an omitted session capability before calling the provider', async () => {
     process.env.DEEPSEEK_API_KEY = 'test-key';
     global.fetch = vi.fn();
@@ -409,6 +424,7 @@ describe('POST /api/chat', () => {
       expect(res.status).toBe(200);
       expect(data).toEqual({
         message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
+        outcome: 'confidential_diversion',
         draftUpdates: {},
         briefReady: false,
         reviewPrompt: null,
@@ -420,7 +436,11 @@ describe('POST /api/chat', () => {
       expect(fromMock).not.toHaveBeenCalled();
       expect(global.fetch).not.toHaveBeenCalled();
       expect(emitEventMock).not.toHaveBeenCalled();
-      expect([...logSpy.mock.calls, ...warnSpy.mock.calls, ...errorSpy.mock.calls].flat().join(' ')).not.toContain(secret);
+      expect(safelySerializeLogCalls([
+        ...logSpy.mock.calls,
+        ...warnSpy.mock.calls,
+        ...errorSpy.mock.calls
+      ])).not.toContain(secret);
     } finally {
       logSpy.mockRestore();
       warnSpy.mockRestore();
@@ -428,7 +448,7 @@ describe('POST /api/chat', () => {
     }
   });
 
-  test('classifies only the current last user message', async () => {
+  test('diverts when an earlier provider-bound user message is confidential and the current message is benign', async () => {
     global.fetch = vi.fn();
     const { res, data } = await postChat({
       messages: [
@@ -439,10 +459,48 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.messages).toBeDefined();
-    expect(JSON.stringify(data)).not.toMatch(/cannot process confidential/i);
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledOnce();
+    expect(data.outcome).toBe('confidential_diversion');
+    expect(data.message).toMatch(/cannot process confidential or sensitive material/i);
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledTimes(3);
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA.');
     expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('Can you do filming?');
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA. Can you do filming?');
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('classifies the bounded joined user history to catch a split confidential phrase', async () => {
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [
+        { role: 'user', content: 'This project is under' },
+        { role: 'user', content: 'NDA.' }
+      ]
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.outcome).toBe('confidential_diversion');
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('This project is under NDA.');
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('rejects blank current user content before classification or provider activity', async () => {
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [
+        { role: 'user', content: 'Earlier project context' },
+        { role: 'user', content: '  \n\t ' }
+      ]
+    });
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe('Invalid request payload');
+    expect(classifyConfidentialIntentMock).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test('checks authenticated session mismatch before confidential classification', async () => {

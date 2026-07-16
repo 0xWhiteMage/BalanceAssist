@@ -92,6 +92,36 @@ describe('chatRequest client', () => {
     await expect(chatRequest({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeNull();
   });
 
+  test('returns the validated confidential diversion outcome', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
+      outcome: 'confidential_diversion',
+      draftUpdates: {},
+      briefReady: false
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    const result = await chatRequest({ messages: [{ role: 'user', content: 'protected text' }] });
+
+    expect(result?.outcome).toBe('confidential_diversion');
+  });
+
+  test('rejects an unknown chat outcome', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: 'Unexpected response',
+      outcome: 'retry_with_history'
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    await expect(chatRequest({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeNull();
+  });
+
   test('chatRequest only posts browser user messages to /api/chat', async () => {
     const requestBodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
 

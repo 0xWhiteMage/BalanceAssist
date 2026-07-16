@@ -43,6 +43,7 @@ const SHARE_WORK_TOOL_NAME = 'share_work';
 function confidentialDiversionResponse(request: Request) {
   return jsonWithCors({
     message: CONFIDENTIAL_INTAKE_RESPONSE,
+    outcome: 'confidential_diversion',
     draftUpdates: {},
     briefReady: false,
     reviewPrompt: null,
@@ -528,7 +529,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (classifyConfidentialIntent(lastUserMessage) !== 'allow') {
+    const classificationInputs = [
+      ...messages.map((message) => message.content),
+      messages.map((message) => message.content).join(' ')
+    ];
+    const classifications = classificationInputs.map((input) => classifyConfidentialIntent(input));
+    if (classifications.some((classification) => classification !== 'allow')) {
       return confidentialDiversionResponse(request);
     }
   } catch {

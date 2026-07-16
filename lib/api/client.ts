@@ -478,6 +478,7 @@ export type ChatRequestPayload = {
 
 export type ChatResponse = {
   replies: ChatReplyItem[];
+  outcome?: 'confidential_diversion';
   draftUpdates: Record<string, string | boolean>;
   briefReady: boolean;
   sharedWork: ChatSharedWork | null;
@@ -486,6 +487,7 @@ export type ChatResponse = {
 const chatResponseSchema = z.object({
   message: z.string().optional(),
   messages: z.array(z.string()).optional(),
+  outcome: z.literal('confidential_diversion').optional(),
   draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(),
   briefReady: z.boolean().optional(),
   sharedWork: z.object({ entries: z.array(z.object({
@@ -519,6 +521,7 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
 
   return {
     replies: textChunks.map((text) => ({ text })),
+    outcome: data.outcome,
     draftUpdates: data.draftUpdates ?? {},
     briefReady: Boolean(data.briefReady),
     sharedWork: data.sharedWork ?? null

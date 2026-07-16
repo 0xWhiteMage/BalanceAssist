@@ -63,6 +63,71 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay brief rail gating (Fix 4)', () => {
+  test('moves a confidential diversion to human-only contact without retrying or relaying blocked history', async () => {
+    const secret = 'Project NIGHTJAR is under NDA';
+    const requests: Array<{ url: string; body: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, body: String(init?.body ?? '') });
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
+          outcome: 'confidential_diversion',
+          draftUpdates: {},
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (url.includes('/api/telegram/relay')) {
+        return new Response(JSON.stringify({ ok: true, persisted: true, queued: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (url.includes('/api/telegram/messages')) {
+        return new Response(JSON.stringify({
+          outgoingStatus: null,
+          messages: [],
+          fileRequestOpen: false,
+          fileRequestNote: null,
+          scheduleRequestOpen: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: secret } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText(/this channel cannot process confidential or sensitive material/i, {}, { timeout: 5000 })).toBeVisible();
+    const humanInput = await screen.findByPlaceholderText(/message the team request/i, {}, { timeout: 5000 });
+    const chatRequests = () => requests.filter((request) => request.url.includes('/api/chat'));
+    const relayRequests = () => requests.filter((request) => request.url.includes('/api/telegram/relay'));
+    expect(chatRequests()).toHaveLength(1);
+    expect(relayRequests()).toHaveLength(0);
+
+    fireEvent.change(humanInput, { target: { value: 'Please ask a producer to contact me.' } });
+    fireEvent.keyDown(humanInput, { key: 'Enter' });
+
+    await waitFor(() => expect(relayRequests()).toHaveLength(1));
+    expect(chatRequests()).toHaveLength(1);
+    expect(relayRequests()[0].body).toContain('Please ask a producer to contact me.');
+    expect(relayRequests()[0].body).not.toContain(secret);
+  }, 15_000);
+
   test('makes direct human contact usable while the request is pending without claiming the team is connected', async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

@@ -187,6 +187,7 @@ export function WidgetOverlay({
   const humanBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
+  const confidentialDiversionRef = useRef(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -475,10 +476,12 @@ export function WidgetOverlay({
     setView('chat');
     setCalendlyUrl(null);
     setAllowAttachment(false);
+    confidentialDiversionRef.current = false;
     cancelRef.current = false;
   }
 
   async function handleLLMResponse(history: ChatMessage[]) {
+    if (confidentialDiversionRef.current) return;
     const latestUserText = [...history].reverse().find((message) => message.sender === 'user')?.text ?? '';
 
     try {
@@ -509,6 +512,20 @@ export function WidgetOverlay({
           isTeamConnected: teamRef.current
         });
         await botSay(localFallback ?? getFallbackResponse());
+        return;
+      }
+
+      if (data.outcome === 'confidential_diversion') {
+        confidentialDiversionRef.current = true;
+        if (advanceTimerRef.current) {
+          clearTimeout(advanceTimerRef.current);
+          advanceTimerRef.current = null;
+        }
+        for (const reply of data.replies) {
+          await botSay(reply.text);
+        }
+        setEntryPath('human');
+        await handleTeamConnect();
         return;
       }
 
