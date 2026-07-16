@@ -81,15 +81,23 @@ const FILENAME_CATEGORY_PRIORITY: Record<Exclude<ConfidentialIntentResult, 'allo
   sensitive: 4
 };
 
-function classifyFilenameToken(tokens: readonly string[], index: number): ConfidentialIntentResult {
+type FilenamePhraseMatch = {
+  category: Exclude<ConfidentialIntentResult, 'allow'>;
+  length: number;
+};
+
+function matchFilenamePhrase(tokens: readonly string[], index: number): FilenamePhraseMatch | null {
   const token = tokens[index];
   const next = tokens[index + 1];
   const afterNext = tokens[index + 2];
 
-  if (token === 'nda' || (token === 'non' && next === 'disclosure' && afterNext === 'agreement')) return 'nda';
-  if (token === 'confidential') return 'confidential';
+  if (token === 'nda') return { category: 'nda', length: 1 };
+  if (token === 'non' && next === 'disclosure' && afterNext === 'agreement') {
+    return { category: 'nda', length: 3 };
+  }
+  if (token === 'confidential') return { category: 'confidential', length: 1 };
   if (token === 'unreleased' || token === 'unannounced' || (token === 'pre' && next === 'release')) {
-    return 'unreleased';
+    return { category: 'unreleased', length: token === 'pre' ? 2 : 1 };
   }
   if (
     (token === 'personal' && next === 'data') ||
@@ -97,10 +105,30 @@ function classifyFilenameToken(tokens: readonly string[], index: number): Confid
     (token === 'identifying' && next === 'details') ||
     (token === 'contact' && (next === 'details' || next === 'information'))
   ) {
-    return 'personal-data';
+    return { category: 'personal-data', length: token === 'personally' ? 3 : 2 };
   }
-  if (token === 'sensitive') return 'sensitive';
-  return 'allow';
+  if (token === 'sensitive') return { category: 'sensitive', length: 1 };
+  return null;
+}
+
+function filenameMaskLength(tokens: readonly string[], index: number): number {
+  const token = tokens[index];
+  const next = tokens[index + 1];
+  const afterNext = tokens[index + 2];
+  const fourth = tokens[index + 3];
+
+  if (token === 'not' && (next === 'confidential' || next === 'sensitive')) return 2;
+  if (token === 'no' && next === 'personal' && afterNext === 'data') return 3;
+  if (token === 'not' && next === 'under' && afterNext === 'nda') return 3;
+  if (token === 'already' && next === 'released') return 2;
+  if (token === 'guide' && next === 'to' && afterNext === 'confidential' && fourth === 'information') return 4;
+  if (token === 'sensitive' && next === 'topic') return 2;
+
+  const protectedPhrase = matchFilenamePhrase(tokens, index);
+  if (!protectedPhrase) return 0;
+  let markerIndex = index + protectedPhrase.length;
+  if (['content', 'data', 'information'].includes(tokens[markerIndex])) markerIndex += 1;
+  return tokens[markerIndex] === 'policy' || tokens[markerIndex] === 'template' ? markerIndex - index + 1 : 0;
 }
 
 function removeDefaultIgnorables(value: string): string {
@@ -137,21 +165,29 @@ export function classifyConfidentialFilename(filename: string): ConfidentialInte
   const canonical = removeDefaultIgnorables(filename.normalize('NFKC')).toLowerCase().trim();
   if (canonical.length > 512) return 'sensitive';
 
-  const extensionIndex = canonical.lastIndexOf('.');
-  const hasExtension = extensionIndex > 0;
-  if (extensionIndex === 0 || (hasExtension && !/^[a-z0-9]{1,16}$/.test(canonical.slice(extensionIndex + 1)))) {
-    return 'allow';
+  const tokens = normalizeForClassification(canonical).split(' ').filter(Boolean);
+  const masked = new Array<boolean>(tokens.length).fill(false);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const maskLength = filenameMaskLength(tokens, index);
+    for (let offset = 0; offset < maskLength; offset += 1) {
+      masked[index + offset] = true;
+    }
   }
 
-  const basename = hasExtension ? canonical.slice(0, extensionIndex) : canonical;
-  if (/[\\/]/.test(basename)) return 'allow';
-  const tokens = normalizeForClassification(basename).split(' ').filter(Boolean);
   let result: ConfidentialIntentResult = 'allow';
 
   for (let index = 0; index < tokens.length; index += 1) {
-    const category = classifyFilenameToken(tokens, index);
+    if (masked[index]) continue;
+    const match = matchFilenamePhrase(tokens, index);
+    if (!match) continue;
+    let phraseIsMasked = false;
+    for (let offset = 1; offset < match.length; offset += 1) {
+      if (masked[index + offset]) phraseIsMasked = true;
+    }
+    if (phraseIsMasked) continue;
+
+    const category = match.category;
     if (
-      category !== 'allow' &&
       (result === 'allow' || FILENAME_CATEGORY_PRIORITY[category] < FILENAME_CATEGORY_PRIORITY[result])
     ) {
       result = category;

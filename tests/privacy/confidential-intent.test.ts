@@ -112,9 +112,46 @@ describe('classifyConfidentialIntent', () => {
     ['nda-confidential', 'nda'],
     ['nda-candidate.pdf', 'nda'],
     ['confidential-sensitive-data', 'confidential'],
-    ['confidential-personal-data', 'confidential'],
-    ['sensitive-topic.txt', 'sensitive']
+    ['confidential-personal-data', 'confidential']
   ])('keeps filename classification monotonic with precedence for %j as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['.confidential', 'confidential'],
+    ['confidential.', 'confidential'],
+    ['confidential.pdf!', 'confidential']
+  ])('scans the full normalized filename despite extension punctuation: %j', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test.each([
+    'not-confidential.txt',
+    'no-personal-data.csv',
+    'not-sensitive.pdf',
+    'not-under-nda.docx',
+    'already-released.mov',
+    'guide-to-confidential-information.pdf',
+    'sensitive-topic.txt',
+    'confidential-information-policy.pdf',
+    'nda-template.docx',
+    'sensitive-data-template.csv',
+    'personal-data-policy.pdf',
+    'unreleased-content-policy.txt'
+  ])('masks bounded filename negation or educational label %j', (input) => {
+    expect(classifyConfidentialFilename(input)).toBe('allow');
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['not-confidential-sensitive-data.pdf', 'sensitive'],
+    ['no-personal-data-confidential-brief.pdf', 'confidential'],
+    ['not-sensitive-nda-material.pdf', 'nda'],
+    ['not-under-nda-confidential.pdf', 'confidential'],
+    ['already-released-unreleased-campaign.pdf', 'unreleased'],
+    ['guide-to-confidential-information-nda-material.pdf', 'nda'],
+    ['nda-template-confidential.pdf', 'confidential'],
+    ['personal-data-policy-sensitive.pdf', 'sensitive']
+  ])('keeps a separate positive filename phrase after masking %j as %s', (input, expected) => {
     expect(classifyConfidentialFilename(input)).toBe(expected);
   });
 
