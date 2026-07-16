@@ -34,7 +34,15 @@
     "source_channel": { "id": "source_channel", "title": "Source Channel", "type": "status" },
     "approved_at": { "id": "submitted_at", "title": "Approved At", "type": "date" },
     "approved_revision": { "id": "approved_revision", "title": "Approved Revision", "type": "numbers" },
-    "reference_links": { "id": "reference_links", "title": "Reference Links", "type": "long_text" }
+    "reference_links": { "id": "reference_links", "title": "Reference Links", "type": "long_text" },
+    "lead_owner": { "id": "lead_owner", "title": "Owner", "type": "people" },
+    "pipeline_stage": { "id": "color_mm5ac1te", "title": "Pipeline Stage", "type": "status" },
+    "next_follow_up": { "id": "next_follow_up", "title": "Next follow-up", "type": "date" },
+    "last_contacted": { "id": "last_contacted", "title": "Last contacted", "type": "date" },
+    "meeting_booked": { "id": "meeting_booked", "title": "Meeting booked", "type": "checkbox" },
+    "meeting_outcome": { "id": "color_mm5afggy", "title": "Meeting Outcome", "type": "status" },
+    "sales_notes": { "id": "sales_notes", "title": "Sales notes", "type": "long_text" },
+    "loss_reason": { "id": "loss_reason", "title": "Loss reason", "type": "text" }
   },
   "statusLabelIds": {
     "qualification_status": { "qualified": 1, "needs_review": 0, "misfit": 17, "unqualified": 2 },
