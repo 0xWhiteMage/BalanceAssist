@@ -181,6 +181,7 @@ export function WidgetOverlay({
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapGenerationRef = useRef(0);
+  const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -317,15 +318,22 @@ export function WidgetOverlay({
         isDisclaimer?: boolean;
         isSystem?: boolean;
         delay?: number;
+        isValid?: () => boolean;
       }
     ): Promise<void> => {
-      if (cancelRef.current) return;
+      const isValid = options?.isValid ?? (() => true);
+      if (cancelRef.current || !isValid()) return;
 
+      const botSayGeneration = botSayGenerationRef.current + 1;
+      botSayGenerationRef.current = botSayGeneration;
       setIsTyping(true);
       const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
       await sleep(delay);
 
-      if (cancelRef.current) return;
+      if (cancelRef.current || !isValid()) {
+        if (botSayGenerationRef.current === botSayGeneration) setIsTyping(false);
+        return;
+      }
 
       setIsTyping(false);
       const botMessage: ChatMessage = {
@@ -338,6 +346,7 @@ export function WidgetOverlay({
         isDisclaimer: options?.isDisclaimer
       };
       const nextMessages = [...messagesRef.current, botMessage];
+      if (cancelRef.current || !isValid()) return;
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
     },
@@ -544,12 +553,14 @@ export function WidgetOverlay({
     const bootstrapGeneration = bootstrapGenerationRef.current;
     const bootstrapIsCurrent = () =>
       bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
-    const activeSessionId = await loadOrCreateSession();
+    const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
     if (!bootstrapIsCurrent() || !activeSessionId) return;
     const consentRecorded = await recordHumanContactConsent(activeSessionId);
     if (!bootstrapIsCurrent()) return;
     if (!consentRecorded) {
-      await botSay('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.');
+      await botSay('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.', {
+        isValid: bootstrapIsCurrent
+      });
       return;
     }
 

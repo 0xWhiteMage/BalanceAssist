@@ -472,6 +472,86 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   });
 
+  test('does not continue a pending human session create after unmount', async () => {
+    const requestLog: RecordedRequest[] = [];
+    const pendingSession = deferred<Response>();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requestLog.push({ url, method: init?.method });
+      if (url.includes('/api/sessions/inspect')) return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      if (url.includes('/api/sessions') && init?.method === 'POST') return pendingSession.promise;
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const { unmount } = render(<WidgetOverlay autoOpen={true} />);
+
+    await chooseHumanPath();
+    await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toBe(true));
+    unmount();
+    pendingSession.resolve(new Response(JSON.stringify({ sessionId: 'unmounted-session', persisted: true }), { status: 200 }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(false);
+    expect(requestLog.some((entry) => /\/api\/(events|chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
+  });
+
+  test('does not continue pending human consent after unmount', async () => {
+    const requestLog: RecordedRequest[] = [];
+    const pendingConsent = deferred<Response>();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      requestLog.push({ url, method: init?.method, body });
+      if (url.includes('/api/sessions/inspect')) return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ sessionId: 'unmounted-consent-session', persisted: true }), { status: 200 });
+      }
+      if (url.includes('/consent')) return pendingConsent.promise;
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const { unmount } = render(<WidgetOverlay autoOpen={true} />);
+
+    await chooseHumanPath();
+    await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(true));
+    unmount();
+    pendingConsent.resolve(new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(requestLog.some((entry) => entry.url.includes('/api/events'))).toBe(false);
+    expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
+  });
+
+  test('does not commit delayed consent-failure output after close and reopen', async () => {
+    const requestLog: RecordedRequest[] = [];
+    global.fetch = makeFetchRecorder([
+      ({ url, method, body }) => {
+        requestLog.push({ url, method, body });
+        if (url.includes('/api/sessions/inspect')) return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+        if (url.includes('/api/sessions') && method === 'POST') {
+          return new Response(JSON.stringify({ sessionId: 'ai-session', persisted: true }), { status: 200 });
+        }
+        if (url.includes('/consent')) return new Response(JSON.stringify({ ok: false }), { status: 503 });
+        return null;
+      }
+    ]);
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
+    }, { timeout: 7000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(true));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_900));
+    });
+
+    expect(screen.queryByText('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.')).toBeNull();
+    expect(screen.queryByPlaceholderText(/message the team request/i)).toBeNull();
+    expect(requestLog.some((entry) => /\/api\/(telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
+  }, 10_000);
+
   test('keeps human recovery persistent when human session creation fails', async () => {
     const requestLog: RecordedRequest[] = [];
     global.fetch = makeFetchRecorder([

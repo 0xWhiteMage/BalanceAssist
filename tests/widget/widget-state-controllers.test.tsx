@@ -106,6 +106,81 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.expiresAt).toBeNull();
     expect(result.current.isSessionExpired).toBe(false);
   });
+
+  test('does not adopt a created session after reset and creates a fresh session on the next explicit bootstrap', async () => {
+    const pendingCreate = deferred<{ sessionId: string; status: string; sourceUrl: string; persisted: boolean }>();
+    const createSession = vi.fn()
+      .mockImplementationOnce(() => pendingCreate.promise)
+      .mockResolvedValueOnce({ sessionId: 'fresh-session', status: 'new', sourceUrl: '', persisted: true });
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession,
+      getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    let valid = true;
+    let staleBootstrap!: Promise<string | null>;
+
+    act(() => {
+      staleBootstrap = result.current.ensureSession(() => valid);
+    });
+    await waitFor(() => expect(createSession).toHaveBeenCalledOnce());
+    act(() => {
+      valid = false;
+      result.current.reset();
+    });
+    await act(async () => {
+      pendingCreate.resolve({ sessionId: 'stale-session', status: 'new', sourceUrl: '', persisted: true });
+      await staleBootstrap;
+    });
+
+    expect(result.current.sessionId).toBeNull();
+    valid = true;
+    await act(async () => {
+      expect(await result.current.ensureSession(() => valid)).toBe('fresh-session');
+    });
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(result.current.sessionId).toBe('fresh-session');
+  });
+
+  test('does not adopt or hydrate a restored session after its bootstrap is invalidated', async () => {
+    const pendingRestore = deferred<{ sessionId: string; status: string; sourceUrl: string } | null>();
+    const getCurrentSession = vi.fn()
+      .mockImplementationOnce(() => pendingRestore.promise)
+      .mockResolvedValueOnce(null);
+    const fetchProjectDraft = vi.fn(async () => null);
+    const createSession = vi.fn(async () => ({ sessionId: 'fresh-restored-session', status: 'new', sourceUrl: '', persisted: true }));
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession, getCurrentSession, fetchProjectDraft,
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    let valid = true;
+    let staleBootstrap!: Promise<string | null>;
+
+    act(() => {
+      staleBootstrap = result.current.loadOrCreateSession(() => valid);
+    });
+    await waitFor(() => expect(getCurrentSession).toHaveBeenCalledOnce());
+    act(() => {
+      valid = false;
+      result.current.reset();
+    });
+    await act(async () => {
+      pendingRestore.resolve({ sessionId: 'stale-restored-session', status: 'open', sourceUrl: '' });
+      await staleBootstrap;
+    });
+
+    expect(result.current.sessionId).toBeNull();
+    expect(fetchProjectDraft).not.toHaveBeenCalled();
+    valid = true;
+    await act(async () => {
+      expect(await result.current.loadOrCreateSession(() => valid)).toBe('fresh-restored-session');
+    });
+    expect(getCurrentSession).toHaveBeenCalledTimes(2);
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(result.current.sessionId).toBe('fresh-restored-session');
+  });
 });
 
 describe('useTeamRelay', () => {
