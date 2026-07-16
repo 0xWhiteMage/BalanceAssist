@@ -63,7 +63,7 @@ async function main() {
 
   const crmRecordId = randomUUID();
   const itemName = `Balance Assist canary ${crmRecordId.slice(0, 8)}`;
-  const sourceValues = { crm_record_id: crmRecordId, qualification_status: { index: schema.statusLabelIds.qualification_status.needs_review } };
+  const sourceValues = { [schema.columns.crm_record_id.id]: crmRecordId, [schema.columns.qualification_status.id]: { index: schema.statusLabelIds.qualification_status.needs_review } };
   const ownedIds = schema.mondayOwnedColumns.map((name) => schema.columns[name].id);
   let itemId;
   let beforeOwned;
