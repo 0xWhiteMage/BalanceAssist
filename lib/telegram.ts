@@ -27,8 +27,9 @@ export type TelegramUpdate = {
   };
 };
 
-export const HANDOFF_SEND_TIMEOUT_MS = 15_000;
-export const TOPIC_CREATE_TIMEOUT_MS = 15_000;
+export const HANDOFF_SEND_TIMEOUT_MS = 10_000;
+export const TOPIC_CREATE_TIMEOUT_MS = 10_000;
+export const TOPIC_CLEANUP_TIMEOUT_MS = 10_000;
 
 let testTelegramTransport: typeof fetch | undefined;
 
@@ -292,23 +293,35 @@ export async function editForumTopic(
   return response.ok;
 }
 
-export async function closeForumTopic(threadId: number): Promise<boolean> {
+export async function closeForumTopic(
+  threadId: number,
+  options?: { timeoutMs?: number }
+): Promise<boolean> {
   const config = getTelegramConfig();
 
   if (!config) {
     return false;
   }
 
-  const response = await telegramFetch(`https://api.telegram.org/bot${config.botToken}/closeForumTopic`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: config.chatId,
-      message_thread_id: threadId
-    })
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options?.timeoutMs ?? TOPIC_CLEANUP_TIMEOUT_MS);
+  try {
+    const response = await telegramFetch(`https://api.telegram.org/bot${config.botToken}/closeForumTopic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: config.chatId,
+        message_thread_id: threadId
+      }),
+      signal: controller.signal
+    });
 
-  return response.ok;
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function deleteForumTopic(threadId: number): Promise<boolean> {

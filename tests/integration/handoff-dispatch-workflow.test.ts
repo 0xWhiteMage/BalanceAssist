@@ -56,6 +56,7 @@ describe('handoff dispatch workflow', () => {
   it('keeps the dispatch time budget below its HTTP and workflow limits', async () => {
     const workflowSource = await readFile(resolve(process.cwd(), '.github/workflows/handoff-dispatch.yml'), 'utf8');
     const routeSource = await readFile(resolve(process.cwd(), 'app/api/internal/handoff-dispatch/route.ts'), 'utf8');
+    const telegramSource = await readFile(resolve(process.cwd(), 'lib/telegram.ts'), 'utf8');
     const workflow = parse(workflowSource) as Workflow;
     const dispatch = workflow.jobs?.dispatch;
     const step = dispatch?.steps?.find(({ name }) => name === 'Dispatch pending handoffs');
@@ -64,12 +65,14 @@ describe('handoff dispatch workflow', () => {
     const dispatchHttpTimeoutMs = maxTimes[0] * 1_000;
     const heartbeatTimeoutMs = maxTimes[1] * 1_000;
     const workflowTimeoutMs = (dispatch?.['timeout-minutes'] ?? 0) * 60_000;
+    const cleanupTimeoutMs = Number(telegramSource.match(/TOPIC_CLEANUP_TIMEOUT_MS = ([\d_]+)/)?.[1]?.replaceAll('_', ''));
 
     expect(batchSize).toBe(2);
-    expect(HANDOFF_SEND_TIMEOUT_MS).toBe(15_000);
-    expect(TOPIC_CREATE_TIMEOUT_MS).toBe(15_000);
+    expect(HANDOFF_SEND_TIMEOUT_MS).toBe(10_000);
+    expect(TOPIC_CREATE_TIMEOUT_MS).toBe(10_000);
+    expect(cleanupTimeoutMs).toBe(10_000);
     expect(maxTimes).toEqual([80, 15]);
-    expect(batchSize * (HANDOFF_SEND_TIMEOUT_MS + TOPIC_CREATE_TIMEOUT_MS)).toBeLessThan(dispatchHttpTimeoutMs);
+    expect(batchSize * (HANDOFF_SEND_TIMEOUT_MS + TOPIC_CREATE_TIMEOUT_MS + cleanupTimeoutMs)).toBeLessThanOrEqual(dispatchHttpTimeoutMs - 20_000);
     expect(dispatchHttpTimeoutMs + heartbeatTimeoutMs).toBeLessThan(workflowTimeoutMs);
   });
 

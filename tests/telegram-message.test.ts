@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   HANDOFF_SEND_TIMEOUT_MS,
+  closeForumTopic,
   createForumTopic,
   installTelegramTransportForTests,
   sendTelegramMessage
@@ -89,5 +90,24 @@ describe('sendTelegramMessage', () => {
 
     expect(requestSignal?.aborted).toBe(true);
     await expect(creating).resolves.toBeNull();
+  });
+
+  test('bounds race-lost topic cleanup', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
+    vi.stubEnv('TELEGRAM_CHAT_ID', '123');
+    let requestSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal as AbortSignal;
+      return new Promise<never>((_, reject) => {
+        requestSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    }));
+
+    const closing = closeForumTopic(99, { timeoutMs: 1 });
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(requestSignal?.aborted).toBe(true);
+    await expect(closing).resolves.toBe(false);
   });
 });
