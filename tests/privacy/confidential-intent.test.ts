@@ -104,6 +104,32 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialFilename(input)).toBe(expected);
   });
 
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['nightjar-confidential', 'confidential'],
+    ['project-nightjar-confidential-brief', 'confidential'],
+    ['candidate-confidential-brief.pdf', 'confidential'],
+    ['confidential-unknown.pdf', 'confidential'],
+    ['nda-confidential', 'nda'],
+    ['nda-candidate.pdf', 'nda'],
+    ['confidential-sensitive-data', 'confidential'],
+    ['confidential-personal-data', 'confidential'],
+    ['sensitive-topic.txt', 'sensitive']
+  ])('keeps filename classification monotonic with precedence for %j as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test('fails closed when the normalized filename exceeds 512 characters', () => {
+    expect(classifyConfidentialFilename('x'.repeat(513))).toBe('sensitive');
+  });
+
+  test('allows a benign normalized filename at the 512 character boundary', () => {
+    expect(classifyConfidentialFilename('x'.repeat(512))).toBe('allow');
+  });
+
+  test('applies the length limit after removing default-ignorable code points', () => {
+    expect(classifyConfidentialFilename(`${'\u200b'.repeat(513)}confidential`)).toBe('confidential');
+  });
+
   test.each([
     'confidential.pdf',
     'nda_material.pdf',
@@ -116,7 +142,6 @@ describe('classifyConfidentialIntent', () => {
 
   test.each([
     'personal-project.pdf',
-    'sensitive-topic.txt',
     'private-event.pdf',
     'confidentially.pdf',
     'confidentiality.pdf',
@@ -129,9 +154,6 @@ describe('classifyConfidentialIntent', () => {
     '2026-confidentiality-brief.pdf',
     'client-sensitivity-data.pdf',
     'personalisation-data-final.pdf',
-    'candidate-confidential-brief.pdf',
-    'nda-candidate.pdf',
-    'confidential-unknown.pdf',
     'release-form-final.pdf'
   ])('allows benign filename near-match %j', (input) => {
     expect(classifyConfidentialFilename(input)).toBe('allow');
