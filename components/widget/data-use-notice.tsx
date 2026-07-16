@@ -10,8 +10,8 @@ export function DataUseNotice({
   onLeave
 }: {
   onConsent: (record: ConsentRecord) => void;
-  onHuman?: () => void;
-  onLeave?: () => void;
+  onHuman: () => void;
+  onLeave: () => void;
 }) {
   const [showAiDisclosure, setShowAiDisclosure] = useState(false);
 
@@ -95,7 +95,7 @@ const entryActionStyle = {
   minHeight: '44px',
   padding: '10px 16px',
   borderRadius: '20px',
-  border: `1px solid ${brandTokens.colors.border}`,
+  border: `1px solid ${brandTokens.colors.warmGold}`,
   background: 'transparent',
   color: brandTokens.colors.lightText,
   fontSize: '12px',

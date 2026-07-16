@@ -62,22 +62,49 @@ test('human recovery persists on mobile when session creation fails', async ({ p
 });
 
 test('equal entry actions have mobile bounds, visible keyboard focus, and keyboard activation', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.route('**/api/sessions/inspect', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ ok: true, exists: false })
   }));
   await page.route('**/api/sessions', (route) => route.fulfill({
-    status: 503,
+    status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ ok: false, code: 'session_unavailable' })
+    body: JSON.stringify({ sessionId: 'entry-action-session', persisted: true })
+  }));
+  await page.route('**/api/projects/entry-action-session/consent', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, consent: { humanContact: true, producerTransfer: false } })
   }));
   await page.goto('/preview');
 
   const initialNames = ['Build a brief with AI', 'Talk to the team without AI', 'Leave'];
   const disclosedNames = ['Continue with AI', 'Talk to the team without AI', 'Leave'];
   const actions = page.locator('[data-testid="data-use-notice"] .balance-entry-action');
+  const panelBackgrounds = ['#101010', '#1d1d1d'];
+
+  function contrastRatio(foreground: string, background: string) {
+    function channels(color: string) {
+      if (color.startsWith('#')) {
+        return color.match(/[a-f\d]{2}/gi)?.map((value) => Number.parseInt(value, 16)) ?? [];
+      }
+      return color.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [];
+    }
+
+    function luminance(color: string) {
+      const [red, green, blue] = channels(color).map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    }
+
+    const foregroundLuminance = luminance(foreground);
+    const backgroundLuminance = luminance(background);
+    return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+      (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+  }
 
   async function expectActionOrderSizeAndFocus(names: string[]) {
     await expect(actions).toHaveText(names);
@@ -97,12 +124,17 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
         return {
           outlineStyle: style.outlineStyle,
           outlineWidth: Number.parseFloat(style.outlineWidth),
-          outlineOffset: Number.parseFloat(style.outlineOffset)
+          outlineOffset: Number.parseFloat(style.outlineOffset),
+          outlineColor: style.outlineColor
         };
       });
       expect(focusStyle.outlineStyle).not.toBe('none');
-      expect(focusStyle.outlineWidth).toBeGreaterThan(0);
+      expect(focusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
       expect(focusStyle.outlineOffset).toBeGreaterThanOrEqual(2);
+      expect(focusStyle.outlineColor).toBe('rgb(219, 181, 128)');
+      for (const background of panelBackgrounds) {
+        expect(contrastRatio(focusStyle.outlineColor, background)).toBeGreaterThanOrEqual(3);
+      }
     }
   }
 
@@ -116,16 +148,16 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
   await expectActionOrderSizeAndFocus(disclosedNames);
 
   await page.getByRole('button', { name: 'Continue with AI', exact: true }).press('Enter');
-  await expect(page.getByTestId('data-use-notice')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Attach references' })).toBeVisible();
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Enter');
-  await expect(page.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
+  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Enter');
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Space');
-  await expect(page.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
+  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Leave', exact: true }).press('Space');

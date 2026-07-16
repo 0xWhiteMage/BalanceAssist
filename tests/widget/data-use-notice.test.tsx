@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
 import { DATA_USE_NOTICE_COPY, CONSENT_VERSION } from '@/lib/privacy/notice';
@@ -14,6 +15,29 @@ describe('DataUseNotice', () => {
     fontWeight: '600'
   };
 
+  function contrastRatio(foreground: string, background: string) {
+    function luminance(hex: string) {
+      const channels = hex.match(/[a-f\d]{2}/gi)?.map((value) => Number.parseInt(value, 16) / 255) ?? [];
+      const [red, green, blue] = channels.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    }
+
+    const foregroundLuminance = luminance(foreground);
+    const backgroundLuminance = luminance(background);
+    return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+      (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+  }
+
+  function renderNotice(overrides: Partial<ComponentProps<typeof DataUseNotice>> = {}) {
+    const props = {
+      onConsent: vi.fn(),
+      onHuman: vi.fn(),
+      onLeave: vi.fn(),
+      ...overrides
+    };
+    return { ...render(<DataUseNotice {...props} />), ...props };
+  }
+
   function expectEqualEntryActions(names: string[]) {
     const actions = names.map((name) => screen.getByRole('button', { name }));
 
@@ -23,32 +47,40 @@ describe('DataUseNotice', () => {
       expect(action.tagName).toBe('BUTTON');
       expect(action).toHaveAttribute('type', 'button');
       expect(action.style).toMatchObject(entryActionContract);
+      expect(action).toHaveStyle({
+        borderColor: brandTokens.colors.warmGold,
+        borderStyle: 'solid',
+        borderWidth: '1px'
+      });
     }
 
     expect(new Set(actions.map((action) => action.className))).toEqual(new Set(['balance-entry-action']));
-    expect(new Set(actions.map((action) => action.style.cssText))).toHaveLength(1);
-    expect(actions[0].style.border).toBe(`1px solid ${brandTokens.colors.border}`);
   }
 
+  test('keeps the shared boundary above 3:1 against every panel gradient endpoint', () => {
+    expect(contrastRatio(brandTokens.colors.warmGold, brandTokens.colors.baseBlack)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(brandTokens.colors.warmGold, brandTokens.colors.charcoal)).toBeGreaterThanOrEqual(3);
+  });
+
   test('renders the data use notice with the correct body text', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
+    renderNotice();
     expect(screen.getByText(DATA_USE_NOTICE_COPY.body)).toBeInTheDocument();
   });
 
   test('renders the Balance Assist AI title', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
+    renderNotice();
     expect(screen.getByText(DATA_USE_NOTICE_COPY.title)).toBeInTheDocument();
   });
 
   test('gives initial AI, human, and leave actions one exact visual contract', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
+    renderNotice();
 
     expectEqualEntryActions(['Build a brief with AI', 'Talk to the team without AI', 'Leave']);
     expect(screen.queryByRole('button', { name: /I understand/i })).not.toBeInTheDocument();
   });
 
   test('keeps the exact visual contract after opening the AI disclosure', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
+    renderNotice();
 
     fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
 
@@ -57,7 +89,7 @@ describe('DataUseNotice', () => {
 
   test('records AI consent only after Continue with AI', () => {
     const onConsent = vi.fn();
-    render(<DataUseNotice onConsent={onConsent} />);
+    renderNotice({ onConsent });
 
     fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
     expect(screen.getByText(/DeepSeek processes AI-mode messages/i)).toBeInTheDocument();
@@ -71,54 +103,62 @@ describe('DataUseNotice', () => {
   });
 
   test('takes the human path without recording AI consent', () => {
-    const onConsent = vi.fn();
     const onHuman = vi.fn();
-    render(<DataUseNotice onConsent={onConsent} onHuman={onHuman} />);
+    const { onConsent } = renderNotice({ onHuman });
 
     fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
     expect(onHuman).toHaveBeenCalledOnce();
     expect(onConsent).not.toHaveBeenCalled();
   });
 
+  test('leaves through the required leave action', () => {
+    const onLeave = vi.fn();
+    renderNotice({ onLeave });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
+
+    expect(onLeave).toHaveBeenCalledOnce();
+  });
+
   test('includes data-testid="data-use-notice" on the wrapper', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
+    renderNotice();
     expect(screen.getByTestId('data-use-notice')).toBeInTheDocument();
   });
 
   test('discloses the 24-hour temporary draft period without promising follow-up storage', () => {
-    render(<DataUseNotice onConsent={vi.fn()} />);
+    renderNotice();
 
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/temporary draft.*24 hours/i);
     expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/follow up/i);
   });
 
   test('discloses deletion status, its 24-hour SLA, and external-copy limits', () => {
-    render(<DataUseNotice onConsent={vi.fn()} />);
+    renderNotice();
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/request deletion/i);
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/backups/i);
   });
 
   test('names Monday.com as a recipient of an approved project transfer', () => {
-    render(<DataUseNotice onConsent={vi.fn()} />);
+    renderNotice();
 
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/monday\.com/i);
     expect(CONSENT_VERSION).toBe('1.1');
   });
 
   test('distinguishes AI session processing from team-contact relay delivery', () => {
-    render(<DataUseNotice onConsent={vi.fn()} />);
+    renderNotice();
 
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI stays in this temporary session pending producer-transfer approval/i);
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/team contact.*relay message.*Balance Assist team/i);
   });
 
   test('links to the privacy page for more detail', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
+    renderNotice();
     expect(screen.getByRole('link', { name: /privacy/i })).toHaveAttribute('href', DATA_USE_NOTICE_COPY.privacyLink);
   });
 
   test('copy does not invite job applications or CV capture', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
+    renderNotice();
     expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/job application|cv|resume/i);
   });
 });
