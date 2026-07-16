@@ -1,0 +1,1 @@
+export const HANDOFF_DISPATCH_BATCH_SIZE = 2;

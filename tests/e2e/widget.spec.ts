@@ -3,7 +3,7 @@ import path from 'node:path';
 
 test('widget landing shows human escalation', async ({ page }) => {
   await page.goto('/widget');
-  await expect(page.getByRole('button', { name: 'Talk to the team without AI', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Talk to a human', exact: true })).toBeVisible();
 });
 
 test('direct human contact keeps a usable pending request input without claiming a team connection', async ({ page }) => {
