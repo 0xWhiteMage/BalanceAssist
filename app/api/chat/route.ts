@@ -26,6 +26,10 @@ import { chatRequestPayloadSchema, MAX_CHAT_BODY_BYTES } from '@/lib/api/contrac
 import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
 import { consumeRateLimit } from '@/lib/security/rate-limit';
 import { getCareersRedirect, isCareersIntent } from '@/lib/conversation/careers-redirect';
+import {
+  classifyConfidentialIntent,
+  CONFIDENTIAL_INTAKE_RESPONSE
+} from '@/lib/privacy/confidential-intent';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -35,6 +39,17 @@ type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 const PROVIDER_TIMEOUT_MS = 15000;
 const TOOL_NAME = 'record_brief_updates';
 const SHARE_WORK_TOOL_NAME = 'share_work';
+
+function confidentialDiversionResponse(request: Request) {
+  return jsonWithCors({
+    message: CONFIDENTIAL_INTAKE_RESPONSE,
+    draftUpdates: {},
+    briefReady: false,
+    reviewPrompt: null,
+    missingFields: [],
+    truncated: false
+  }, undefined, request);
+}
 
 type SharedWorkEntry = {
   title: string;
@@ -505,13 +520,22 @@ export async function POST(request: Request) {
   }
 
   const { messages, context } = parsed.data;
-  const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
   const sessionId = session.auth.sessionId;
-  const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
 
   if (context?.sessionId && context.sessionId !== sessionId) {
     return jsonWithCors({ error: 'Session mismatch' }, { status: 403 }, request);
   }
+
+  try {
+    if (classifyConfidentialIntent(lastUserMessage) !== 'allow') {
+      return confidentialDiversionResponse(request);
+    }
+  } catch {
+    return confidentialDiversionResponse(request);
+  }
+
+  const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
 
   if (messages.some((message) => isCareersIntent(message.content))) {
     return jsonWithCors({ message: `Please apply through ${getCareersRedirect()}.`, draftUpdates: {}, briefReady: false, reviewPrompt: null, missingFields: [], truncated: false }, undefined, request);

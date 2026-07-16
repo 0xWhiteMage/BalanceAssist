@@ -5,14 +5,24 @@ const {
   hasSupabaseServerConfigMock,
   requireSessionMock,
   emitEventMock,
-  consumeRateLimitMock
+  consumeRateLimitMock,
+  classifyConfidentialIntentMock
 } = vi.hoisted(() => ({
   createServerSupabaseClientMock: vi.fn(),
   hasSupabaseServerConfigMock: vi.fn(() => false),
   requireSessionMock: vi.fn(),
   emitEventMock: vi.fn(),
-  consumeRateLimitMock: vi.fn()
+  consumeRateLimitMock: vi.fn(),
+  classifyConfidentialIntentMock: vi.fn()
 }));
+
+vi.mock('@/lib/privacy/confidential-intent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/privacy/confidential-intent')>();
+  return {
+    ...actual,
+    classifyConfidentialIntent: classifyConfidentialIntentMock
+  };
+});
 
 vi.mock('@/lib/supabase/server', () => ({
   createServerSupabaseClient: createServerSupabaseClientMock,
@@ -64,6 +74,11 @@ describe('POST /api/chat', () => {
     });
     consumeRateLimitMock.mockReset();
     consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
+    classifyConfidentialIntentMock.mockReset();
+    classifyConfidentialIntentMock.mockImplementation((value: string) =>
+      /under nda/i.test(value) ? 'nda' : 'allow'
+    );
+    emitEventMock.mockReset();
   });
 
   afterEach(() => {
@@ -368,6 +383,106 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(413);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('diverts the current confidential message before rate limiting, draft access, provider calls, events, or logs', async () => {
+    const secret = 'Project NIGHTJAR is under NDA';
+    const fromMock = vi.fn(() => {
+      throw new Error('draft access must not occur');
+    });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'test-session', capability: 'test-session.secret' },
+      supabase: { from: fromMock, rpc: vi.fn() }
+    });
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const { res, data } = await postChat({
+        messages: [{ role: 'user', content: secret }]
+      });
+
+      expect(res.status).toBe(200);
+      expect(data).toEqual({
+        message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
+        draftUpdates: {},
+        briefReady: false,
+        reviewPrompt: null,
+        missingFields: [],
+        truncated: false
+      });
+      expect(JSON.stringify(data)).not.toContain('NIGHTJAR');
+      expect(consumeRateLimitMock).not.toHaveBeenCalled();
+      expect(fromMock).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(emitEventMock).not.toHaveBeenCalled();
+      expect([...logSpy.mock.calls, ...warnSpy.mock.calls, ...errorSpy.mock.calls].flat().join(' ')).not.toContain(secret);
+    } finally {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  test('classifies only the current last user message', async () => {
+    global.fetch = vi.fn();
+    const { res, data } = await postChat({
+      messages: [
+        { role: 'user', content: 'An earlier message was under NDA.' },
+        { role: 'user', content: 'Can you do filming?' }
+      ],
+      context: { isTeamConnected: false }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.messages).toBeDefined();
+    expect(JSON.stringify(data)).not.toMatch(/cannot process confidential/i);
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledOnce();
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('Can you do filming?');
+  });
+
+  test('checks authenticated session mismatch before confidential classification', async () => {
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'This project is under NDA.' }],
+      context: { sessionId: 'another-session' }
+    });
+
+    expect(res.status).toBe(403);
+    expect(data.error).toBe('Session mismatch');
+    expect(classifyConfidentialIntentMock).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('validates the shared request schema before confidential classification', async () => {
+    const { res } = await postChat({
+      messages: [{ role: 'assistant', content: 'This project is under NDA.' }]
+    });
+
+    expect(res.status).toBe(400);
+    expect(classifyConfidentialIntentMock).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('fails closed with the same diversion if classification throws', async () => {
+    classifyConfidentialIntentMock.mockImplementationOnce(() => {
+      throw new Error('classifier failure');
+    });
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'ordinary project text' }]
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toMatch(/cannot process confidential or sensitive material/i);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(emitEventMock).not.toHaveBeenCalled();
   });
 
   test('redirects careers intent before provider calls or draft persistence', async () => {
