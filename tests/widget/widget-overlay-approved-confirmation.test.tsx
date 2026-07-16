@@ -23,6 +23,7 @@ vi.mock('@/lib/api/client', async () => {
     ...actual,
     finalizeLead: finalizeLeadMock,
     fetchTeamMessages: vi.fn(async () => ({
+      outgoingStatus: null,
       messages: [],
       fileRequestOpen: false,
       fileRequestNote: null,
