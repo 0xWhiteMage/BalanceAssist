@@ -85,7 +85,7 @@ async function main() {
     evidence('canary_verified', { migrationVersions, schemaVerified: true, ownerFieldsUnchanged: true, reconciled: true });
   } finally {
     if (itemId) {
-      const scrubValues = Object.fromEntries(schema.sourceOwnedColumns.filter((name) => name !== 'crm_record_id').map((name) => [schema.columns[name].id, null]));
+        const scrubValues = Object.fromEntries(schema.sourceOwnedColumns.filter((name) => !['crm_record_id', 'qualification_status'].includes(name)).map((name) => [schema.columns[name].id, null]));
       try {
         await monday('mutation Scrub($boardId: ID!, $itemId: ID!, $values: JSON!) { change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $values) { id } }', { boardId: schema.boardId, itemId, values: JSON.stringify(scrubValues) }, randomUUID());
         await monday('mutation Delete($itemId: ID!) { delete_item(item_id: $itemId) { id } }', { itemId }, randomUUID());
