@@ -108,7 +108,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }, [dependencies, noticeConsent, setActiveSession]);
 
   const loadOrCreateSession = useCallback(() => {
-    if (sessionIdRef.current) return Promise.resolve(sessionIdRef.current);
+    if (sessionIdRef.current && !isExpired(expiresAtRef.current)) return Promise.resolve(sessionIdRef.current);
     if (!noticeConsent || typeof window === 'undefined') return Promise.resolve(null);
     if (bootstrapRef.current) return bootstrapRef.current;
     const bootstrap = (async () => {

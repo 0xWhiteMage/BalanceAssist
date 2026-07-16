@@ -95,6 +95,31 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.expiresAt).toBeNull();
     expect(result.current.isSessionExpired).toBe(false);
   });
+
+  test('replaces an expired active session and clears its expiration', async () => {
+    const createSession = vi.fn()
+      .mockResolvedValueOnce({ sessionId: 'expired-session', status: 'new', sourceUrl: '', persisted: true, expiresAt: '2026-07-13T10:00:00.000Z' })
+      .mockResolvedValueOnce({ sessionId: 'fresh-session', status: 'new', sourceUrl: '', persisted: true });
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession,
+      getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null),
+      updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true),
+      requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+
+    expect(result.current.isSessionExpired).toBe(true);
+
+    await act(async () => { await result.current.loadOrCreateSession(); });
+
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(result.current.sessionId).toBe('fresh-session');
+    expect(result.current.expiresAt).toBeNull();
+    expect(result.current.isSessionExpired).toBe(false);
+  });
 });
 
 describe('useTeamRelay', () => {

@@ -58,9 +58,18 @@ function mockUnauthorizedSession() {
 
 function buildReferenceLinkSupabase() {
   const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
+  const consentOrder = vi.fn(async () => ({
+    data: [{ scope: 'producer_transfer', granted: true, created_at: '2026-07-13T10:00:00.000Z', id: 'consent-1' }],
+    error: null
+  }));
+  const consentEq = vi.fn(() => ({ order: consentOrder }));
+  const consentSelect = vi.fn(() => ({ eq: consentEq }));
 
   return {
     inserts,
+    consentSelect,
+    consentEq,
+    consentOrder,
     supabase: {
       from: vi.fn((table: string) => {
         if (table === 'sessions') {
@@ -76,14 +85,7 @@ function buildReferenceLinkSupabase() {
 
         if (table === 'session_consents') {
           return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(async () => ({
-                  data: [{ scope: 'producer_transfer', granted: true, created_at: '2026-07-13T10:00:00.000Z', id: 'consent-1' }],
-                  error: null
-                }))
-              }))
-            }))
+            select: consentSelect
           };
         }
 
@@ -202,7 +204,7 @@ describe('session-scoped API routes', () => {
   });
 
   test('POST /api/attachments/link uses the authenticated session when sessionId is omitted', async () => {
-    const { inserts, supabase } = buildReferenceLinkSupabase();
+    const { inserts, consentEq, consentOrder, consentSelect, supabase } = buildReferenceLinkSupabase();
 
     requireSessionMock.mockResolvedValue({
       ok: true,
@@ -231,6 +233,9 @@ describe('session-scoped API routes', () => {
       link: { id: 'link-1', sessionId: 'sess-link-auth' }
     });
     expect(requireSessionMock).toHaveBeenCalledWith(request, undefined);
+    expect(consentSelect).toHaveBeenCalledWith('scope, granted, created_at, id');
+    expect(consentEq).toHaveBeenCalledWith('session_id', 'sess-link-auth');
+    expect(consentOrder).toHaveBeenCalledWith('created_at', { ascending: true });
     expect(inserts).toContainEqual({
       table: 'reference_links',
       row: {
@@ -265,6 +270,6 @@ describe('session-scoped API routes', () => {
     const response = await POST(request);
 
     expect(response.status).toBe(401);
-    expect(requireSessionMock).toHaveBeenCalledWith(request, 'sess-finalize');
+    expect(requireSessionMock).toHaveBeenCalledWith(request);
   });
 });

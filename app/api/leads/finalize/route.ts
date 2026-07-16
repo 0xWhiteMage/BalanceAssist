@@ -7,21 +7,16 @@ export async function OPTIONS(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const requestedSessionId = await request.clone().json()
-    .then((body: unknown) => (
-      typeof body === 'object' && body !== null && typeof (body as { sessionId?: unknown }).sessionId === 'string'
-        ? (body as { sessionId: string }).sessionId
-        : undefined
-    ))
-    .catch(() => undefined);
-
-  const authResult = await requireSession(request, requestedSessionId);
+  const authResult = await requireSession(request);
   if (!authResult.ok) return authResult.response;
 
   const parsed = await parseRequestBody(request, finalizeLeadPayloadSchema);
   if (!parsed.ok) return parsed.response;
 
   const { sessionId } = parsed.data;
+  if (sessionId !== authResult.auth.sessionId) {
+    return jsonWithCors({ error: 'Session mismatch' }, { status: 403 }, request);
+  }
 
   const { data, error } = await authResult.supabase.rpc('finalize_session_lead', {
     p_session_id: sessionId

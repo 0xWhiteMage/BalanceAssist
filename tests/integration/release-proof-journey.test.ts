@@ -203,7 +203,14 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     await expect(client!.query('select draft_version, draft from public.sessions where id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [expect.objectContaining({ draft_version: 1, draft: expect.objectContaining({ contactEmail: expect.any(Object) }) })] });
     const final = await finalizeLead(new Request(`${origin}/api/leads/finalize`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: session.sessionId }) }));
-    await expect(final.json()).resolves.toMatchObject({ queued: true, crmQueued: true, qualificationStatus: 'needs_review' });
+    await expect(final.json()).resolves.toMatchObject({
+      persisted: true,
+      qualificationStatus: 'needs_review',
+      score: 5,
+      recommendedNextStep: 'manual_review',
+      queued: true,
+      crmQueued: true
+    });
     await expect(client!.query(
       `select c.desired_revision, o.revision, o.operation, o.state
        from public.crm_leads c

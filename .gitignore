@@ -9,3 +9,8 @@ coverage/
 .DS_Store
 tsconfig.tsbuildinfo
 .worktrees/
+
+.vercel/
+.env*
+!.env.example
+supabase/.temp/

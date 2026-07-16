@@ -16,6 +16,7 @@ describe('POST /api/leads/finalize', () => {
 
   beforeEach(() => {
     rpc.mockReset();
+    requireSessionMock.mockReset();
     requireSessionMock.mockResolvedValue({ ok: true, auth: { sessionId: '11111111-2222-3333-4444-555555555555' }, supabase: { rpc } });
   });
 
@@ -55,5 +56,15 @@ describe('POST /api/leads/finalize', () => {
     const response = await finalize({ sessionId: '11111111-2222-3333-4444-555555555555' });
 
     await expect(response.json()).resolves.toMatchObject({ crmQueued: false });
+  });
+
+  test('authenticates before rejecting an invalid request body', async () => {
+    requireSessionMock.mockResolvedValue({ ok: false, response: new Response(null, { status: 401 }) });
+
+    const response = await finalize({});
+
+    expect(response.status).toBe(401);
+    expect(requireSessionMock).toHaveBeenCalledWith(expect.any(Request));
+    expect(rpc).not.toHaveBeenCalled();
   });
 });
