@@ -433,6 +433,7 @@ export function WidgetOverlay({
     setMessages([]);
     setCurrentStep('intro');
     setHasStarted(false);
+    setEntryPath(null);
     setRailMode('essentials');
     setReferenceLinks([]);
     setReferenceFiles([]);

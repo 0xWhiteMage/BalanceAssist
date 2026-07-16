@@ -608,6 +608,37 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     });
   });
 
+  test('returns to the initial choices and starts a new AI session after a successful reset', async () => {
+    let sessionCreates = 0;
+    global.fetch = makeFetchRecorder([
+      ({ url, method }) => {
+        if (url.includes('/api/sessions/inspect')) return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+        if (url.includes('/api/sessions') && method === 'POST') {
+          sessionCreates += 1;
+          return new Response(JSON.stringify({ sessionId: `reset-session-${sessionCreates}`, persisted: true }), { status: 200 });
+        }
+        if (url.includes('/api/projects/reset-session-1/reset') && method === 'POST') {
+          return new Response(JSON.stringify({ ok: true, reset: true }), { status: 200 });
+        }
+        return null;
+      }
+    ]);
+
+    render(<WidgetOverlay autoOpen={true} />);
+    await startWithBalanceAssist();
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
+    }, { timeout: 7000 });
+
+    const input = await findChatInput();
+    fireEvent.change(input, { target: { value: 'forget this project' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Build a brief with AI' })).toBeVisible(), { timeout: 7000 });
+    await startWithBalanceAssist();
+    await waitFor(() => expect(sessionCreates).toBe(2));
+  }, 15000);
+
   test('submits a deletion request through the server when the user asks to delete the project', async () => {
     const requestLog: RecordedRequest[] = [];
 
