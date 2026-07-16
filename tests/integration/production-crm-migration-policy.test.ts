@@ -111,6 +111,9 @@ describe('production CRM migration policy', () => {
     const runCommands = migrationStep?.run?.split(/\r?\n/).map((command) => command.trim()).filter(Boolean) ?? [];
     const dryRunIndex = runCommands.indexOf('node scripts/apply-production-crm-migrations.mjs --dry-run');
     const postDryRunCommands = runCommands.slice(dryRunIndex + 1);
+    const projectRefCommand = "printf '%s\\n' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref";
+    const artifactQueryCommand = 'npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql';
+    const projectRefCommands = postDryRunCommands.filter((command) => /\s>\s*supabase\/\.temp\/project-ref$/.test(command));
     const secretReferences = JSON.stringify(migrate).match(/\$\{\{\s*secrets\.[A-Z0-9_]+\s*\}\}/g) ?? [];
 
     expect(source).toContain('production-crm-migrations.yml@refs/heads/main');
@@ -123,9 +126,11 @@ describe('production CRM migration policy', () => {
     ]);
     expect(secretReferences).toEqual(['${{ secrets.SUPABASE_ACCESS_TOKEN }}']);
     expect(dryRunIndex).toBeGreaterThanOrEqual(0);
-    expect(postDryRunCommands).toContain('npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql');
+    expect(projectRefCommands).toEqual([projectRefCommand]);
+    expect(postDryRunCommands.indexOf(projectRefCommand)).toBeLessThan(postDryRunCommands.indexOf(artifactQueryCommand));
+    expect(postDryRunCommands).toContain(artifactQueryCommand);
     expect(postDryRunCommands.filter((command) => !/^(?:mkdir|printf)\b/.test(command))).toEqual([
-      'npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql'
+      artifactQueryCommand
     ]);
   });
 });
