@@ -216,4 +216,21 @@ describe('GET /api/telegram/messages relay status', () => {
     expect(from).not.toHaveBeenCalled();
     expect(supabase).toBeDefined();
   });
+
+  test('rejects an authenticated but unrelated session before any persisted read', async () => {
+    const { GET } = await import('@/app/api/telegram/messages/route');
+    const { from } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: false,
+      response: Response.json({ error: 'Session mismatch' }, { status: 403 })
+    });
+    const request = new Request('http://localhost/api/telegram/messages?sessionId=other-session');
+
+    const response = await GET(request);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'Session mismatch' });
+    expect(requireSessionMock).toHaveBeenCalledWith(request, 'other-session');
+    expect(from).not.toHaveBeenCalled();
+  });
 });
