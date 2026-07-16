@@ -73,31 +73,81 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
   }
 ];
 
-const FILENAME_CATEGORY_PATTERNS: ReadonlyArray<{
+const FILENAME_CATEGORY_PHRASES: ReadonlyArray<{
   category: Exclude<ConfidentialIntentResult, 'allow'>;
-  pattern: RegExp;
+  phrases: readonly (readonly string[])[];
 }> = [
   {
     category: 'nda',
-    pattern: /^(?:nda|non disclosure agreement)(?: (?:protected|restricted))?(?: (?:information|data|documents?|materials?|content|details|briefs?|files?))?$/
+    phrases: [['nda'], ['non', 'disclosure', 'agreement']]
   },
   {
     category: 'confidential',
-    pattern: /^confidential(?: (?:client )?(?:information|data|documents?|materials?|content|details|briefs?|files?))?$/
+    phrases: [['confidential']]
   },
   {
     category: 'unreleased',
-    pattern: /^(?:unreleased|pre release|unannounced)(?: (?:client )?(?:project|campaign|product|film|video|footage|media|assets?|creative|launch))?$/
+    phrases: [['unreleased'], ['pre', 'release'], ['unannounced']]
   },
   {
     category: 'personal-data',
-    pattern: /^(?:personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)$/
+    phrases: [
+      ['personal', 'data'],
+      ['personally', 'identifiable', 'information'],
+      ['personally', 'identifying', 'information'],
+      ['identifying', 'details'],
+      ['contact', 'details'],
+      ['contact', 'information']
+    ]
   },
   {
     category: 'sensitive',
-    pattern: /^(?:highly )?sensitive(?: (?:client )?(?:information|data|documents?|materials?|content|details|briefs?|files?))?$/
+    phrases: [['sensitive'], ['highly', 'sensitive']]
   }
 ];
+
+const FILENAME_DECORATORS = new Set([
+  'asset',
+  'assets',
+  'brief',
+  'briefs',
+  'campaign',
+  'client',
+  'content',
+  'creative',
+  'csv',
+  'data',
+  'details',
+  'docx',
+  'document',
+  'documents',
+  'draft',
+  'file',
+  'files',
+  'film',
+  'final',
+  'footage',
+  'gif',
+  'information',
+  'jpeg',
+  'jpg',
+  'launch',
+  'material',
+  'materials',
+  'media',
+  'mov',
+  'mp4',
+  'pdf',
+  'png',
+  'product',
+  'project',
+  'protected',
+  'restricted',
+  'txt',
+  'video',
+  'webp',
+  'xlsx'
+]);
 
 function removeDefaultIgnorables(value: string): string {
   return value.replace(/\p{Default_Ignorable_Code_Point}/gu, '');
@@ -132,16 +182,30 @@ export function classifyConfidentialIntent(value: string): ConfidentialIntentRes
 export function classifyConfidentialFilename(filename: string): ConfidentialIntentResult {
   const canonical = removeDefaultIgnorables(filename.normalize('NFKC')).toLowerCase().trim();
   const extensionIndex = canonical.lastIndexOf('.');
-  if (extensionIndex <= 0 || !/^[a-z0-9]{1,16}$/.test(canonical.slice(extensionIndex + 1))) {
+  const hasExtension = extensionIndex > 0;
+  if (extensionIndex === 0 || (hasExtension && !/^[a-z0-9]{1,16}$/.test(canonical.slice(extensionIndex + 1)))) {
     return 'allow';
   }
 
-  const basename = canonical.slice(0, extensionIndex);
+  const basename = hasExtension ? canonical.slice(0, extensionIndex) : canonical;
   if (/[\\/]/.test(basename)) return 'allow';
-  const normalizedBasename = normalizeForClassification(basename);
+  const tokens = normalizeForClassification(basename).split(' ').filter(Boolean);
 
-  for (const rule of FILENAME_CATEGORY_PATTERNS) {
-    if (rule.pattern.test(normalizedBasename)) return rule.category;
+  for (const rule of FILENAME_CATEGORY_PHRASES) {
+    for (const phrase of rule.phrases) {
+      for (let index = 0; index <= tokens.length - phrase.length; index += 1) {
+        if (!phrase.every((token, offset) => tokens[index + offset] === token)) continue;
+        const decorators = [...tokens.slice(0, index), ...tokens.slice(index + phrase.length)];
+        if (!hasExtension && decorators.length > 0) continue;
+        if (
+          decorators.every(
+            (token) => FILENAME_DECORATORS.has(token) || /^(?:19|20)\d{2}$/.test(token) || /^(?:v|rev)\d{1,3}$/.test(token)
+          )
+        ) {
+          return rule.category;
+        }
+      }
+    }
   }
   return 'allow';
 }

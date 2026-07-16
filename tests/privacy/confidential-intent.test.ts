@@ -69,6 +69,41 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialFilename(input)).toBe(expected);
   });
 
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['confidential', 'confidential'],
+    ['nda', 'nda'],
+    ['sensitive', 'sensitive'],
+    ['personal-data', 'personal-data'],
+    ['unreleased', 'unreleased']
+  ])('classifies extensionless exact protected filename label %j as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['2026-confidential-brief.pdf', 'confidential'],
+    ['client-confidential-brief.pdf', 'confidential'],
+    ['confidential-brief-final.pdf', 'confidential'],
+    ['confidential.txt.pdf', 'confidential'],
+    ['2026-nda-material.pdf', 'nda'],
+    ['client-nda-material.pdf', 'nda'],
+    ['nda-material-final.pdf', 'nda'],
+    ['nda.txt.pdf', 'nda'],
+    ['2026-sensitive-data.pdf', 'sensitive'],
+    ['client-sensitive-data.pdf', 'sensitive'],
+    ['sensitive-data-final.pdf', 'sensitive'],
+    ['sensitive.txt.pdf', 'sensitive'],
+    ['2026-personal-data.pdf', 'personal-data'],
+    ['client-personal-data.pdf', 'personal-data'],
+    ['personal-data-final.pdf', 'personal-data'],
+    ['personal-data.txt.pdf', 'personal-data'],
+    ['2026-unreleased-campaign.pdf', 'unreleased'],
+    ['client-unreleased-campaign.pdf', 'unreleased'],
+    ['unreleased-campaign-final.pdf', 'unreleased'],
+    ['unreleased.txt.pdf', 'unreleased']
+  ])('classifies bounded decorated filename %j as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
   test.each([
     'confidential.pdf',
     'nda_material.pdf',
@@ -84,9 +119,20 @@ describe('classifyConfidentialIntent', () => {
     'sensitive-topic.txt',
     'private-event.pdf',
     'confidentially.pdf',
+    'confidentiality.pdf',
+    'sensitivity.pdf',
+    'personalisation.pdf',
+    'candidate.pdf',
     'unconditional.pdf',
     'release-form.pdf',
-    'missing-extension'
+    'missing-extension',
+    '2026-confidentiality-brief.pdf',
+    'client-sensitivity-data.pdf',
+    'personalisation-data-final.pdf',
+    'candidate-confidential-brief.pdf',
+    'nda-candidate.pdf',
+    'confidential-unknown.pdf',
+    'release-form-final.pdf'
   ])('allows benign filename near-match %j', (input) => {
     expect(classifyConfidentialFilename(input)).toBe('allow');
   });
