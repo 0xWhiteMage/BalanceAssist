@@ -32,4 +32,15 @@ describe('POST /api/telegram/relay', () => {
     await expect(response.json()).resolves.toMatchObject({ ok: false, error: 'request_id_required' });
     expect(rpc).not.toHaveBeenCalled();
   });
+
+  test('returns consent_required when the human-contact authorization is absent', async () => {
+    rpc.mockResolvedValue({ data: [{ persisted: false, consent_required: true }], error: null });
+    const { POST } = await import('@/app/api/telegram/relay/route');
+    const response = await POST(new Request('http://localhost/api/telegram/relay', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': 'missing-human-contact' }, body: JSON.stringify({ sessionId: 'sess-relay', text: 'Same text' })
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: 'consent_required' });
+  });
 });

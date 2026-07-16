@@ -1,9 +1,10 @@
-export const SESSION_CONSENT_SCOPES = ['analysis', 'producer_transfer'] as const;
+export const SESSION_CONSENT_SCOPES = ['analysis', 'human_contact', 'producer_transfer'] as const;
 
 export type SessionConsentScope = (typeof SESSION_CONSENT_SCOPES)[number];
 
 export type SessionConsentState = {
   analysis: boolean;
+  humanContact: boolean;
   producerTransfer: boolean;
 };
 
@@ -29,11 +30,12 @@ export async function getSessionConsent(client: ConsentLedgerClient, sessionId: 
 
   if (error) throw new Error('session_consent_query_failed');
 
-  const state: SessionConsentState = { analysis: false, producerTransfer: false };
+  const state: SessionConsentState = { analysis: false, humanContact: false, producerTransfer: false };
   for (const transition of [...(data ?? [])].sort((a, b) =>
     String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')) || String(a.id ?? '').localeCompare(String(b.id ?? ''))
   )) {
     if (transition.scope === 'analysis') state.analysis = transition.granted;
+    if (transition.scope === 'human_contact') state.humanContact = transition.granted;
     if (transition.scope === 'producer_transfer') state.producerTransfer = transition.granted;
   }
   return state;

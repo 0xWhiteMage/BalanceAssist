@@ -330,7 +330,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     });
   });
 
-  test('creates a human relay session without AI consent, chat, or transfer consent', async () => {
+  test('creates a human relay session with human-contact consent but without AI or producer-transfer consent', async () => {
     const requestLog: RecordedRequest[] = [];
 
     global.fetch = makeFetchRecorder([
@@ -367,7 +367,9 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       expect(requestLog.some((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toBe(true);
     });
     expect(requestLog.some((entry) => entry.url.includes('/api/chat'))).toBe(false);
-    expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(false);
+    const consentRequest = requestLog.find((entry) => entry.url.includes('/consent'));
+    expect(consentRequest?.body).toMatchObject({ scope: 'human_contact', granted: true });
+    expect(JSON.stringify(consentRequest?.body)).not.toContain('producer_transfer');
   });
 
   test('keeps email and scheduling fallbacks visible when human session creation fails', async () => {

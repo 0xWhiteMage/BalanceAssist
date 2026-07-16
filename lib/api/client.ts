@@ -163,6 +163,18 @@ export async function recordProducerTransferConsent(sessionId: string): Promise<
   }
 }
 
+export async function recordHumanContactConsent(sessionId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'human_contact', granted: true, noticeVersion: CONSENT_VERSION })
+    });
+    if (!response.ok) return false;
+    const data = await response.json() as { ok?: boolean; consent?: { humanContact?: boolean } };
+    return data.ok === true && data.consent?.humanContact === true;
+  } catch { return false; }
+}
+
 export type TeamMessage = {
   id: number;
   sender: 'user' | 'team';

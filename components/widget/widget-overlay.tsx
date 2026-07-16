@@ -22,7 +22,7 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
-import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
@@ -540,6 +540,10 @@ export function WidgetOverlay({
     const activeSessionId = await loadOrCreateSession();
     if (!activeSessionId) {
       setEntryPath(null);
+      return;
+    }
+    if (!await recordHumanContactConsent(activeSessionId)) {
+      await botSay('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.');
       return;
     }
 

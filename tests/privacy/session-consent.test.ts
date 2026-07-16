@@ -16,6 +16,7 @@ describe('getSessionConsent', () => {
               data: [
                 { scope: 'analysis', granted: true, created_at: '2026-07-13T10:00:00.000Z' },
                 { scope: 'producer_transfer', granted: true, created_at: '2026-07-13T10:01:00.000Z' },
+                { scope: 'human_contact', granted: true, created_at: '2026-07-13T10:01:30.000Z' },
                 { scope: 'analysis', granted: false, created_at: '2026-07-13T10:02:00.000Z' }
               ],
               error: null
@@ -27,7 +28,8 @@ describe('getSessionConsent', () => {
 
     await expect(getSessionConsent(client as never, 'session-1')).resolves.toEqual({
       analysis: false,
-      producerTransfer: true
+      producerTransfer: true,
+      humanContact: true
     });
   });
 
@@ -50,7 +52,8 @@ describe('getSessionConsent', () => {
 
     await expect(getSessionConsent(client as never, 'session-1')).resolves.toEqual({
       analysis: false,
-      producerTransfer: false
+      producerTransfer: false,
+      humanContact: false
     });
   });
 

@@ -4,7 +4,7 @@ import { requireSession } from '@/lib/api/require-session';
 import { CONSENT_VERSION } from '@/lib/privacy/notice';
 
 const transitionSchema = z.object({
-  scope: z.enum(['analysis', 'producer_transfer']),
+  scope: z.enum(['analysis', 'human_contact', 'producer_transfer']),
   granted: z.boolean(),
   noticeVersion: z.string().min(1)
 });
@@ -45,9 +45,10 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     return jsonWithCors({ ok: false, code: 'CONSENT_PERSISTENCE_FAILED' }, { status: 500 }, request);
   }
 
-  const state = (Array.isArray(data) ? data[0] : data) as { analysis?: boolean; producer_transfer?: boolean } | null;
+  const state = (Array.isArray(data) ? data[0] : data) as { analysis?: boolean; human_contact?: boolean; producer_transfer?: boolean } | null;
   return jsonWithCors({ ok: true, consent: {
     analysis: state?.analysis === true,
+    humanContact: state?.human_contact === true,
     producerTransfer: state?.producer_transfer === true
   } }, undefined, request);
 }
