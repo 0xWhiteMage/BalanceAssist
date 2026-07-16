@@ -71,6 +71,57 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay brief rail gating (Fix 4)', () => {
+  test('shows factual unavailability without local fallback or retry when DeepSeek rejects', async () => {
+    let chatCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatCalls += 1;
+        return new Response(JSON.stringify({
+          error: 'Chat service unavailable',
+          detail: 'chat_provider_unavailable'
+        }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Invent an unusual production approach' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText(/AI chat is temporarily unavailable.*Talk to a human/i, {}, { timeout: 5000 })).toBeVisible();
+    expect(chatCalls).toBe(1);
+    expect(screen.queryByText(/could you tell me a bit more about the project|could you rephrase that|what else can you tell me/i)).toBeNull();
+  }, 10_000);
+
+  test('shows the same factual unavailability without local fallback or retry when chat times out', async () => {
+    let chatCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatCalls += 1;
+        throw new DOMException('timed out', 'AbortError');
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Invent an unusual production approach' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText(/AI chat is temporarily unavailable.*Talk to a human/i, {}, { timeout: 5000 })).toBeVisible();
+    expect(chatCalls).toBe(1);
+    expect(screen.queryByText(/could you tell me a bit more about the project|could you rephrase that|what else can you tell me/i)).toBeNull();
+  }, 10_000);
+
   test('ignores a deferred normal response after AI processing moves to human-only contact', async () => {
     const pendingChat = deferred<Response>();
     const requests: string[] = [];

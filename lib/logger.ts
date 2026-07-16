@@ -3,6 +3,7 @@ import { sanitizeObservabilityData } from '@/lib/observability/sanitize';
 type LogLevel = 'info' | 'warn' | 'error';
 
 type LogContext = Record<string, unknown>;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 
 function generateRequestId(): string {
   return typeof crypto !== 'undefined' && crypto.randomUUID
@@ -37,6 +38,7 @@ export function createLogger(tag: string, requestId?: string) {
   };
 }
 
-export function extractRequestId(request: Request): string | undefined {
-  return request.headers.get('x-request-id') ?? undefined;
+export function extractRequestId(request: Request): string {
+  const requestId = request.headers.get('x-request-id');
+  return requestId && REQUEST_ID_PATTERN.test(requestId) ? requestId : generateRequestId();
 }

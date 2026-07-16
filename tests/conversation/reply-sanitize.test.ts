@@ -80,3 +80,25 @@ test.each([
   expect(result.reply).toMatch(expected);
   expect(result.draft).toEqual({});
 });
+
+test.each([
+  ['We can deliver by Friday.', /timing.*producer/i],
+  ['The quote comes to twelve thousand dollars.', /pricing.*producer/i],
+  ['We reserved the studio for Friday.', /availability.*producer/i],
+  ['We booked the crew for Friday.', /availability.*producer/i]
+])('overrides bounded commitment paraphrase and discards draft updates: %s', (providerReply, expected) => {
+  const result = sanitizeReply(providerReply, 'What can Balance commit to?', {
+    toolCallArguments: { timelineBand: 'Secretly injected update' }
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(expected);
+  expect(result.draft).toEqual({});
+});
+
+test('allows non-scheduling availability language', () => {
+  const providerReply = 'We are available to help build your brief.';
+  const result = sanitizeReply(providerReply, 'Can you help with my brief?');
+
+  expect(result).toEqual({ reply: providerReply, draft: {}, overridden: false });
+});

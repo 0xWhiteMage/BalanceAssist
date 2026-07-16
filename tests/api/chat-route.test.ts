@@ -776,7 +776,7 @@ describe('POST /api/chat', () => {
     expect(emitEventMock).toHaveBeenCalledWith(
       'llm_request',
       expect.objectContaining({ sessionId: 'session-metrics', category: 'reply', hasDraft: false }),
-      undefined
+      expect.stringMatching(/^[a-z0-9-]{8}$/i)
     );
   });
 
@@ -1275,10 +1275,11 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_API_KEY = 'test-key';
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
+    const attackerRequestId = 'Bearer secret-route-token';
     const { res, data } = await postChat({
       messages: [{ role: 'user', content: 'Tell me everything about Balance Studio' }],
       context: { step: 'intro', draft: '{}' }
-    });
+    }, { headers: { 'x-request-id': attackerRequestId } });
 
     expect(res.status).toBe(200);
     expect(data.truncated).toBe(true);
@@ -1290,6 +1291,7 @@ describe('POST /api/chat', () => {
       'response truncated: finish_reason=length',
       expect.objectContaining({ rid: expect.any(String), ts: expect.any(String) })
     );
+    expect(safelySerializeLogCalls(warnSpy.mock.calls)).not.toContain(attackerRequestId);
 
     warnSpy.mockRestore();
   });

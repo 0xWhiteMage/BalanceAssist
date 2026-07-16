@@ -13,11 +13,23 @@ const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> =
     response: 'Final pricing is set by Balance producers after they review the scope.'
   },
   {
+    pattern: /\b(?:price|pricing|quote|fee|cost)\b[^.\n]{0,40}\b(?:comes? to|is|will be|totals?|equals?)\b[^.\n]{0,40}\b(?:dollars?|pounds?|euros?|sgd|usd|eur|gbp)\b/i,
+    response: 'Final pricing is set by Balance producers after they review the scope.'
+  },
+  {
     pattern: /\b(?:guarantee|guaranteed|promise|promised|definitely)\b[^.\n]*(?:deliver|delivery|complete|completed|ready|timeline|date|by\b)/i,
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
-    pattern: /\b(?:crew|team|studio|we) (?:is|are|will be) (?:definitely )?(?:available|free|booked|confirmed)\b/i,
+    pattern: /\b(?:we|balance|our (?:team|crew|studio)) (?:can|will) (?:deliver|complete|finish|have [^.\n]{0,20} ready)\b[^.\n]{0,20}\bby\b[^.\n]{1,30}/i,
+    response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
+  },
+  {
+    pattern: /\b(?:reserved|booked|confirmed) (?:the )?(?:crew|team|studio)\b[^.\n]{0,30}\b(?:for|on)\b/i,
+    response: 'Availability is confirmed by Balance producers after they review the project and schedule.'
+  },
+  {
+    pattern: /\b(?:crew|team|studio|we) (?:is|are|will be) (?:definitely )?(?:available|free|booked|confirmed)\b[^.\n]{0,30}\b(?:next|this|on|for|from|until|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)/i,
     response: 'Availability is confirmed by Balance producers after they review the project and schedule.'
   }
 ];

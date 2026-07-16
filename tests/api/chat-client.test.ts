@@ -83,6 +83,33 @@ describe('chatRequest client', () => {
     expect(result).toBeNull();
   });
 
+  test('preserves the exact provider-unavailable 503 as a typed chat response', async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        error: 'Chat service unavailable',
+        detail: 'chat_provider_unavailable'
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    const result = await chatRequest({
+      messages: [{ role: 'user', content: 'provider-dependent request' }]
+    });
+
+    expect(result).toEqual({
+      outcome: 'provider_unavailable',
+      error: 'Chat service unavailable',
+      detail: 'chat_provider_unavailable',
+      replies: [],
+      draftUpdates: {},
+      briefReady: false,
+      sharedWork: null
+    });
+  });
+
   test('rejects malformed reply text before it reaches the widget', async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ messages: ['valid', 42], draftUpdates: {}, briefReady: false }), {
       status: 200, headers: { 'Content-Type': 'application/json' }

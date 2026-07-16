@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { createLogger } from '@/lib/logger';
+import { createLogger, extractRequestId } from '@/lib/logger';
 
 describe('createLogger', () => {
   test('includes a stable request id in log entries', () => {
@@ -85,6 +85,50 @@ describe('createLogger', () => {
       providerDetail: '[redacted]',
       correlation: '[redacted]'
     });
+    spy.mockRestore();
+  });
+});
+
+describe('extractRequestId', () => {
+  test.each([
+    '550e8400-e29b-41d4-a716-446655440000',
+    'request_token-123.abc',
+    'a'.repeat(64)
+  ])('accepts a bounded UUID/token request id: %s', (requestId) => {
+    const request = new Request('https://example.com', {
+      headers: { 'x-request-id': requestId }
+    });
+
+    expect(extractRequestId(request)).toBe(requestId);
+  });
+
+  test.each([
+    ['secret-bearing', 'Bearer secret-route-token'],
+    ['CRLF-bearing', 'safe-id\r\nX-Secret: leaked'],
+    ['oversized', 'a'.repeat(65)],
+    ['invalid-character', 'attacker@example.com']
+  ])('replaces a %s request id with a generated server id', (_case, requestId) => {
+    const request = {
+      headers: { get: () => requestId }
+    } as unknown as Request;
+
+    const extracted = extractRequestId(request);
+    expect(extracted).toMatch(/^[a-z0-9-]{8}$/i);
+    expect(extracted).not.toContain(requestId);
+  });
+
+  test('never writes a rejected request-id header to logs', () => {
+    const attackerValue = 'Bearer secret-log-token';
+    const request = {
+      headers: { get: () => attackerValue }
+    } as unknown as Request;
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    createLogger('test', extractRequestId(request)).warn('safe warning');
+
+    expect(JSON.stringify(spy.mock.calls)).not.toContain(attackerValue);
+    const entry = spy.mock.calls[0][2] as Record<string, unknown>;
+    expect(entry.rid).toMatch(/^[a-z0-9-]{8}$/i);
     spy.mockRestore();
   });
 });

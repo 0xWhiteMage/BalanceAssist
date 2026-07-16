@@ -22,7 +22,6 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
-import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
 import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
@@ -31,6 +30,8 @@ import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversa
 import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
+
+const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
 
 let messageCounter = 0;
 function nextId() {
@@ -532,12 +533,13 @@ export function WidgetOverlay({
       });
       if (!isCurrent()) return;
       if (!data) {
-        const localFallback = getLocalResponse(latestUserText, {
-          draft: draftRef.current,
-          step: stepRef.current,
-          isTeamConnected: teamRef.current
-        });
-        await botSay(localFallback ?? getFallbackResponse());
+        await botSay(CHAT_UNAVAILABLE_MESSAGE);
+        if (!isCurrent()) return;
+        return;
+      }
+
+      if (data.outcome === 'provider_unavailable') {
+        await botSay(CHAT_UNAVAILABLE_MESSAGE);
         if (!isCurrent()) return;
         return;
       }
@@ -565,7 +567,7 @@ export function WidgetOverlay({
 
       const replyChunks: string[] = (() => {
         if (data.replies.length > 0) return data.replies.map((reply) => reply.text);
-        return [getNextMissingFieldPrompt(draftRef.current)];
+        return [CHAT_UNAVAILABLE_MESSAGE];
       })();
       const draftUpdates: Record<string, string | boolean> = data.draftUpdates ?? {};
       const sharedWork = data.sharedWork
@@ -615,19 +617,8 @@ export function WidgetOverlay({
       }
     } catch {
       if (!isCurrent()) return;
-      try {
-        const localFallback = getLocalResponse(latestUserText, {
-          draft: draftRef.current,
-          step: stepRef.current,
-          isTeamConnected: teamRef.current
-        });
-        await botSay(localFallback ?? getFallbackResponse());
-        if (!isCurrent()) return;
-      } catch {
-        if (!isCurrent()) return;
-        await botSay(getFallbackResponse());
-        if (!isCurrent()) return;
-      }
+      await botSay(CHAT_UNAVAILABLE_MESSAGE);
+      if (!isCurrent()) return;
     }
   }
 
@@ -985,54 +976,13 @@ export function WidgetOverlay({
       if (currentStep === 'free-chat') {
         await ensureSession();
         appendUserMessage(trimmed);
-
-        const localResponse = getLocalResponse(trimmed, {
-          draft,
-          step: currentStep,
-          isTeamConnected
-        });
-
-        if (localResponse) {
-          await botSay(localResponse);
-          return;
-        }
-
         await handleLLMResponse(messagesRef.current);
         return;
       }
-
-      const memoryRecallPattern = /what.*do.*you.*remember|what.*have.*i.*shared|what.*do.*you.*know.*about.*my.*project/i;
-      const aiDisclosurePattern = /are.*you.*(?:bot|ai|robot|machine)|is.*this.*(?:bot|ai|automated)|are.*you.*real|are.*you.*human|am.*i.*talking.*to.*(?:bot|ai|human|person)/i;
 
       if (!isTeamConnected && isIntakeStep && trimmed.length > 0) {
-        if (memoryRecallPattern.test(trimmed) || aiDisclosurePattern.test(trimmed)) {
-          const localResponse = getLocalResponse(trimmed, {
-            draft,
-            step: currentStep,
-            isTeamConnected
-          });
-
-          if (localResponse) {
-            appendUserMessage(trimmed);
-            await botSay(localResponse);
-            return;
-          }
-        }
-
         appendUserMessage(trimmed);
         await handleLLMResponse(messagesRef.current);
-        return;
-      }
-
-      const localResponse = getLocalResponse(trimmed, {
-        draft,
-        step: currentStep,
-        isTeamConnected
-      });
-
-      if (localResponse) {
-        appendUserMessage(trimmed);
-        await botSay(localResponse);
         return;
       }
 
@@ -1046,7 +996,7 @@ export function WidgetOverlay({
       try {
         await handleLLMResponse(messagesRef.current);
       } catch {
-        await botSay(getFallbackResponse());
+        await botSay(CHAT_UNAVAILABLE_MESSAGE);
       }
     } finally {
       if (!cancelRef.current) {
