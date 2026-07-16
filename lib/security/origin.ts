@@ -1,6 +1,7 @@
 const DEFAULT_ORIGINS = [
   'https://balancestudio.tv',
-  'https://www.balancestudio.tv'
+  'https://www.balancestudio.tv',
+  'https://balance-assist.vercel.app'
 ];
 
 export function getAllowedOrigins(): string[] {

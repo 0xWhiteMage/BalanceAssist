@@ -9,5 +9,6 @@ export function selectCrmMigrations(migrations: Migration[]): Migration[];
 export function applyProductionCrmMigrations(options?: {
   connectionString?: string;
   migrationsDir?: string;
+  artifactPath?: string;
   dryRun?: boolean;
 }): Promise<{ applied?: string[]; planned?: string[]; recordedVersions?: string[]; schemaVersion: string | undefined }>;

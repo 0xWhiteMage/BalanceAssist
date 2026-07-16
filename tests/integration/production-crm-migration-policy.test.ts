@@ -98,6 +98,12 @@ describe('production CRM migration policy', () => {
     }
   });
 
+  it('declares the reviewed artifact override used by the CRM runner', async () => {
+    const declaration = await readFile(resolve(root, 'scripts/apply-production-crm-migrations.d.mts'), 'utf8');
+
+    expect(declaration).toContain('artifactPath?: string;');
+  });
+
   it('prints the dry-run migration plan when invoked as a CLI', async () => {
     const { stdout } = await execFileAsync(process.execPath, ['scripts/apply-production-crm-migrations.mjs', '--dry-run'], { cwd: root });
 

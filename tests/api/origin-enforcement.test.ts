@@ -125,4 +125,13 @@ describe('requireSession origin enforcement', () => {
     const result = await requireSession(request);
     expect(result.ok).toBe(true);
   });
+
+  test('permits session and request IDs from the explicit Vercel origin', async () => {
+    const { corsOptionsResponse } = await import('@/lib/api/route-helpers');
+    const response = corsOptionsResponse('https://balance-assist.vercel.app');
+
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://balance-assist.vercel.app');
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('x-request-id');
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('x-session-id');
+  });
 });

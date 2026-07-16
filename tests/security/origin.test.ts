@@ -62,6 +62,7 @@ describe('security/origin', () => {
       const origins = getAllowedOrigins();
       expect(origins).toContain('https://balancestudio.tv');
       expect(origins).toContain('https://www.balancestudio.tv');
+      expect(origins).toContain('https://balance-assist.vercel.app');
     });
 
     it('includes custom origins from env', () => {
@@ -76,6 +77,11 @@ describe('security/origin', () => {
   describe('isAllowedOrigin', () => {
     it('allows Balance studio origin', () => {
       expect(isAllowedOrigin('https://www.balancestudio.tv')).toBe(true);
+    });
+
+    it('allows only the explicit production Vercel origin', () => {
+      expect(isAllowedOrigin('https://balance-assist.vercel.app')).toBe(true);
+      expect(isAllowedOrigin('https://other-project.vercel.app')).toBe(false);
     });
 
     it('rejects unknown origin', () => {

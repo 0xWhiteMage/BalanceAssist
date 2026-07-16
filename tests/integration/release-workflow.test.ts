@@ -19,6 +19,8 @@ describe('production release workflows', () => {
   it('deploys only a manually selected validated commit through protected promotion', async () => {
     const release = await workflow('production-release.yml');
     const source = await readFile(resolve(process.cwd(), '.github/workflows/production-release.yml'), 'utf8');
+    const envExample = await readFile(resolve(process.cwd(), '.env.example'), 'utf8');
+    const readme = await readFile(resolve(process.cwd(), 'README.md'), 'utf8');
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
     const jobs = release.jobs ?? {};
 
@@ -27,6 +29,20 @@ describe('production release workflows', () => {
     expect(jobs.validate?.environment).toBeUndefined();
     expect(jobs.gates?.needs).toEqual(['validate']);
     expect(jobs.gates?.environment).toBe('production');
+    const sessionConfig = jobs.gates?.steps?.find((step) => step.name === 'Verify Vercel production session configuration');
+    const sessionConfigIndex = jobs.gates?.steps?.indexOf(sessionConfig as NonNullable<typeof sessionConfig>) ?? -1;
+    const installIndex = jobs.gates?.steps?.findIndex((step) => step.run === 'npm ci') ?? -1;
+    expect(sessionConfigIndex).toBeGreaterThan(installIndex);
+    expect(sessionConfig?.env?.VERCEL_TOKEN).toBe('${{ secrets.VERCEL_TOKEN }}');
+    expect(sessionConfig?.run).toContain('vercel env pull');
+    expect(sessionConfig?.run).toContain('--environment=production');
+    expect(sessionConfig?.run).toContain("config.TRUSTED_CLIENT_IP_HEADER !== 'x-vercel-forwarded-for'");
+    expect(sessionConfig?.run).toContain('https://balance-assist.vercel.app');
+    expect(sessionConfig?.run).toContain("origin.includes('*')");
+    expect(envExample).toContain('ALLOWED_ORIGINS=https://balancestudio.tv,https://www.balancestudio.tv,https://balance-assist.vercel.app');
+    expect(envExample).toContain('TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for');
+    expect(readme).toContain('ALLOWED_ORIGINS=https://balancestudio.tv,https://www.balancestudio.tv,https://balance-assist.vercel.app');
+    expect(readme).toContain('TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for');
     const vercelAudit = jobs.gates?.steps?.find((step) => step.name === 'Verify Vercel dashboard release control');
     expect(vercelAudit?.env?.VERCEL_GIT_DEPLOYMENTS_DISABLED_AT).toBe('${{ vars.VERCEL_GIT_DEPLOYMENTS_DISABLED_AT }}');
     expect(vercelAudit?.run).toContain('test -n "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT"');
