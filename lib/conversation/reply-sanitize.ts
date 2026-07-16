@@ -3,6 +3,25 @@ import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 const DRAFT_MARKER = ':::draft:::';
 const DRAFT_LINE_PATTERN = /:::draft:::\s*(?:<json>)?\s*(\{[\s\S]*?\})\s*(?:<\/json>)?\s*:::/i;
 
+const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
+  {
+    pattern: /\b(?:legally (?:binding|enforceable)|legal advice|you should sign|contract (?:is|means|allows|requires)|nda (?:is|means|allows|requires))\b/i,
+    response: "I can't provide legal or contract advice. A Balance producer must review legal and contract terms directly."
+  },
+  {
+    pattern: /\b(?:final |fixed |guaranteed )?(?:price|pricing|quote|fee|cost)\b[^.\n]*(?:\$|sgd|usd|eur|gbp|\d[\d,]*(?:\.\d{2})?)/i,
+    response: 'Final pricing is set by Balance producers after they review the scope.'
+  },
+  {
+    pattern: /\b(?:guarantee|guaranteed|promise|promised|definitely)\b[^.\n]*(?:deliver|delivery|complete|completed|ready|timeline|date|by\b)/i,
+    response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
+  },
+  {
+    pattern: /\b(?:crew|team|studio|we) (?:is|are|will be) (?:definitely )?(?:available|free|booked|confirmed)\b/i,
+    response: 'Availability is confirmed by Balance producers after they review the project and schedule.'
+  }
+];
+
 const REFUSAL_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
   {
     pattern: /\bhow much\b.*\b(cost|price|quote|fee|charge)\b/i,
@@ -84,6 +103,9 @@ function parseAssistantReply(reply: string): {
 }
 
 function matchesRefusal(reply: string, userMessage: string): string | null {
+  for (const { pattern, response } of PRODUCER_BOUNDARY_PATTERNS) {
+    if (pattern.test(reply)) return response;
+  }
   for (const { pattern, response } of REFUSAL_PATTERNS) {
     if (pattern.test(userMessage)) {
       return response;

@@ -37,6 +37,10 @@ export async function OPTIONS() {
 
 type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 const PROVIDER_TIMEOUT_MS = 15000;
+const CHAT_PROVIDER_UNAVAILABLE = {
+  error: 'Chat service unavailable',
+  detail: 'chat_provider_unavailable'
+} as const;
 const TOOL_NAME = 'record_brief_updates';
 const SHARE_WORK_TOOL_NAME = 'share_work';
 
@@ -100,41 +104,6 @@ async function fetchProvider(input: string, init: RequestInit) {
   } finally {
     clearTimeout(timeoutId);
   }
-}
-
-function readMinimaxContent(data: unknown): string | null {
-  if (!data || typeof data !== 'object') {
-    return null;
-  }
-
-  const payload = data as {
-    reply?: unknown;
-    choices?: Array<{
-      message?: { content?: unknown };
-      messages?: Array<{ content?: unknown }>;
-      text?: unknown;
-    }>;
-  };
-
-  if (typeof payload.reply === 'string' && payload.reply.trim().length > 0) {
-    return payload.reply;
-  }
-
-  const firstChoice = payload.choices?.[0];
-
-  if (typeof firstChoice?.message?.content === 'string' && firstChoice.message.content.trim().length > 0) {
-    return firstChoice.message.content;
-  }
-
-  if (typeof firstChoice?.messages?.[0]?.content === 'string' && firstChoice.messages[0].content.trim().length > 0) {
-    return firstChoice.messages[0].content;
-  }
-
-  if (typeof firstChoice?.text === 'string' && firstChoice.text.trim().length > 0) {
-    return firstChoice.text;
-  }
-
-  return null;
 }
 
 type ProviderResult = {
@@ -266,46 +235,6 @@ async function callOpenAICompatible(
   }
 
   return { content: rawContent ?? getFallbackResponse(), toolArguments: null, sharedWork: null, truncated };
-}
-
-async function callMinimax(apiKey: string, messages: OpenAIMessage[]): Promise<string> {
-  const systemContent = messages.find((m) => m.role === 'system')?.content ?? '';
-  const userMessages = messages.filter((m) => m.role !== 'system');
-
-  const response = await fetchProvider('https://api.minimax.chat/v1/text/chatcompletion_v2', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'MiniMax-Text-01',
-      messages: [
-        { role: 'system', content: systemContent },
-        ...userMessages
-      ],
-      max_tokens: 512,
-      temperature: 0.6
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Minimax API returned ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  if (data?.base_resp?.status_code && data.base_resp.status_code !== 0) {
-    throw new Error(`Minimax API error ${data.base_resp.status_code}: ${data.base_resp.status_msg ?? 'unknown error'}`);
-  }
-
-  const content = readMinimaxContent(data);
-
-  if (!content) {
-    throw new Error('Minimax response did not contain assistant content');
-  }
-
-  return content;
 }
 
 async function logLlmEvent(
@@ -592,55 +521,36 @@ export async function POST(request: Request) {
   let category: 'reply' | 'refusal' | 'local_fallback' = 'reply';
 
   try {
-    if (env.DEEPSEEK_API_KEY) {
-      const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
-      const model = env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
-      const providerResult = await callOpenAICompatible(
-        'https://api.deepseek.com/v1/chat/completions',
-        env.DEEPSEEK_API_KEY,
-        model,
-        llmMessages,
-        { useTools: true, sessionId, priorDraft: llmContext.priorDraft, userMessage: lastUserMessage, requestId }
-      );
-      visibleContent = providerResult.content;
-      toolArguments = providerResult.toolArguments;
-      sharedWork = providerResult.sharedWork;
-      truncated = providerResult.truncated;
-    } else if (env.MINIMAX_API_KEY) {
-      const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
-      visibleContent = await callMinimax(env.MINIMAX_API_KEY, llmMessages);
-    } else if (env.OPENAI_API_KEY) {
-      const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
-      const endpoint = env.OPENAI_API_ENDPOINT ?? 'https://api.openai.com/v1/chat/completions';
-      const model = env.OPENAI_MODEL ?? 'gpt-4o-mini';
-      const providerResult = await callOpenAICompatible(
-        endpoint,
-        env.OPENAI_API_KEY,
-        model,
-        llmMessages,
-        { useTools: true, sessionId, priorDraft: llmContext.priorDraft, userMessage: lastUserMessage, requestId }
-      );
-      visibleContent = providerResult.content;
-      toolArguments = providerResult.toolArguments;
-      sharedWork = providerResult.sharedWork;
-      truncated = providerResult.truncated;
-    } else {
-      category = 'local_fallback';
+    const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
+
+    if (!env.DEEPSEEK_API_KEY) {
       const localResponse = getLocalResponse(lastUserMessage, {
-        draft: llmContext.priorDraft as never,
+        draft: { ...createDefaultLeadDraft(), ...llmContext.priorDraft },
         step: (context?.step as ConversationStepId) ?? 'free-chat',
         isTeamConnected: context?.isTeamConnected ?? false
       });
 
       if (localResponse) {
+        category = 'local_fallback';
         visibleContent = localResponse;
       } else if (context?.step && conversationSteps[context.step as ConversationStepId]?.quickReplies) {
-        visibleContent = "I didn't quite catch that — could you pick one of the options above, or tell me about your project?";
+        category = 'local_fallback';
+        visibleContent = "I didn't quite catch that - could you pick one of the options above, or tell me about your project?";
       } else {
-        visibleContent = getFallbackResponse();
+        return jsonWithCors(CHAT_PROVIDER_UNAVAILABLE, { status: 503 }, request);
       }
-
-      await new Promise((r) => setTimeout(r, 400));
+    } else {
+      const providerResult = await callOpenAICompatible(
+        'https://api.deepseek.com/v1/chat/completions',
+        env.DEEPSEEK_API_KEY,
+        env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
+        llmMessages,
+        { useTools: true, sessionId, priorDraft: llmContext.priorDraft, userMessage: lastUserMessage, requestId }
+      );
+      visibleContent = providerResult.content;
+      toolArguments = providerResult.toolArguments;
+      sharedWork = providerResult.sharedWork;
+      truncated = providerResult.truncated;
     }
 
     const sanitized = sanitizeReply(visibleContent, lastUserMessage, { toolCallArguments: toolArguments ?? undefined });
@@ -684,9 +594,8 @@ export async function POST(request: Request) {
       sharedWork: sharedWork ?? undefined,
       truncated
     });
-  } catch (error) {
-    const message = 'chat_provider_failed';
-    return jsonWithCors({ error: 'Chat service error', detail: message }, { status: 500 });
+  } catch {
+    return jsonWithCors(CHAT_PROVIDER_UNAVAILABLE, { status: 503 }, request);
   }
 }
 

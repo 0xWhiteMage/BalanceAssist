@@ -66,3 +66,17 @@ test('uses tool-call arguments over prose draft line when both present', () => {
   expect(result.draft.contactName).toBe('Tool');
   expect(result.draft.contactEmail).toBe('tool@example.com');
 });
+
+test.each([
+  ['The binding contract is legally enforceable and you should sign it.', /legal|contract.*producer/i],
+  ['The final price is SGD 12,000.', /pricing.*producer/i],
+  ['We guarantee delivery by 1 September.', /timing.*producer/i],
+  ['The crew is definitely available next Friday.', /availability.*producer/i]
+])('overrides prohibited provider claim and discards its draft: %s', (providerReply, expected) => {
+  const result = sanitizeReply(providerReply, 'Tell me what you can commit to', {
+    toolCallArguments: { projectScope: 'Secretly injected update' }
+  });
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(expected);
+  expect(result.draft).toEqual({});
+});

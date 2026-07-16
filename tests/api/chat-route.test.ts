@@ -45,13 +45,22 @@ describe('POST /api/chat', () => {
   let originalFetch: typeof fetch;
   let originalDeepseekKey: string | undefined;
   let originalDeepseekModel: string | undefined;
+  let originalMinimaxKey: string | undefined;
+  let originalOpenAiKey: string | undefined;
+  let originalOpenAiEndpoint: string | undefined;
 
   beforeEach(() => {
     originalFetch = global.fetch;
     originalDeepseekKey = process.env.DEEPSEEK_API_KEY;
     originalDeepseekModel = process.env.DEEPSEEK_MODEL;
+    originalMinimaxKey = process.env.MINIMAX_API_KEY;
+    originalOpenAiKey = process.env.OPENAI_API_KEY;
+    originalOpenAiEndpoint = process.env.OPENAI_API_ENDPOINT;
     delete process.env.DEEPSEEK_API_KEY;
     delete process.env.DEEPSEEK_MODEL;
+    delete process.env.MINIMAX_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_ENDPOINT;
     hasSupabaseServerConfigMock.mockReset();
     hasSupabaseServerConfigMock.mockReturnValue(false);
     createServerSupabaseClientMock.mockReset();
@@ -82,8 +91,16 @@ describe('POST /api/chat', () => {
   });
 
   afterEach(() => {
-    process.env.DEEPSEEK_API_KEY = originalDeepseekKey;
-    process.env.DEEPSEEK_MODEL = originalDeepseekModel;
+    if (originalDeepseekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalDeepseekKey;
+    if (originalDeepseekModel === undefined) delete process.env.DEEPSEEK_MODEL;
+    else process.env.DEEPSEEK_MODEL = originalDeepseekModel;
+    if (originalMinimaxKey === undefined) delete process.env.MINIMAX_API_KEY;
+    else process.env.MINIMAX_API_KEY = originalMinimaxKey;
+    if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalOpenAiKey;
+    if (originalOpenAiEndpoint === undefined) delete process.env.OPENAI_API_ENDPOINT;
+    else process.env.OPENAI_API_ENDPOINT = originalOpenAiEndpoint;
     global.fetch = originalFetch;
   });
 
@@ -1124,7 +1141,7 @@ describe('POST /api/chat', () => {
     expect(data.reviewPrompt).toBeNull();
   });
 
-  test('returns local fallback response when no API key is set', async () => {
+  test('returns unavailable when no API key is set and no deterministic answer applies', async () => {
     global.fetch = vi.fn();
 
     const { res, data } = await postChat({
@@ -1132,13 +1149,102 @@ describe('POST /api/chat', () => {
       context: { step: 'intro', draft: '{}' }
     });
 
+    expect(res.status).toBe(503);
+    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('calls only the fixed DeepSeek endpoint and configured DeepSeek model', async () => {
+    process.env.DEEPSEEK_API_KEY = 'deepseek-key';
+    process.env.DEEPSEEK_MODEL = 'approved-deepseek-model';
+    process.env.MINIMAX_API_KEY = 'minimax-key';
+    process.env.OPENAI_API_KEY = 'openai-key';
+    process.env.OPENAI_API_ENDPOINT = 'not-a-url-and-must-be-ignored';
+    global.fetch = vi.fn(async () => makeTruncatedResponse('DeepSeek reply', 'stop')) as unknown as typeof fetch;
+
+    const { res } = await postChat({
+      messages: [{ role: 'user', content: 'Tell me about an unusual production approach' }]
+    });
+
+    expect(res.status).toBe(200);
+    expect(global.fetch).toHaveBeenCalledOnce();
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.deepseek.com/v1/chat/completions',
+      expect.objectContaining({
+        body: expect.stringContaining('"model":"approved-deepseek-model"')
+      })
+    );
+    expect(String(vi.mocked(global.fetch).mock.calls[0][0])).not.toMatch(/minimax|openai|attacker/i);
+  });
+
+  test('does not select an alternate provider when DeepSeek is unconfigured', async () => {
+    process.env.MINIMAX_API_KEY = 'minimax-key';
+    process.env.OPENAI_API_KEY = 'openai-key';
+    process.env.OPENAI_API_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'Invent a highly unusual production answer not covered locally' }]
+    });
+
+    expect(res.status).toBe(503);
+    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('keeps an applicable deterministic answer when DeepSeek is unconfigured', async () => {
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+
     expect(res.status).toBe(200);
     expect(data.message).toBeTypeOf('string');
-    expect(data.message.length).toBeGreaterThan(0);
-    expect(data.draftUpdates).toEqual({});
-    expect(data.briefReady).toBe(false);
-    expect(data.reviewPrompt).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('returns one redacted unavailable error when DeepSeek rejects the request', async () => {
+    process.env.DEEPSEEK_API_KEY = 'deepseek-key';
+    process.env.MINIMAX_API_KEY = 'minimax-key';
+    process.env.OPENAI_API_KEY = 'openai-key';
+    global.fetch = vi.fn(async () => new Response('provider body SECRET-42', { status: 429 })) as unknown as typeof fetch;
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'ordinary provider-dependent question' }]
+    });
+
+    expect(res.status).toBe(503);
+    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(JSON.stringify(data)).not.toMatch(/SECRET-42|429|minimax|openai|deepseek-key/i);
+    expect(global.fetch).toHaveBeenCalledOnce();
+  });
+
+  test('returns the same redacted unavailable error when DeepSeek times out', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.DEEPSEEK_API_KEY = 'deepseek-key';
+      global.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('timeout body SECRET-43', 'AbortError'));
+          }, { once: true });
+        })
+      ) as unknown as typeof fetch;
+
+      const responsePromise = postChat({
+        messages: [{ role: 'user', content: 'ordinary provider-dependent timeout question' }]
+      });
+      await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(15_000);
+      const { res, data } = await responsePromise;
+
+      expect(res.status).toBe(503);
+      expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+      expect(JSON.stringify(data)).not.toMatch(/SECRET-43|AbortError|deepseek-key/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('answers filming FAQs deterministically with messages[] and sharedWork without calling the LLM', async () => {
