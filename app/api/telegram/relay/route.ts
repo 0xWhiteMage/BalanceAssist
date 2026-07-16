@@ -27,19 +27,14 @@ export async function POST(request: Request) {
     p_text: text
   });
   const result = Array.isArray(data) ? data[0] as {
-    persisted?: boolean; consent_required?: boolean; message_id?: number | null; handoff_id?: string | null; thread_id?: number | null;
+    persisted?: boolean; consent_required?: boolean; handoff_id?: string | null;
   } : null;
   if (error || !result) return jsonWithCors({ ok: false, error: 'relay_persist_failed' }, { status: 500 }, request);
   if (result.consent_required) return jsonWithCors({ ok: false, code: 'consent_required' }, { status: 403 }, request);
 
   return jsonWithCors({
     ok: result.persisted === true,
-    sessionId,
-    telegramSent: false,
-    queued: Boolean(result.handoff_id),
     persisted: result.persisted === true,
-    messageId: result.message_id ?? undefined,
-    handoffId: result.handoff_id ?? undefined,
-    threadId: result.thread_id ?? undefined
+    queued: Boolean(result.handoff_id)
   }, undefined, request);
 }
