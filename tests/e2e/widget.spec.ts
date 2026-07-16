@@ -75,33 +75,66 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
   }));
   await page.goto('/preview');
 
-  const names = ['Build a brief with AI', 'Talk to the team without AI', 'Leave'];
-  await page.getByRole('link', { name: /privacy/i }).focus();
-  for (const name of names) {
-    const action = page.getByRole('button', { name, exact: true });
-    const bounds = await action.boundingBox();
-    expect(bounds).not.toBeNull();
-    expect(bounds!.width).toBeGreaterThanOrEqual(44);
-    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+  const initialNames = ['Build a brief with AI', 'Talk to the team without AI', 'Leave'];
+  const disclosedNames = ['Continue with AI', 'Talk to the team without AI', 'Leave'];
+  const actions = page.locator('[data-testid="data-use-notice"] .balance-entry-action');
 
-    await page.keyboard.press('Tab');
-    await expect(action).toBeFocused();
-    const focusStyle = await action.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        outlineStyle: style.outlineStyle,
-        outlineWidth: Number.parseFloat(style.outlineWidth),
-        outlineOffset: Number.parseFloat(style.outlineOffset)
-      };
-    });
-    expect(focusStyle.outlineStyle).not.toBe('none');
-    expect(focusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
-    expect(focusStyle.outlineOffset).toBeGreaterThanOrEqual(2);
+  async function expectActionOrderSizeAndFocus(names: string[]) {
+    await expect(actions).toHaveText(names);
+    await page.getByRole('link', { name: /privacy/i }).focus();
+
+    for (const name of names) {
+      const action = page.getByRole('button', { name, exact: true });
+      const bounds = await action.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.width).toBeGreaterThanOrEqual(44);
+      expect(bounds!.height).toBeGreaterThanOrEqual(44);
+
+      await page.keyboard.press('Tab');
+      await expect(action).toBeFocused();
+      const focusStyle = await action.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number.parseFloat(style.outlineWidth),
+          outlineOffset: Number.parseFloat(style.outlineOffset)
+        };
+      });
+      expect(focusStyle.outlineStyle).not.toBe('none');
+      expect(focusStyle.outlineWidth).toBeGreaterThan(0);
+      expect(focusStyle.outlineOffset).toBeGreaterThanOrEqual(2);
+    }
   }
 
-  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).focus();
-  await page.keyboard.press('Enter');
+  async function reloadEntry() {
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Build a brief with AI', exact: true })).toBeVisible();
+  }
+
+  await expectActionOrderSizeAndFocus(initialNames);
+  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Space');
+  await expectActionOrderSizeAndFocus(disclosedNames);
+
+  await page.getByRole('button', { name: 'Continue with AI', exact: true }).press('Enter');
+  await expect(page.getByTestId('data-use-notice')).toHaveCount(0);
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Enter');
   await expect(page.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Enter');
+  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Space');
+  await expect(page.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Leave', exact: true }).press('Space');
+  await expect(page.getByRole('dialog', { name: 'Balance Assist' })).toHaveCount(0);
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Space');
+  await page.getByRole('button', { name: 'Leave', exact: true }).press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Balance Assist' })).toHaveCount(0);
 });
 
 test('restores focus after closing its nested reference dialog without force clicks', async ({ page }) => {
