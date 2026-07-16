@@ -83,7 +83,7 @@ In **Settings → Secrets and variables → Actions** add:
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `production` environment only; immutable Vercel deploy and alias promotion |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `production` environment only; bounded schema/service-role readiness probes |
 | `PRODUCTION_DATABASE_URL` | `production-migrations` environment only; never repository configuration |
-| `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations` and `production-cleanup-migrations` environments only; runs reviewed SQL through the Supabase Management API |
+| `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations`, `production-cleanup-migrations`, and `production` canary environments; runs reviewed SQL and migration-record checks through the Supabase Management API |
 | `PRODUCTION_BACKUP_AUDIT_REFERENCE` | `production-cleanup-migrations` environment only; protected backup/audit record bound to the cleanup release SHA |
 
 Set the protected `production` environment variable `VERCEL_GIT_DEPLOYMENTS_DISABLED_AT` to a UTC ISO-8601 dashboard-audit timestamp (for example, `2026-07-14T12:00:00Z`). The release gate rejects absent, malformed, future, or more-than-90-day-old attestations. Recheck the Vercel setting before each release and quarterly; a failed gate or a Vercel Git deployment outside a release is an alert requiring the setting to be disabled and the release/audit history to be reviewed.
@@ -92,7 +92,7 @@ Create GitHub environments named `production`, `production-migrations`, and `pro
 
 Production migrations are forward-only and run only in the protected `production-migrations` job after disposable-stack validation and immutable-deployment smoke, before alias promotion. Starting after `037_scheduler_health.sql`, the runner fail-closes unless a migration is exactly one supported additive `CREATE TABLE`, `ALTER TABLE ... ADD COLUMN`, or `CREATE INDEX` statement. Before examining migration files, it queries `public.schema_migrations`: reviewed cleanup versions `038` through `043` are permitted only when every version is already recorded; otherwise it fails with the prerequisite to run `Production cleanup migrations` first. The runner records applied versions in `public.schema_migrations` and prints the final schema version. Never put the production database credential in `.env` or run it outside the approved workflow.
 
-CRM migrations use the separate protected `production-crm-migrations` workflow. It hash-verifies the checked-in SQL artifact, then uses `SUPABASE_ACCESS_TOKEN` through the Supabase Management API; it does not use a direct database connection URL. The production canary's database prerequisite remains a separate release gate.
+CRM migrations use the separate protected `production-crm-migrations` workflow. It hash-verifies the checked-in SQL artifact, then uses `SUPABASE_ACCESS_TOKEN` through the Supabase Management API; it does not use a direct database connection URL. The production canary verifies migration records through the Supabase Management API before it contacts Monday.
 
 ### One-time cleanup migration runbook
 

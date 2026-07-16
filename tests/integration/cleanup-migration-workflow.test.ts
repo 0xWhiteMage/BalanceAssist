@@ -67,10 +67,11 @@ describe('production cleanup migration workflow', () => {
     ]);
   });
 
-  it('documents the managed Supabase token for cleanup without assigning a direct database URL', async () => {
+  it('documents the managed Supabase token for CRM, cleanup, and canary verification without assigning a direct database URL', async () => {
     const readme = await readFile(resolve(process.cwd(), 'README.md'), 'utf8');
 
-    expect(readme).toContain('| `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations` and `production-cleanup-migrations` environments only; runs reviewed SQL through the Supabase Management API |');
+    expect(readme).toContain('| `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations`, `production-cleanup-migrations`, and `production` canary environments; runs reviewed SQL and migration-record checks through the Supabase Management API |');
+    expect(readme).toContain('The production canary verifies migration records through the Supabase Management API before it contacts Monday.');
     expect(readme).not.toContain('| `PRODUCTION_DATABASE_URL` | `production-migrations` and `production-cleanup-migrations`');
   });
 });

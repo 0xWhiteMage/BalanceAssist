@@ -2,7 +2,6 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import pg from 'pg';
 
 const root = resolve(import.meta.dirname, '..');
 const schema = JSON.parse(readFileSync(resolve(root, 'config/monday-crm-schema.json'), 'utf8'));
@@ -35,19 +34,6 @@ function assertDormantLanes() {
   }
 }
 
-async function verifyMigrations() {
-  const databaseUrl = required('PRODUCTION_DATABASE_URL');
-  const client = new pg.Client({ connectionString: databaseUrl });
-  await client.connect();
-  try {
-    const { rows } = await client.query("select version::text from public.schema_migrations where version::text = any($1::text[])", [migrationVersions]);
-    const recorded = new Set(rows.map((row) => row.version));
-    if (migrationVersions.some((version) => !recorded.has(version))) throw new Error('Required Monday CRM migrations through 053 are not recorded.');
-  } finally {
-    await client.end();
-  }
-}
-
 async function monday(query, variables, idempotencyKey) {
   const response = await fetch('https://api.monday.com/v2', {
     method: 'POST',
@@ -70,10 +56,10 @@ async function main() {
   assertDormantLanes();
   if (process.env.MONDAY_BOARD_ID !== schema.boardId || process.env.MONDAY_API_VERSION !== '2026-07') throw new Error('Canary requires the checked-in Monday board and API version.');
   if (!migrationSources.every((source) => existsSync(resolve(root, 'supabase/migrations', source)))) throw new Error('Required Monday migration sources through 053 are missing.');
+  if (required('MONDAY_CANARY_MIGRATIONS_VERIFIED') !== '1') throw new Error('Canary requires CI migration verification through 053.');
 
   const schemaCheck = spawnSync(process.execPath, ['scripts/verify-monday-schema.mjs'], { cwd: root, encoding: 'utf8', env: process.env });
   if (schemaCheck.status !== 0) throw new Error('Live Monday schema fingerprint does not match the checked-in contract.');
-  await verifyMigrations();
 
   const crmRecordId = randomUUID();
   const itemName = `Balance Assist canary ${crmRecordId.slice(0, 8)}`;
