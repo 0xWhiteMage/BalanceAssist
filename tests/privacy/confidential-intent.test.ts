@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  classifyConfidentialFilename,
   classifyConfidentialIntent,
   CONFIDENTIAL_INTAKE_RESPONSE,
   type ConfidentialIntentResult
@@ -52,7 +53,42 @@ describe('classifyConfidentialIntent', () => {
     ['personal-data.csv', 'personal-data'],
     ['sensitive-client-information.txt', 'sensitive']
   ])('classifies realistic filename %j as %s', (input, expected) => {
-    expect(classifyConfidentialIntent(input)).toBe(expected);
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['confidential.pdf', 'confidential'],
+    ['nda_material.pdf', 'nda'],
+    ['sensitive.pdf', 'sensitive'],
+    ['personal-data.pdf', 'personal-data'],
+    ['personally-identifiable-information.csv', 'personal-data'],
+    ['unreleased.mov', 'unreleased'],
+    ['pre-release-footage.mp4', 'unreleased'],
+    ['unannounced_project.pdf', 'unreleased']
+  ])('classifies standalone bounded filename label %j as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test.each([
+    'confidential.pdf',
+    'nda_material.pdf',
+    'sensitive.pdf',
+    'personal-data.pdf',
+    'unreleased.mov'
+  ])('does not apply filename-only labels to prose classification: %j', (input) => {
+    expect(classifyConfidentialIntent(input)).toBe('allow');
+  });
+
+  test.each([
+    'personal-project.pdf',
+    'sensitive-topic.txt',
+    'private-event.pdf',
+    'confidentially.pdf',
+    'unconditional.pdf',
+    'release-form.pdf',
+    'missing-extension'
+  ])('allows benign filename near-match %j', (input) => {
+    expect(classifyConfidentialFilename(input)).toBe('allow');
   });
 
   test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
@@ -64,15 +100,31 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialIntent(input)).toBe(expected);
   });
 
-  test.each([
-    'THIS PROJECT IS UNDER AN NDA',
-    'This\tproject\nis under NDA.',
-    'This project is under an N.D.A.',
-    'This project is under a non disclosure agreement',
-    'I am sharing pre–release footage',
-    "I’m sending confidential client documents"
-  ])('normalizes case, whitespace, punctuation, apostrophes, and hyphenation: %j', (input) => {
-    expect(classifyConfidentialIntent(input)).not.toBe('allow');
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['This brief is confiden\u034ftial.', 'confidential'],
+    ['I am uploading sensi\ufe0ftive client data.', 'sensitive'],
+    ['This file contains perso\u{e0100}nal data.', 'personal-data']
+  ])('removes non-Cf default-ignorable code points before classifying %j as %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['confiden\u034ftial.pdf', 'confidential'],
+    ['n\ufe0fda_material.pdf', 'nda'],
+    ['unre\u{e0100}leased.mov', 'unreleased']
+  ])('removes default-ignorable code points from filename %j before classifying as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['THIS PROJECT IS UNDER AN NDA', 'nda'],
+    ['This\tproject\nis under NDA.', 'nda'],
+    ['This project is under an N.D.A.', 'nda'],
+    ['This project is under a non disclosure agreement', 'nda'],
+    ['I am sharing pre–release footage', 'unreleased'],
+    ["I’m sending confidential client documents", 'confidential']
+  ])('normalizes case, whitespace, punctuation, apostrophes, and hyphenation: %j', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
   });
 
   test.each([
@@ -107,11 +159,22 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialIntent(input)).toBe('allow');
   });
 
+  test.each([
+    "I don't have any unreleased footage.",
+    'We have no pre-release assets.',
+    'I no longer have unannounced media.',
+    'We are no longer sharing pre-release footage.',
+    'The client is no longer sending unannounced media.'
+  ])('allows natural unreleased possession and no-longer-sharing negations: %j', (input) => {
+    expect(classifyConfidentialIntent(input)).toBe('allow');
+  });
+
   test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
     ['This project is not under NDA, but the attached brief is confidential.', 'confidential'],
     ['The campaign is no longer unreleased, but this file contains personal data.', 'personal-data'],
     ['This footage is not pre-release, but I am sending sensitive client data.', 'sensitive'],
-    ['This contains no personal data, but it is an unreleased campaign.', 'unreleased']
+    ['This contains no personal data, but it is an unreleased campaign.', 'unreleased'],
+    ["I don't have unreleased footage, but I am sending sensitive client data.", 'sensitive']
   ])('does not let a bounded negation hide a separate positive phrase: %j', (input, expected) => {
     expect(classifyConfidentialIntent(input)).toBe(expected);
   });
