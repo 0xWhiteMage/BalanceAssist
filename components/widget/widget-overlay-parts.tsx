@@ -266,7 +266,7 @@ export function HumanFooter({
   onConnect
 }: {
   isTeamConnected: boolean;
-  humanStatus: 'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'replied';
+  humanStatus: 'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable' | 'replied';
   onConnect: () => void;
 }) {
   return (
@@ -369,10 +369,36 @@ export function HumanFooter({
                   ? 'Queued for the Balance team'
                 : humanStatus === 'delivered'
                   ? 'Message delivered'
+                : humanStatus === 'unavailable'
+                  ? 'Message delivery unavailable'
                   : 'Connected to team'}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+export function HumanFallbacks({
+  calendlyUrl,
+  unavailable = false,
+  deliveryUnavailable = false
+}: {
+  calendlyUrl: string | null;
+  unavailable?: boolean;
+  deliveryUnavailable?: boolean;
+}) {
+  const copy = deliveryUnavailable
+    ? 'Message delivery is unavailable. Please email the team or book a call instead.'
+    : unavailable
+      ? 'The private relay could not start. You can still contact the team directly.'
+      : 'Prefer another route? Contact the team directly.';
+
+  return (
+    <div role={unavailable || deliveryUnavailable ? 'status' : undefined} style={{ display: 'grid', gap: 8, padding: 12, fontSize: 12, lineHeight: 1.5 }}>
+      <p style={{ margin: 0 }}>{copy}</p>
+      <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
+      {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
     </div>
   );
 }

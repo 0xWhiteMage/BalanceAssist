@@ -13,7 +13,7 @@ type SendResult = 'persisted' | 'failed' | 'invalidated';
 
 export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }: Dependencies) {
   const [requested, setRequested] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'replied'>('idle');
+  const [status, setStatus] = useState<'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable' | 'replied'>('idle');
   const [isTeamConnected, setIsTeamConnected] = useState(false);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [fileRequestOpen, setFileRequestOpen] = useState(false);
@@ -60,6 +60,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
       if (!suppressOutgoingStatus) {
         setStatus((current) => {
           if (current === 'replied') return current;
+          if (next.outgoingStatus === 'unavailable') return 'unavailable';
           if (next.outgoingStatus === 'delivered') return 'delivered';
           if (next.outgoingStatus === 'queued' && current !== 'delivered') return 'queued';
           return current;
@@ -113,7 +114,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     pollingRef.current = null;
     pendingSendGenerationRef.current = generation;
     setWaitingForReply(true);
-    setStatus((current) => current === 'replied' ? current : 'sending');
+    setStatus('sending');
     const retry = retryRef.current?.text === text ? retryRef.current : {
       text,
       requestId: crypto.randomUUID()

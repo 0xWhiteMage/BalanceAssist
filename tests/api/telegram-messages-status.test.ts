@@ -114,7 +114,7 @@ describe('GET /api/telegram/messages relay status', () => {
     expectNoPrivateKeys(body);
   });
 
-  test.each(['claiming', 'sending', 'failed', 'escalated'])('keeps %s queued regardless of elapsed time', async (state) => {
+  test.each(['claiming', 'sending'])('keeps %s queued regardless of elapsed time', async (state) => {
     const { supabase } = buildSupabase({
       outbox: {
         data: {
@@ -128,6 +128,33 @@ describe('GET /api/telegram/messages relay status', () => {
     });
 
     await expect((await poll(supabase)).json()).resolves.toMatchObject({ outgoingStatus: 'queued' });
+  });
+
+  test.each(['failed', 'escalated'])('projects terminal %s delivery as unavailable without provider detail', async (state) => {
+    const { supabase } = buildSupabase({
+      outbox: {
+        data: {
+          state,
+          payload: { type: 'relay', provider: 'telegram', last_error: 'private provider failure' }
+        },
+        error: null
+      }
+    });
+
+    const body = await (await poll(supabase)).json();
+    expect(body.outgoingStatus).toBe('unavailable');
+    expectNoPrivateKeys(body);
+  });
+
+  test.each(['failed', 'escalated'])('keeps a complete durable receipt delivered when state is %s', async (state) => {
+    const { supabase } = buildSupabase({
+      outbox: {
+        data: { state, payload: { type: 'relay', telegramMessageId: 502, telegramThreadId: 77 } },
+        error: null
+      }
+    });
+
+    await expect((await poll(supabase)).json()).resolves.toMatchObject({ outgoingStatus: 'delivered' });
   });
 
   test('projects a sent relay outbox as delivered without exposing its metadata', async () => {

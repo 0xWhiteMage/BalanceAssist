@@ -503,6 +503,47 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('replied');
   });
 
+  test('tracks a second send independently after the first reply', async () => {
+    const poll = vi.fn()
+      .mockResolvedValueOnce({ outgoingStatus: 'delivered' as const, messages: [{ id: 1, sender: 'team' as const, text: 'First reply', createdAt: '2026-07-16T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: 'queued' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: 'delivered' as const, messages: [{ id: 2, sender: 'team' as const, text: 'Second reply', createdAt: '2026-07-16T10:01:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+    const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: relay
+    }));
+
+    await act(async () => { await result.current.send('First message'); });
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('replied');
+
+    let secondSend!: Promise<'persisted' | 'failed' | 'invalidated'>;
+    act(() => { secondSend = result.current.send('Second message'); });
+    expect(result.current.status).toBe('sending');
+    await act(async () => { await secondSend; });
+    expect(result.current.status).toBe('queued');
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('queued');
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('delivered');
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('replied');
+    expect(result.current.messages.map((message) => message.text)).toEqual(['First reply', 'Second reply']);
+    expect(poll.mock.calls.map(([, sinceId]) => sinceId)).toEqual([0, 1, 1, 1]);
+  });
+
+  test('reports terminal outgoing delivery as unavailable', async () => {
+    const poll = vi.fn(async () => ({ outgoingStatus: 'unavailable' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn()
+    }));
+
+    await act(async () => { await result.current.poll(); });
+
+    expect(result.current.status).toBe('unavailable');
+  });
+
   test('preserves queued after a rejected poll and retries on the next timer tick', async () => {
     vi.useFakeTimers();
     const poll = vi.fn()
@@ -680,6 +721,15 @@ describe('relay API client', () => {
       fileRequestNote: null,
       scheduleRequestOpen: false
     });
+  });
+
+  test('accepts the sanitized unavailable outgoing poll status', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      ...validPollResponse,
+      outgoingStatus: 'unavailable'
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(fetchTeamMessages('session-1')).resolves.toMatchObject({ outgoingStatus: 'unavailable' });
   });
 
   test.each([

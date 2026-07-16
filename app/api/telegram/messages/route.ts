@@ -96,6 +96,8 @@ export async function GET(request: Request) {
     ? null
     : persistedRelay.state === 'sent' || hasPersistedReceipt
       ? 'delivered' as const
+      : persistedRelay.state === 'failed' || persistedRelay.state === 'escalated'
+        ? 'unavailable' as const
       : 'queued' as const;
 
   return jsonWithCors({

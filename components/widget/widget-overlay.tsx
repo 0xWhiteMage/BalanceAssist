@@ -8,6 +8,7 @@ import {
   BotAvatarSmall,
   FileRequestBanner,
   FileRequestInputHint,
+  HumanFallbacks,
   HumanFooter,
   UploadPolicyModal,
   WidgetOverlayHeader
@@ -181,6 +182,7 @@ export function WidgetOverlay({
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapGenerationRef = useRef(0);
+  const aiBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const humanBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
@@ -355,27 +357,29 @@ export function WidgetOverlay({
   );
 
   const advanceStep = useCallback(
-    async (stepId: ConversationStepId, draftForMessages: LeadDraft) => {
-      if (cancelRef.current) return;
+    async (stepId: ConversationStepId, draftForMessages: LeadDraft, isValid: () => boolean = () => true) => {
+      if (cancelRef.current || !isValid()) return;
 
       setCurrentStep(stepId);
       const step = conversationSteps[stepId];
       const texts = resolveBotTexts(stepId, draftForMessages);
 
       for (let i = 0; i < texts.length; i++) {
-        if (cancelRef.current) return;
+        if (cancelRef.current || !isValid()) return;
         const isLast = i === texts.length - 1;
         await botSay(texts[i], {
           isDisclaimer: stepId === 'intro' && i === 1,
-          inlineCards: isLast ? step.inlineCards : undefined
+          inlineCards: isLast ? step.inlineCards : undefined,
+          isValid
         });
       }
 
       if (texts.length === 0 && step.inlineCards) {
-        if (cancelRef.current) return;
-        await botSay('', { inlineCards: step.inlineCards });
+        if (cancelRef.current || !isValid()) return;
+        await botSay('', { inlineCards: step.inlineCards, isValid });
       }
 
+      if (!isValid()) return;
       setAllowAttachment(Boolean(step.allowAttachment));
     },
     [botSay]
@@ -386,21 +390,33 @@ export function WidgetOverlay({
 
   const startConversation = useCallback(async () => {
     if (hasStarted || isTeamConnected || !noticeConsent) return;
+    const bootstrapGeneration = bootstrapGenerationRef.current;
+    if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
+    aiBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     cancelRef.current = false;
+    const bootstrapIsCurrent = () =>
+      bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
 
-    const activeSessionId = await loadOrCreateSession();
-    if (cancelRef.current) return;
-    if (!activeSessionId) {
-      setEntryPath(null);
-      return;
+    try {
+      const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
+      if (!bootstrapIsCurrent()) return;
+      if (!activeSessionId) {
+        setEntryPath(null);
+        return;
+      }
+
+      await advanceStep('intro', createDefaultLeadDraft(), bootstrapIsCurrent);
+      if (bootstrapIsCurrent()) setHasStarted(true);
+    } finally {
+      if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) {
+        aiBootstrapInFlightGenerationRef.current = null;
+      }
     }
-
-    setHasStarted(true);
-    await advanceStep('intro', createDefaultLeadDraft());
   }, [advanceStep, hasStarted, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
   function handleClose() {
     bootstrapGenerationRef.current += 1;
+    sessionDraft.invalidateBootstrap();
     if (sessionId) {
       void logEvent({ sessionId, eventName: 'widget_closed' });
     }
@@ -423,6 +439,7 @@ export function WidgetOverlay({
     cancelRef.current = false;
     teamRelay.resume();
     setIsOpen(true);
+    if (entryPath === 'ai' && noticeConsent && !hasStarted) void startConversation();
   }
 
   useDialogFocus({ active: isOpen, dialogRef: widgetContainerRef, onDismiss: handleClose });
@@ -1547,7 +1564,7 @@ export function WidgetOverlay({
               </div>
 
               <HumanFooter isTeamConnected={humanRequested} humanStatus={humanStatus} onConnect={handleTeamConnect} />
-              {humanRequested && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} />}
+              {humanRequested && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} deliveryUnavailable={humanStatus === 'unavailable'} />}
             </>
           )}
         </div>
@@ -1606,16 +1623,6 @@ export function WidgetOverlay({
           </svg>
         </button>
       )}
-    </div>
-  );
-}
-
-function HumanFallbacks({ calendlyUrl, unavailable = false }: { calendlyUrl: string | null; unavailable?: boolean }) {
-  return (
-    <div role={unavailable ? 'status' : undefined} style={{ display: 'grid', gap: 8, padding: 12, fontSize: 12, lineHeight: 1.5 }}>
-      <p style={{ margin: 0 }}>{unavailable ? 'The private relay could not start. You can still contact the team directly.' : 'Prefer another route? Contact the team directly.'}</p>
-      <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
-      {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
     </div>
   );
 }

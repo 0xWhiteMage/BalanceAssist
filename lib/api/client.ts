@@ -183,7 +183,7 @@ export type TeamMessage = {
 };
 
 export type TeamPollState = {
-  outgoingStatus: 'queued' | 'delivered' | null;
+  outgoingStatus: 'queued' | 'delivered' | 'unavailable' | null;
   messages: TeamMessage[];
   fileRequestOpen: boolean;
   fileRequestNote: string | null;
@@ -191,7 +191,7 @@ export type TeamPollState = {
 };
 
 const teamPollStateSchema = z.object({
-  outgoingStatus: z.enum(['queued', 'delivered']).nullable(),
+  outgoingStatus: z.enum(['queued', 'delivered', 'unavailable']).nullable(),
   messages: z.array(z.object({
     id: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     sender: z.enum(['user', 'team']),

@@ -408,6 +408,101 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   });
 
+  test('invalidates a pending AI create on close and starts one fresh bootstrap on reopen', async () => {
+    const pendingCreate = deferred<Response>();
+    let createCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/sessions/inspect')) {
+        return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      }
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        createCalls += 1;
+        if (createCalls === 1) return pendingCreate.promise;
+        return new Response(JSON.stringify({ sessionId: 'fresh-ai-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+    await waitFor(() => expect(createCalls).toBe(1));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    await waitFor(() => expect(createCalls).toBe(2));
+    await act(async () => {
+      pendingCreate.resolve(new Response(JSON.stringify({ sessionId: 'stale-ai-session', persisted: true }), { status: 200 }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/What can I help you with today\?/i)).toHaveLength(1);
+    }, { timeout: 7_000 });
+    expect(createCalls).toBe(2);
+  }, 10_000);
+
+  test('invalidates a pending AI restore on close and restarts cleanly on reopen', async () => {
+    const pendingRestore = deferred<Response>();
+    let inspectCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/sessions/inspect')) {
+        inspectCalls += 1;
+        if (inspectCalls === 1) return pendingRestore.promise;
+        return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      }
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ sessionId: 'fresh-restored-ai-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+    await waitFor(() => expect(inspectCalls).toBe(1));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    await waitFor(() => expect(inspectCalls).toBe(2));
+    await act(async () => {
+      pendingRestore.resolve(new Response(JSON.stringify({
+        ok: true,
+        exists: true,
+        session: { id: 'stale-restored-ai-session', status: 'open', source_url: '' }
+      }), { status: 200 }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/What can I help you with today\?/i)).toHaveLength(1);
+    }, { timeout: 7_000 });
+    expect(inspectCalls).toBe(2);
+  }, 10_000);
+
+  test.each([
+    ['missing', { ok: true, exists: false }],
+    ['restored', { ok: true, exists: true, session: { id: 'unmounted-restored-ai', status: 'open', source_url: '' } }]
+  ])('does not continue a pending %s AI restore after unmount', async (_case, inspectBody) => {
+    const pendingRestore = deferred<Response>();
+    const requestLog: RecordedRequest[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requestLog.push({ url, method: init?.method });
+      if (url.includes('/api/sessions/inspect')) return pendingRestore.promise;
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ sessionId: 'should-not-create', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const { unmount } = render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+    await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/api/sessions/inspect'))).toBe(true));
+    unmount();
+    pendingRestore.resolve(new Response(JSON.stringify(inspectBody), { status: 200 }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(requestLog.some((entry) => entry.url === '/api/sessions' && entry.method === 'POST')).toBe(false);
+    expect(requestLog.some((entry) => entry.url.includes('/api/projects/unmounted-restored-ai'))).toBe(false);
+  });
+
   test('does not revive a stale human bootstrap when reopened before it resolves', async () => {
     const requestLog: RecordedRequest[] = [];
     const pendingSession = deferred<Response>();

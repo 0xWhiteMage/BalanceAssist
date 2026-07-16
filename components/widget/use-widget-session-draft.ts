@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import type { ConsentRecord } from '@/lib/privacy/notice';
@@ -47,6 +47,13 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const approveInFlightRef = useRef(false);
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
+
+  const invalidateBootstrap = useCallback(() => {
+    bootstrapGenerationRef.current += 1;
+    bootstrapRef.current = null;
+  }, []);
+
+  useEffect(() => invalidateBootstrap, [invalidateBootstrap]);
 
   const applyCanonicalDraft = useCallback((values: Record<string, string>, version: number, canonical?: ProjectDraftResponse) => {
     const nextDraft = { ...createDefaultLeadDraft(), ...values } as LeadDraft;
@@ -195,8 +202,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }, []);
 
   const reset = useCallback(() => {
-    bootstrapGenerationRef.current += 1;
-    bootstrapRef.current = null;
+    invalidateBootstrap();
     sessionIdRef.current = null;
     expiresAtRef.current = null;
     draftVersionRef.current = 0;
@@ -209,11 +215,11 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     setBriefApproved(false);
     setReferenceLinks([]);
     setApproval({});
-  }, []);
+  }, [invalidateBootstrap]);
 
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, draftVersion,
-    hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession,
+    hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession, invalidateBootstrap,
     applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),

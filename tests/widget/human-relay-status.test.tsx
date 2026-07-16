@@ -1,0 +1,22 @@
+// @vitest-environment jsdom
+import { render, screen } from '@testing-library/react';
+import { describe, expect, test, vi } from 'vitest';
+import { HumanFallbacks, HumanFooter } from '@/components/widget/widget-overlay-parts';
+
+describe('human relay public status', () => {
+  test('describes unavailable delivery without provider detail', () => {
+    render(<HumanFooter isTeamConnected={true} humanStatus="unavailable" onConnect={vi.fn()} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Message delivery unavailable');
+    expect(screen.queryByText(/provider|telegram|private provider failure/i)).toBeNull();
+  });
+
+  test('keeps direct email and booking recovery available for unavailable delivery', () => {
+    render(<HumanFallbacks calendlyUrl="https://calendly.com/balance/test" deliveryUnavailable={true} />);
+
+    expect(screen.getByText('Message delivery is unavailable. Please email the team or book a call instead.')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Email the team' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(screen.getByRole('link', { name: 'Book a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+    expect(screen.queryByText(/provider|telegram|private provider failure/i)).toBeNull();
+  });
+});
