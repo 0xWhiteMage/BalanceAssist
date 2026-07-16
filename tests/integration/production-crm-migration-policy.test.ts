@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { resolve } from 'node:path';
 import {
   applyProductionCrmMigrations,
@@ -10,6 +12,7 @@ import {
 } from '../../scripts/apply-production-crm-migrations.mjs';
 
 const root = process.cwd();
+const execFileAsync = promisify(execFile);
 const crmMigrations = [
   ['044', '044_monday_crm_projection_tables.sql'],
   ['047', '047_atomic_crm_approval.sql'],
@@ -57,6 +60,15 @@ describe('production CRM migration policy', () => {
     expect(artifact).not.toContain('046_claim_next_handoff_qualification.sql');
     expect(artifact).not.toContain('050_');
     expect(artifact).not.toContain('051_');
+  });
+
+  it('prints the dry-run migration plan when invoked as a CLI', async () => {
+    const { stdout } = await execFileAsync(process.execPath, ['scripts/apply-production-crm-migrations.mjs', '--dry-run'], { cwd: root });
+
+    expect(JSON.parse(stdout)).toEqual({
+      planned: crmMigrations.map(([, filename]) => filename),
+      schemaVersion: '053'
+    });
   });
 
   it('uses a baseline-043 transaction guard and shared advisory lock before applying CRM source', async () => {

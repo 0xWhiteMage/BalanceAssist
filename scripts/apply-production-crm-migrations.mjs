@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
 import { getIncrementalMigrations } from './apply-test-migrations.mjs';
 
@@ -110,7 +111,7 @@ export async function applyProductionCrmMigrations({
   }
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   applyProductionCrmMigrations({ dryRun: process.argv.includes('--dry-run') }).then(
     (result) => console.log(JSON.stringify(result)),
     (error) => { console.error(error.message); process.exitCode = 1; }
