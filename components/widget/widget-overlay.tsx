@@ -188,6 +188,7 @@ export function WidgetOverlay({
   const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
   const confidentialDiversionRef = useRef(false);
+  const aiProcessingGenerationRef = useRef(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
@@ -302,6 +303,7 @@ export function WidgetOverlay({
   useEffect(() => {
     return () => {
       bootstrapGenerationRef.current += 1;
+      aiProcessingGenerationRef.current += 1;
       cancelRef.current = true;
       if (advanceTimerRef.current) {
         clearTimeout(advanceTimerRef.current);
@@ -326,20 +328,27 @@ export function WidgetOverlay({
         isValid?: () => boolean;
       }
     ): Promise<void> => {
+      const aiProcessingGeneration = aiProcessingGenerationRef.current;
       const isValid = options?.isValid ?? (() => true);
-      if (cancelRef.current || !isValid()) return;
+      const isCurrent = () =>
+        aiProcessingGeneration === aiProcessingGenerationRef.current &&
+        !cancelRef.current &&
+        isValid();
+      if (!isCurrent()) return;
 
       const botSayGeneration = botSayGenerationRef.current + 1;
       botSayGenerationRef.current = botSayGeneration;
+      if (!isCurrent()) return;
       setIsTyping(true);
       const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
       await sleep(delay);
 
-      if (cancelRef.current || !isValid()) {
+      if (!isCurrent()) {
         if (botSayGenerationRef.current === botSayGeneration) setIsTyping(false);
         return;
       }
 
+      if (!isCurrent()) return;
       setIsTyping(false);
       const botMessage: ChatMessage = {
         id: nextId(),
@@ -351,7 +360,7 @@ export function WidgetOverlay({
         isDisclaimer: options?.isDisclaimer
       };
       const nextMessages = [...messagesRef.current, botMessage];
-      if (cancelRef.current || !isValid()) return;
+      if (!isCurrent()) return;
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
     },
@@ -360,7 +369,12 @@ export function WidgetOverlay({
 
   const advanceStep = useCallback(
     async (stepId: ConversationStepId, draftForMessages: LeadDraft, isValid: () => boolean = () => true) => {
-      if (cancelRef.current || !isValid()) return;
+      const aiProcessingGeneration = aiProcessingGenerationRef.current;
+      const isCurrent = () =>
+        aiProcessingGeneration === aiProcessingGenerationRef.current &&
+        !cancelRef.current &&
+        isValid();
+      if (!isCurrent()) return;
 
       setCurrentStep(stepId);
       const step = conversationSteps[stepId];
@@ -374,14 +388,16 @@ export function WidgetOverlay({
           inlineCards: isLast ? step.inlineCards : undefined,
           isValid
         });
+        if (!isCurrent()) return;
       }
 
       if (texts.length === 0 && step.inlineCards) {
-        if (cancelRef.current || !isValid()) return;
+        if (!isCurrent()) return;
         await botSay('', { inlineCards: step.inlineCards, isValid });
+        if (!isCurrent()) return;
       }
 
-      if (!isValid()) return;
+      if (!isCurrent()) return;
       setAllowAttachment(Boolean(step.allowAttachment));
     },
     [botSay]
@@ -393,11 +409,14 @@ export function WidgetOverlay({
   const startConversation = useCallback(async () => {
     if (aiBootstrapCompletedRef.current || isTeamConnected || !noticeConsent) return;
     const bootstrapGeneration = bootstrapGenerationRef.current;
+    const aiProcessingGeneration = aiProcessingGenerationRef.current;
     if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
     aiBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     cancelRef.current = false;
     const bootstrapIsCurrent = () =>
-      bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
+      bootstrapGeneration === bootstrapGenerationRef.current &&
+      aiProcessingGeneration === aiProcessingGenerationRef.current &&
+      !cancelRef.current;
 
     try {
       const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
@@ -419,6 +438,7 @@ export function WidgetOverlay({
 
   function handleClose() {
     bootstrapGenerationRef.current += 1;
+    aiProcessingGenerationRef.current += 1;
     sessionDraft.invalidateBootstrap();
     if (!aiBootstrapCompletedRef.current) setHasStarted(false);
     if (sessionId) {
@@ -451,6 +471,7 @@ export function WidgetOverlay({
 
   function handleReset() {
     bootstrapGenerationRef.current += 1;
+    aiProcessingGenerationRef.current += 1;
     aiBootstrapCompletedRef.current = false;
     sessionDraft.reset();
     teamRelay.reset();
@@ -482,6 +503,11 @@ export function WidgetOverlay({
 
   async function handleLLMResponse(history: ChatMessage[]) {
     if (confidentialDiversionRef.current) return;
+    const aiProcessingGeneration = aiProcessingGenerationRef.current;
+    const isCurrent = () =>
+      aiProcessingGeneration === aiProcessingGenerationRef.current &&
+      !cancelRef.current &&
+      !confidentialDiversionRef.current;
     const latestUserText = [...history].reverse().find((message) => message.sender === 'user')?.text ?? '';
 
     try {
@@ -504,7 +530,7 @@ export function WidgetOverlay({
           capturedFields
         }
       });
-      if (cancelRef.current) return;
+      if (!isCurrent()) return;
       if (!data) {
         const localFallback = getLocalResponse(latestUserText, {
           draft: draftRef.current,
@@ -512,18 +538,26 @@ export function WidgetOverlay({
           isTeamConnected: teamRef.current
         });
         await botSay(localFallback ?? getFallbackResponse());
+        if (!isCurrent()) return;
         return;
       }
 
       if (data.outcome === 'confidential_diversion') {
         confidentialDiversionRef.current = true;
+        aiProcessingGenerationRef.current += 1;
+        const diversionGeneration = aiProcessingGenerationRef.current;
         if (advanceTimerRef.current) {
           clearTimeout(advanceTimerRef.current);
           advanceTimerRef.current = null;
         }
         for (const reply of data.replies) {
           await botSay(reply.text);
+          if (
+            diversionGeneration !== aiProcessingGenerationRef.current ||
+            cancelRef.current
+          ) return;
         }
+        if (diversionGeneration !== aiProcessingGenerationRef.current || cancelRef.current) return;
         setEntryPath('human');
         await handleTeamConnect();
         return;
@@ -554,17 +588,22 @@ export function WidgetOverlay({
             (merged as Record<string, unknown>)[key] = value;
           }
         }
+        if (!isCurrent()) return;
         setDraft(merged);
+        if (!isCurrent()) return;
         setHasProjectIntent(detectProjectIntent(merged));
+        if (!isCurrent()) return;
         setBriefApproved(false);
 
         const nextStep = getNextConversationStep(merged);
         if (nextStep !== stepRef.current) {
+          if (!isCurrent()) return;
           setCurrentStep(nextStep);
         }
         // The chat route persists authenticated updates. Replace optimistic values with its canonical version.
         if (sessionId) {
           await hydrateCanonicalDraft(sessionId);
+          if (!isCurrent()) return;
         }
       }
 
@@ -572,8 +611,10 @@ export function WidgetOverlay({
         const isFirst = i === 0;
         const chunk = replyChunks[i];
         await botSay(chunk, isFirst && sharedWork ? { sharedWork } : undefined);
+        if (!isCurrent()) return;
       }
     } catch {
+      if (!isCurrent()) return;
       try {
         const localFallback = getLocalResponse(latestUserText, {
           draft: draftRef.current,
@@ -581,8 +622,11 @@ export function WidgetOverlay({
           isTeamConnected: teamRef.current
         });
         await botSay(localFallback ?? getFallbackResponse());
+        if (!isCurrent()) return;
       } catch {
+        if (!isCurrent()) return;
         await botSay(getFallbackResponse());
+        if (!isCurrent()) return;
       }
     }
   }
@@ -591,6 +635,11 @@ export function WidgetOverlay({
     if (humanRequested || !noticeConsent) return;
     const bootstrapGeneration = bootstrapGenerationRef.current;
     if (humanBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
+    aiProcessingGenerationRef.current += 1;
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
     humanBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     const bootstrapIsCurrent = () =>
       bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
@@ -832,8 +881,14 @@ export function WidgetOverlay({
 
     if (nextStepId) {
       if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+      const aiProcessingGeneration = aiProcessingGenerationRef.current;
       advanceTimerRef.current = setTimeout(() => {
         advanceTimerRef.current = null;
+        if (
+          aiProcessingGeneration !== aiProcessingGenerationRef.current ||
+          confidentialDiversionRef.current ||
+          cancelRef.current
+        ) return;
         advanceStep(nextStepId!, updatedDraft).catch(() => undefined);
       }, 300);
     }

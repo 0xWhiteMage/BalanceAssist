@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WidgetOverlay } from '@/components/widget/widget-overlay';
 
 const originalFetch = global.fetch;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 beforeAll(() => {
   if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
@@ -63,6 +71,79 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay brief rail gating (Fix 4)', () => {
+  test('ignores a deferred normal response after AI processing moves to human-only contact', async () => {
+    const pendingChat = deferred<Response>();
+    const requests: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes('/api/chat') && init?.method === 'POST') return pendingChat.promise;
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Tell me about a launch film' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(requests.filter((url) => url.includes('/api/chat'))).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    await screen.findByPlaceholderText(/message the team request/i);
+
+    await act(async () => {
+      pendingChat.resolve(new Response(JSON.stringify({
+        message: 'STALE NORMAL RESPONSE',
+        draftUpdates: { service: 'production', projectScope: 'Stale scope' },
+        briefReady: false
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      await pendingChat.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('STALE NORMAL RESPONSE')).toBeNull();
+    expect(screen.queryByTestId('review-rail')).toBeNull();
+  }, 15_000);
+
+  test('cancels a delayed AI bot message when processing moves to human-only contact', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'STALE DELAYED AI REPLY',
+          draftUpdates: {},
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Tell me something ordinary' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByRole('status', { name: /balance assist is typing/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    await screen.findByPlaceholderText(/message the team request/i);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    });
+
+    expect(screen.queryByText('STALE DELAYED AI REPLY')).toBeNull();
+  }, 15_000);
+
   test('moves a confidential diversion to human-only contact without retrying or relaying blocked history', async () => {
     const secret = 'Project NIGHTJAR is under NDA';
     const requests: Array<{ url: string; body: string }> = [];

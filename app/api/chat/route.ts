@@ -531,7 +531,8 @@ export async function POST(request: Request) {
   try {
     const classificationInputs = [
       ...messages.map((message) => message.content),
-      messages.map((message) => message.content).join(' ')
+      messages.map((message) => message.content).join(' '),
+      messages.map((message) => message.content).join('')
     ];
     const classifications = classificationInputs.map((input) => classifyConfidentialIntent(input));
     if (classifications.some((classification) => classification !== 'allow')) {

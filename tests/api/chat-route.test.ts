@@ -461,10 +461,11 @@ describe('POST /api/chat', () => {
     expect(res.status).toBe(200);
     expect(data.outcome).toBe('confidential_diversion');
     expect(data.message).toMatch(/cannot process confidential or sensitive material/i);
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledTimes(3);
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledTimes(4);
     expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA.');
     expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('Can you do filming?');
     expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA. Can you do filming?');
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA.Can you do filming?');
     expect(consumeRateLimitMock).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -482,6 +483,35 @@ describe('POST /api/chat', () => {
     expect(res.status).toBe(200);
     expect(data.outcome).toBe('confidential_diversion');
     expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('This project is under NDA.');
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['confidential', 'The attached brief contains confiden', 'tial information.'],
+    ['unreleased', 'This campaign is unre', 'leased.'],
+    ['personal data', 'This file contains person', 'al data.']
+  ])('uses the real classifier to catch %s split exactly across a message boundary', async (_category, first, second) => {
+    const actual = await vi.importActual<typeof import('@/lib/privacy/confidential-intent')>(
+      '@/lib/privacy/confidential-intent'
+    );
+    expect(actual.classifyConfidentialIntent(first)).toBe('allow');
+    expect(actual.classifyConfidentialIntent(second)).toBe('allow');
+    expect(actual.classifyConfidentialIntent(`${first} ${second}`)).toBe('allow');
+    classifyConfidentialIntentMock.mockImplementation(actual.classifyConfidentialIntent);
+    consumeRateLimitMock.mockResolvedValue({ permitted: false, retryAfterSeconds: 42 });
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [
+        { role: 'user', content: first },
+        { role: 'user', content: second }
+      ]
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.outcome).toBe('confidential_diversion');
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith(`${first}${second}`);
     expect(consumeRateLimitMock).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
   });
