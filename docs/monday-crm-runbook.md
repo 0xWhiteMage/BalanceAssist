@@ -18,7 +18,10 @@ Run the protected workflow from `main` with an immutable commit SHA and the
 source hashes, takes the shared advisory lock, requires baseline `043` and its
 schema signatures, and records only the approved CRM versions. Use
 `node scripts/apply-production-crm-migrations.mjs --dry-run` for a local policy
-check only; do not apply production migrations from a workstation.
+check only; do not apply production migrations from a workstation. The workflow
+uses `SUPABASE_ACCESS_TOKEN` only as its protected
+`production-crm-migrations` environment secret and executes the checked-in SQL
+artifact through the Supabase Management API, not a direct database URL.
 
 On 2026-07-15, the provisioner verified account `3603500`, workspace
 `7318184`, private board `18421762586`, and service-user access. It created the
@@ -108,6 +111,9 @@ live schema fingerprint and recorded CRM migrations `044`, `047`, `048`, `049`,
 with an opaque random CRM ID. Cleanup runs in `finally` even after a failed
 assertion. The uploaded evidence contains only timestamps, migration versions,
 and boolean outcomes.
+
+The canary database prerequisite is separate from the CRM migration route and
+its protected Management API credential.
 
 For a reviewed local invocation, use the root environment file:
 

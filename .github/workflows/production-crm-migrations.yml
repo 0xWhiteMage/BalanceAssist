@@ -50,9 +50,11 @@ jobs:
           cache: npm
       - run: npm ci
       - env:
-          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$PRODUCTION_DATABASE_URL"
+          test -n "$SUPABASE_ACCESS_TOKEN"
           node scripts/apply-production-crm-migrations.mjs --dry-run
-          node scripts/apply-production-crm-migrations.mjs
+          mkdir -p supabase/.temp
+          printf '%s\n' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref
+          npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql

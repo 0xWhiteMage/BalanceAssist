@@ -94,12 +94,16 @@ describe('production CRM migration policy', () => {
     expect(cleanupRunner).not.toContain("['044'");
   });
 
-  it('protects production execution with a main-trusted workflow and approval environment', async () => {
+  it('protects managed production execution with a main-trusted workflow and approval environment', async () => {
     const workflow = await readFile(resolve(root, '.github/workflows/production-crm-migrations.yml'), 'utf8');
 
     expect(workflow).toContain('production-crm-migrations.yml@refs/heads/main');
     expect(workflow).toContain('environment: production-crm-migrations');
+    expect(workflow).toContain('SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}');
     expect(workflow).toContain('node scripts/apply-production-crm-migrations.mjs --dry-run');
-    expect(workflow).toContain('node scripts/apply-production-crm-migrations.mjs');
+    expect(workflow).toContain("printf '%s\\n' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref");
+    expect(workflow).toContain('npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql');
+    expect(workflow).not.toContain('PRODUCTION_DATABASE_URL');
+    expect(workflow).not.toMatch(/node scripts\/apply-production-crm-migrations\.mjs(?! --dry-run)/);
   });
 });
