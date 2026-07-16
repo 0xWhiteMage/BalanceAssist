@@ -1,9 +1,10 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
 import {
@@ -68,6 +69,20 @@ describe('production CRM migration policy', () => {
     expect(artifact).not.toContain('046_claim_next_handoff_qualification.sql');
     expect(artifact).not.toContain('050_');
     expect(artifact).not.toContain('051_');
+  });
+
+  it('rejects a SQL Editor artifact with appended SQL during dry-run verification', async () => {
+    const artifact = await readFile(resolve(root, 'supabase/production-monday-crm-044-053.sql'), 'utf8');
+    const artifactDir = await mkdtemp(resolve(tmpdir(), 'balance-assist-crm-artifact-'));
+    const artifactPath = resolve(artifactDir, 'production-monday-crm-044-053.sql');
+
+    try {
+      await writeFile(artifactPath, `${artifact}\nSELECT 'unreviewed artifact SQL';\n`);
+
+      await expect(applyProductionCrmMigrations({ dryRun: true, artifactPath })).rejects.toThrow('does not match its reviewed artifact');
+    } finally {
+      await rm(artifactDir, { force: true, recursive: true });
+    }
   });
 
   it('prints the dry-run migration plan when invoked as a CLI', async () => {

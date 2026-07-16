@@ -15,6 +15,7 @@ const reviewedCrmMigrations = new Map([
   ['052', { filename: '052_monday_scheduler_health.sql', sha256: '06b8f73575bee85571aeff742aefd3b388a9961c94d73a07181fb9f328b2e617' }],
   ['053', { filename: '053_monday_reconciliation.sql', sha256: '8aa2544cc75f9c5ecec0759cdb885e2db18b8c04fda280e3f24442e7a13428a4' }]
 ]);
+const reviewedCrmArtifactSha256 = '5b9b08fe93820ebbc6c1be33f72e193408993110a3e1b33d869bf138e10f548b';
 
 export const crmMigrationVersions = [...reviewedCrmMigrations.keys()];
 const advisoryLock = 90442053;
@@ -36,6 +37,14 @@ function assertReviewedSource(migration) {
   const sourceHash = createHash('sha256').update(source).digest('hex');
   if (sourceHash !== reviewedCrmMigrations.get(migration.version).sha256) {
     throw new Error(`CRM migration ${migration.filename} does not match its reviewed source`);
+  }
+}
+
+function assertReviewedArtifact(artifactPath) {
+  const artifact = readFileSync(artifactPath, 'utf8').replace(/\r\n/g, '\n');
+  const artifactHash = createHash('sha256').update(artifact).digest('hex');
+  if (artifactHash !== reviewedCrmArtifactSha256) {
+    throw new Error('CRM migration artifact does not match its reviewed artifact');
   }
 }
 
@@ -70,10 +79,12 @@ async function assertCrmRangeIsEmpty(client) {
 export async function applyProductionCrmMigrations({
   connectionString = process.env.PRODUCTION_DATABASE_URL,
   migrationsDir = resolve(process.cwd(), 'supabase/migrations'),
+  artifactPath = resolve(process.cwd(), 'supabase/production-monday-crm-044-053.sql'),
   dryRun = false
 } = {}) {
   const migrations = selectCrmMigrations(getIncrementalMigrations(migrationsDir));
   migrations.forEach(assertReviewedSource);
+  assertReviewedArtifact(artifactPath);
   if (dryRun) return { planned: migrations.map(({ filename }) => filename), schemaVersion: crmMigrationVersions.at(-1) };
   if (!connectionString) throw new Error('PRODUCTION_DATABASE_URL is required in the protected production-crm-migrations environment.');
 
