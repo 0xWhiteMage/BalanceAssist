@@ -15,6 +15,7 @@ const NEGATED_PHRASES = [
   /\b(?:contains?|includes?|has|have) no personal data\b/g,
   /\b(?:does not|doesn't|do not|don't) contain personal data\b/g,
   /\b(?:is|are|was|were) not (?:highly )?sensitive\b/g,
+  /\b(?:is|are|was|were) (?:highly )?sensitive to (?:light|heat|temperature|moisture|pressure|touch|sound)\b/g,
   /\b(?:is|are|was|were) (?:not|no longer) (?:under|covered by|subject to|bound by|protected by) (?:an? )?(?:nda|non disclosure agreement)\b/g,
   /\b(?:this|that|it) (?:is|was) (?:not|no longer) (?:an? )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/g,
   /\b(?:am|is|are|was|were) (?:not|no longer) (?:sharing|sending|uploading|providing|processing) (?:an? |the |our |my |client )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/g,
@@ -42,6 +43,9 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
     category: 'confidential',
     patterns: [
       /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:strictly |highly )?confidential (?:client )?(?:information|data|documents?|materials?|content|details|brief|files?)\b/,
+      /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) proprietary (?:client )?(?:information|data|documents?|materials?|content|details|briefs?|files?)\b/,
+      /\b(?:this|that|it|these|those) (?:is|are) proprietary (?:client )?(?:information|data|documents?|materials?|content|details|briefs?|files?)\b/,
+      /\b(?:please )?keep (?:this|that|it|the attached (?:brief|file|document|material)) (?:a )?secret between us\b/,
       /\b(?:this|that|it|these|those) (?:is|are) (?:strictly |highly )?confidential\b/,
       /\b(?:this|that|the|our|my|client|these|those) (?:attached )?(?:projects?|briefs?|files?|documents?|materials?|information|campaigns?|products?|content)(?: details)? (?:is|are|contains?|includes?) (?:strictly |highly )?confidential(?: (?:information|data|documents?|materials?|content|details|briefs?|files?))?\b/,
       /\b(?:confidential client|client confidential) (?:information|data|documents?|materials?|content|details|briefs?|files?)\b/
@@ -50,6 +54,10 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
   {
     category: 'unreleased',
     patterns: [
+      /\b(?:this|that|it) (?:is|are) (?:an? )?embargoed (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/,
+      /\b(?:shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:an? |the |our |my |client )?embargoed (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/,
+      /\b(?:project|campaign|product|film|video|footage|media|assets?|creative|launch) (?:has|have) not been announced yet\b/,
+      /\b(?:project|campaign|product|film|video|footage|media|assets?|creative|launch) (?:is|are|was|were) not announced yet\b/,
       /\b(?:this|that|the|our|my|client|an?) (?:project|campaign|product|film|video|footage|media|asset|assets|creative|launch) (?:is|are) (?:unreleased|pre release|unannounced)\b/,
       /\b(?:this|that|it) (?:is|are) (?:an? )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/,
       /\b(?:share|send|upload|provide|process|contains?|includes?) (?:an? |the |our |my |client )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/,
@@ -59,6 +67,7 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
   {
     category: 'personal-data',
     patterns: [
+      /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:pii|passport (?:numbers?|details)|identity documents?)\b/,
       /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:private )?(?:personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)\b/,
       /\b(?:this|that|the|our|my|client) (?:attached )?(?:brief|file|document|material)? ?(?:contains?|includes?|has) (?:private )?(?:personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)\b/
     ]
@@ -96,16 +105,40 @@ function matchFilenamePhrase(tokens: readonly string[], index: number): Filename
     return { category: 'nda', length: 3 };
   }
   if (token === 'confidential') return { category: 'confidential', length: 1 };
+  if (
+    token === 'proprietary' &&
+    ((next === 'client' && ['material', 'materials', 'document', 'documents', 'data', 'information'].includes(afterNext)) ||
+      ['material', 'materials', 'document', 'documents', 'data', 'information'].includes(next))
+  ) {
+    return { category: 'confidential', length: next === 'client' ? 3 : 2 };
+  }
+  if (token === 'secret' && next === 'between' && afterNext === 'us') {
+    return { category: 'confidential', length: 3 };
+  }
+  if (
+    token === 'embargoed' &&
+    ['project', 'campaign', 'product', 'film', 'video', 'footage', 'media', 'asset', 'assets', 'creative', 'launch'].includes(
+      next
+    )
+  ) {
+    return { category: 'unreleased', length: 2 };
+  }
+  if (token === 'not' && next === 'announced' && afterNext === 'yet') {
+    return { category: 'unreleased', length: 3 };
+  }
   if (token === 'unreleased' || token === 'unannounced' || (token === 'pre' && next === 'release')) {
     return { category: 'unreleased', length: token === 'pre' ? 2 : 1 };
   }
   if (
+    token === 'pii' ||
+    (token === 'passport' && (next === 'number' || next === 'numbers' || next === 'details')) ||
+    (token === 'identity' && (next === 'document' || next === 'documents')) ||
     (token === 'personal' && next === 'data') ||
     (token === 'personally' && (next === 'identifiable' || next === 'identifying') && afterNext === 'information') ||
     (token === 'identifying' && next === 'details') ||
     (token === 'contact' && (next === 'details' || next === 'information'))
   ) {
-    return { category: 'personal-data', length: token === 'personally' ? 3 : 2 };
+    return { category: 'personal-data', length: token === 'pii' ? 1 : token === 'personally' ? 3 : 2 };
   }
   if (token === 'sensitive') return { category: 'sensitive', length: 1 };
   return null;
@@ -138,6 +171,7 @@ function removeDefaultIgnorables(value: string): string {
 function normalizeForClassification(value: string): string {
   return removeDefaultIgnorables(value.normalize('NFKC'))
     .toLowerCase()
+    .replace(/conf[i\u0456]dent[i\u0456]al/g, 'confidential')
     .replace(/[’‘`]/g, "'")
     .replace(/\bn\s*[.\-]?\s*d\s*[.\-]?\s*a\b/g, 'nda')
     .replace(/[‐‑‒–—−-]+/g, ' ')

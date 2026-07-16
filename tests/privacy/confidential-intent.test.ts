@@ -39,6 +39,23 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialIntent(input)).toBe(expected);
   });
 
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['The attached documents contain proprietary client material.', 'confidential'],
+    ['I need to share proprietary client documents.', 'confidential'],
+    ['This is proprietary client material.', 'confidential'],
+    ['Please keep this secret between us.', 'confidential'],
+    ['Keep the attached brief secret between us.', 'confidential'],
+    ['This is an embargoed launch.', 'unreleased'],
+    ['I am sharing an embargoed campaign.', 'unreleased'],
+    ['This file contains PII.', 'personal-data'],
+    ['The document contains passport numbers.', 'personal-data'],
+    ['I need to send identity documents.', 'personal-data'],
+    ['This launch has not been announced yet.', 'unreleased'],
+    ['The campaign is not announced yet.', 'unreleased']
+  ])('maps governance taxonomy statement %j to %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
   test.each<[string, 'personal-data']>([
     ['This file contains personally identifiable information.', 'personal-data'],
     ['I need to upload personally identifiable information.', 'personal-data']
@@ -101,6 +118,18 @@ describe('classifyConfidentialIntent', () => {
     ['unreleased-campaign-final.pdf', 'unreleased'],
     ['unreleased.txt.pdf', 'unreleased']
   ])('classifies bounded decorated filename %j as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['proprietary-client-material.pdf', 'confidential'],
+    ['secret-between-us.txt', 'confidential'],
+    ['embargoed-launch.pdf', 'unreleased'],
+    ['pii.csv', 'personal-data'],
+    ['passport-numbers.pdf', 'personal-data'],
+    ['identity-documents.zip', 'personal-data'],
+    ['not-announced-yet-launch.mov', 'unreleased']
+  ])('maps governance taxonomy filename %j to %s', (input, expected) => {
     expect(classifyConfidentialFilename(input)).toBe(expected);
   });
 
@@ -191,6 +220,7 @@ describe('classifyConfidentialIntent', () => {
     '2026-confidentiality-brief.pdf',
     'client-sensitivity-data.pdf',
     'personalisation-data-final.pdf',
+    'cand\u0456date.pdf',
     'release-form-final.pdf'
   ])('allows benign filename near-match %j', (input) => {
     expect(classifyConfidentialFilename(input)).toBe('allow');
@@ -221,6 +251,17 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialFilename(input)).toBe(expected);
   });
 
+  test.each<[string, 'confidential']>([
+    ['This brief is conf\u0456dential.', 'confidential'],
+    ['I am sending confident\u0456al client documents.', 'confidential']
+  ])('normalizes a scoped Cyrillic lookalike in protected keyword %j as %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
+  test('normalizes a scoped Cyrillic lookalike in a protected filename', () => {
+    expect(classifyConfidentialFilename('conf\u0456dential-brief.pdf')).toBe('confidential');
+  });
+
   test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
     ['THIS PROJECT IS UNDER AN NDA', 'nda'],
     ['This\tproject\nis under NDA.', 'nda'],
@@ -244,11 +285,29 @@ describe('classifyConfidentialIntent', () => {
     'This document is not sensitive.',
     'The campaign has already been released.',
     'The candidate personalised the confidentially word.',
+    'The word m\u0456xed is ordinary.',
     'The class action is unconditional.',
     'We need a release form for filming.',
     'Please contact me about the project.'
   ])('allows benign, negated, and substring near-matches: %j', (input) => {
     expect(classifyConfidentialIntent(input)).toBe('allow');
+  });
+
+  test.each([
+    'This is sensitive to light.',
+    'The document is sensitive to heat.',
+    'Our material is highly sensitive to temperature.',
+    'The file is sensitive to moisture.'
+  ])('allows physical sensitivity context %j', (input) => {
+    expect(classifyConfidentialIntent(input)).toBe('allow');
+  });
+
+  test('does not let physical sensitivity hide a separate protected-data phrase', () => {
+    expect(
+      classifyConfidentialIntent(
+        'The document is sensitive to light, but the attached file contains sensitive client data.'
+      )
+    ).toBe('sensitive');
   });
 
   test.each([
