@@ -109,17 +109,9 @@ describe('useWidgetSessionDraft', () => {
 });
 
 describe('useTeamRelay', () => {
-  test.each([
-    ['delivered', { outgoingStatus: 'delivered' as const, messages: [] }],
-    ['replied', { outgoingStatus: 'queued' as const, messages: [{ id: 1, sender: 'team' as const, text: 'Reply', createdAt: '2026-07-17T10:00:00.000Z' }] }]
-  ])('does not let a stale send overwrite %s poll evidence', async (expectedStatus, pollResult) => {
+  test('ignores previous-outbox delivery evidence while the current send is pending', async () => {
     const pendingSend = deferred<{ persisted: boolean; queued: boolean; delivered: boolean }>();
-    const poll = vi.fn(async () => ({
-      ...pollResult,
-      fileRequestOpen: false,
-      fileRequestNote: null,
-      scheduleRequestOpen: false
-    }));
+    const poll = vi.fn(async () => ({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
     const { result } = renderHook(() => useTeamRelay({
       sessionId: 'session-1',
       fetchTeamMessages: poll,
@@ -127,16 +119,73 @@ describe('useTeamRelay', () => {
     }));
     act(() => result.current.requestHandoff());
 
-    let sendPromise!: Promise<boolean>;
+    let sendPromise!: Promise<'persisted' | 'failed' | 'invalidated'>;
     act(() => { sendPromise = result.current.send('Hello'); });
     await act(async () => { await result.current.poll(); });
-    expect(result.current.status).toBe(expectedStatus);
+    expect(result.current.status).toBe('sending');
 
     await act(async () => {
       pendingSend.resolve({ persisted: true, queued: true, delivered: false });
       await sendPromise;
     });
-    expect(result.current.status).toBe(expectedStatus);
+    expect(result.current.status).toBe('queued');
+  });
+
+  test('keeps delivery suppressed when a pending-send poll resolves after acknowledgement', async () => {
+    const pendingSend = deferred<{ persisted: boolean; queued: boolean; delivered: boolean }>();
+    const pendingPoll = deferred<{
+      outgoingStatus: 'delivered';
+      messages: [];
+      fileRequestOpen: false;
+      fileRequestNote: null;
+      scheduleRequestOpen: false;
+    }>();
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1',
+      fetchTeamMessages: vi.fn(() => pendingPoll.promise),
+      relayUserMessage: vi.fn(() => pendingSend.promise)
+    }));
+
+    let sendPromise!: Promise<'persisted' | 'failed' | 'invalidated'>;
+    act(() => { sendPromise = result.current.send('Hello'); });
+    let pollPromise!: Promise<void>;
+    act(() => { pollPromise = result.current.poll(); });
+    await act(async () => {
+      pendingSend.resolve({ persisted: true, queued: true, delivered: false });
+      await sendPromise;
+    });
+    expect(result.current.status).toBe('queued');
+
+    await act(async () => {
+      pendingPoll.resolve({ outgoingStatus: 'delivered', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+      await pollPromise;
+    });
+    expect(result.current.status).toBe('queued');
+  });
+
+  test('accepts a team reply while the current send is pending', async () => {
+    const pendingSend = deferred<{ persisted: boolean; queued: boolean; delivered: boolean }>();
+    const poll = vi.fn(async () => ({
+      outgoingStatus: 'delivered' as const,
+      messages: [{ id: 1, sender: 'team' as const, text: 'Reply', createdAt: '2026-07-17T10:00:00.000Z' }],
+      fileRequestOpen: false,
+      fileRequestNote: null,
+      scheduleRequestOpen: false
+    }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn(() => pendingSend.promise)
+    }));
+
+    let sendPromise!: Promise<'persisted' | 'failed' | 'invalidated'>;
+    act(() => { sendPromise = result.current.send('Hello'); });
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('replied');
+
+    await act(async () => {
+      pendingSend.resolve({ persisted: true, queued: true, delivered: false });
+      await sendPromise;
+    });
+    expect(result.current.status).toBe('replied');
   });
 
   test('does not let an older poll promote or leak into a newer send', async () => {
@@ -157,7 +206,7 @@ describe('useTeamRelay', () => {
 
     let pollPromise!: Promise<void>;
     act(() => { pollPromise = result.current.poll(); });
-    let sendPromise!: Promise<boolean>;
+    let sendPromise!: Promise<'persisted' | 'failed' | 'invalidated'>;
     act(() => { sendPromise = result.current.send('New message'); });
     await act(async () => {
       pendingPoll.resolve({
@@ -182,6 +231,43 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('queued');
   });
 
+  test('does not let callbacks retained before reset adopt the reset generation', async () => {
+    const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
+    const poll = vi.fn(async () => ({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: relay
+    }));
+    const retainedSend = result.current.send;
+    const retainedPoll = result.current.poll;
+
+    act(() => result.current.reset());
+    await expect(retainedSend('Old message')).resolves.toBe('invalidated');
+    await retainedPoll();
+
+    expect(relay).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('idle');
+  });
+
+  test('does not let callbacks retained from an old session adopt the new session generation', async () => {
+    const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
+    const poll = vi.fn(async () => ({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) => useTeamRelay({ sessionId, fetchTeamMessages: poll, relayUserMessage: relay }),
+      { initialProps: { sessionId: 'session-1' } }
+    );
+    const retainedSend = result.current.send;
+    const retainedPoll = result.current.poll;
+
+    rerender({ sessionId: 'session-2' });
+    await expect(retainedSend('Old message')).resolves.toBe('invalidated');
+    await retainedPoll();
+
+    expect(relay).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('idle');
+  });
+
   test('reset invalidates pending send and poll without leaking state or sinceId', async () => {
     const pendingPoll = deferred<{
       outgoingStatus: 'delivered';
@@ -201,10 +287,11 @@ describe('useTeamRelay', () => {
     act(() => result.current.requestHandoff());
     let pollPromise!: Promise<void>;
     act(() => { pollPromise = result.current.poll(); });
-    let sendPromise!: Promise<boolean>;
+    let sendPromise!: Promise<'persisted' | 'failed' | 'invalidated'>;
     act(() => { sendPromise = result.current.send('Hello'); });
     act(() => result.current.reset());
 
+    let sendOutcome: unknown;
     await act(async () => {
       pendingPoll.resolve({
         outgoingStatus: 'delivered',
@@ -214,9 +301,10 @@ describe('useTeamRelay', () => {
         scheduleRequestOpen: true
       });
       pendingSend.resolve({ persisted: true, queued: true, delivered: false });
-      await Promise.all([pollPromise, sendPromise]);
+      [, sendOutcome] = await Promise.all([pollPromise, sendPromise]);
     });
 
+    expect(sendOutcome).toBe('invalidated');
     expect(result.current.status).toBe('idle');
     expect(result.current.requested).toBe(false);
     expect(result.current.messages).toEqual([]);
@@ -247,7 +335,7 @@ describe('useTeamRelay', () => {
     act(() => result.current.requestHandoff());
     let pollPromise!: Promise<void>;
     act(() => { pollPromise = result.current.poll(); });
-    let sendPromise!: Promise<boolean>;
+    let sendPromise!: Promise<'persisted' | 'failed' | 'invalidated'>;
     act(() => { sendPromise = result.current.send('Old message'); });
     rerender({ sessionId: 'session-2' });
 
@@ -522,6 +610,31 @@ describe('relay API client', () => {
     await act(async () => { await result.current.poll(); });
 
     expect(global.fetch).toHaveBeenNthCalledWith(1, '/api/telegram/messages?sessionId=session-1&sinceId=0', expect.any(Object));
+    expect(global.fetch).toHaveBeenNthCalledWith(2, '/api/telegram/messages?sessionId=session-1&sinceId=0', expect.any(Object));
+    expect(result.current.messages.map((message) => message.id)).toEqual([7]);
+  });
+
+  test.each([
+    ['fractional', 1.5],
+    ['negative', -1],
+    ['unsafe', Number.MAX_SAFE_INTEGER + 1]
+  ])('rejects a %s message id without poisoning sinceId', async (_case, invalidId) => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...validPollResponse,
+        messages: [{ ...validPollResponse.messages[0], id: invalidId }]
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...validPollResponse,
+        messages: [{ ...validPollResponse.messages[0], id: 7 }]
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages, relayUserMessage: vi.fn()
+    }));
+
+    await act(async () => { await result.current.poll().catch(() => undefined); });
+    await act(async () => { await result.current.poll(); });
+
     expect(global.fetch).toHaveBeenNthCalledWith(2, '/api/telegram/messages?sessionId=session-1&sinceId=0', expect.any(Object));
     expect(result.current.messages.map((message) => message.id)).toEqual([7]);
   });

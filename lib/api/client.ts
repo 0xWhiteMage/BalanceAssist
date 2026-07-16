@@ -193,7 +193,7 @@ export type TeamPollState = {
 const teamPollStateSchema = z.object({
   outgoingStatus: z.enum(['queued', 'delivered']).nullable(),
   messages: z.array(z.object({
-    id: z.number(),
+    id: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     sender: z.enum(['user', 'team']),
     text: z.string(),
     createdAt: z.string()

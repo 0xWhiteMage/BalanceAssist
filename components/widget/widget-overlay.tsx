@@ -852,13 +852,13 @@ export function WidgetOverlay({
           return;
         }
 
-        const ok = await teamRelay.send(trimmed);
-        if (!ok) {
+        const sendResult = await teamRelay.send(trimmed);
+        if (sendResult === 'failed') {
           await botSay('Sorry, I could not reach the team right now. Please email hello@balancestudio.tv.');
           return;
         }
 
-        void teamRelay.poll();
+        if (sendResult === 'persisted') void teamRelay.poll();
         return;
       }
 
