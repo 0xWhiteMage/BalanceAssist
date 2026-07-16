@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
+import { parse } from 'yaml';
 import {
   applyProductionCrmMigrations,
   crmMigrationVersions,
@@ -13,6 +14,13 @@ import {
 
 const root = process.cwd();
 const execFileAsync = promisify(execFile);
+type Workflow = {
+  jobs?: Record<string, {
+    environment?: string;
+    env?: Record<string, string>;
+    steps?: Array<{ env?: Record<string, string>; run?: string }>;
+  }>;
+};
 const crmMigrations = [
   ['044', '044_monday_crm_projection_tables.sql'],
   ['047', '047_atomic_crm_approval.sql'],
@@ -95,15 +103,29 @@ describe('production CRM migration policy', () => {
   });
 
   it('protects managed production execution with a main-trusted workflow and approval environment', async () => {
-    const workflow = await readFile(resolve(root, '.github/workflows/production-crm-migrations.yml'), 'utf8');
+    const source = await readFile(resolve(root, '.github/workflows/production-crm-migrations.yml'), 'utf8');
+    const workflow = parse(source) as Workflow;
+    const migrate = workflow.jobs?.migrate;
+    const migrationSteps = migrate?.steps?.filter((step) => step.run?.includes('node scripts/apply-production-crm-migrations.mjs --dry-run')) ?? [];
+    const migrationStep = migrationSteps[0];
+    const runCommands = migrationStep?.run?.split(/\r?\n/).map((command) => command.trim()).filter(Boolean) ?? [];
+    const dryRunIndex = runCommands.indexOf('node scripts/apply-production-crm-migrations.mjs --dry-run');
+    const postDryRunCommands = runCommands.slice(dryRunIndex + 1);
+    const secretReferences = JSON.stringify(migrate).match(/\$\{\{\s*secrets\.[A-Z0-9_]+\s*\}\}/g) ?? [];
 
-    expect(workflow).toContain('production-crm-migrations.yml@refs/heads/main');
-    expect(workflow).toContain('environment: production-crm-migrations');
-    expect(workflow).toContain('SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}');
-    expect(workflow).toContain('node scripts/apply-production-crm-migrations.mjs --dry-run');
-    expect(workflow).toContain("printf '%s\\n' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref");
-    expect(workflow).toContain('npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql');
-    expect(workflow).not.toContain('PRODUCTION_DATABASE_URL');
-    expect(workflow).not.toMatch(/node scripts\/apply-production-crm-migrations\.mjs(?! --dry-run)/);
+    expect(source).toContain('production-crm-migrations.yml@refs/heads/main');
+    expect(migrate?.environment).toBe('production-crm-migrations');
+    expect(migrate?.env).toBeUndefined();
+    expect(migrationSteps).toHaveLength(1);
+    expect(migrationStep?.env).toEqual({ SUPABASE_ACCESS_TOKEN: '${{ secrets.SUPABASE_ACCESS_TOKEN }}' });
+    expect(migrate?.steps?.flatMap((step) => step.env ? [step.env] : [])).toEqual([
+      { SUPABASE_ACCESS_TOKEN: '${{ secrets.SUPABASE_ACCESS_TOKEN }}' }
+    ]);
+    expect(secretReferences).toEqual(['${{ secrets.SUPABASE_ACCESS_TOKEN }}']);
+    expect(dryRunIndex).toBeGreaterThanOrEqual(0);
+    expect(postDryRunCommands).toContain('npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql');
+    expect(postDryRunCommands.filter((command) => !/^(?:mkdir|printf)\b/.test(command))).toEqual([
+      'npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql'
+    ]);
   });
 });
