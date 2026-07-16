@@ -552,6 +552,86 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(requestLog.some((entry) => /\/api\/(telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   }, 10_000);
 
+  test('coalesces repeated human activation into one bootstrap and continuation', async () => {
+    const requestLog: RecordedRequest[] = [];
+    const pendingSession = deferred<Response>();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      requestLog.push({ url, method: init?.method, body });
+      if (url.includes('/api/sessions/inspect')) return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      if (url.includes('/api/sessions') && init?.method === 'POST') return pendingSession.promise;
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
+      }
+      if (url.includes('/api/events')) return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const humanControl = await screen.findByRole('button', { name: 'Talk to the team without AI' });
+    fireEvent.click(humanControl);
+    fireEvent.click(humanControl);
+    await waitFor(() => expect(requestLog.filter((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toHaveLength(1));
+    await act(async () => {
+      pendingSession.resolve(new Response(JSON.stringify({ sessionId: 'coalesced-session', persisted: true }), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(requestLog.filter((entry) => entry.url.includes('/api/sessions/inspect'))).toHaveLength(1);
+    expect(requestLog.filter((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toHaveLength(1);
+    expect(requestLog.filter((entry) => entry.url.includes('/consent'))).toHaveLength(1);
+    expect(requestLog.filter((entry) => entry.url.includes('/api/events') && (entry.body as { eventName?: string })?.eventName === 'human_handoff')).toHaveLength(1);
+  }, 10_000);
+
+  test('allows a fresh generation while stale cleanup cannot unlock its in-flight guard', async () => {
+    const requestLog: RecordedRequest[] = [];
+    const staleConsent = deferred<Response>();
+    const freshConsent = deferred<Response>();
+    let consentCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      requestLog.push({ url, method: init?.method, body });
+      if (url.includes('/api/sessions/inspect')) return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
+      if (url.includes('/api/sessions') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ sessionId: 'generation-session', persisted: true }), { status: 200 });
+      }
+      if (url.includes('/consent')) {
+        consentCalls += 1;
+        return consentCalls === 1 ? staleConsent.promise : freshConsent.promise;
+      }
+      if (url.includes('/api/events')) return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    await startWithBalanceAssist();
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
+    }, { timeout: 7000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    await waitFor(() => expect(consentCalls).toBe(1));
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    await waitFor(() => expect(consentCalls).toBe(2));
+
+    await act(async () => {
+      staleConsent.resolve(new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    expect(consentCalls).toBe(2);
+
+    await act(async () => {
+      freshConsent.resolve(new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(requestLog.filter((entry) => entry.url.includes('/api/events') && (entry.body as { eventName?: string })?.eventName === 'human_handoff')).toHaveLength(1);
+    expect(screen.getAllByPlaceholderText(/message the team request/i)).toHaveLength(1);
+  }, 10_000);
+
   test('keeps human recovery persistent when human session creation fails', async () => {
     const requestLog: RecordedRequest[] = [];
     global.fetch = makeFetchRecorder([

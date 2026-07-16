@@ -181,6 +181,7 @@ export function WidgetOverlay({
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapGenerationRef = useRef(0);
+  const humanBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
 
@@ -551,36 +552,44 @@ export function WidgetOverlay({
   async function handleTeamConnect() {
     if (humanRequested || !noticeConsent) return;
     const bootstrapGeneration = bootstrapGenerationRef.current;
+    if (humanBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
+    humanBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     const bootstrapIsCurrent = () =>
       bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
-    const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
-    if (!bootstrapIsCurrent() || !activeSessionId) return;
-    const consentRecorded = await recordHumanContactConsent(activeSessionId);
-    if (!bootstrapIsCurrent()) return;
-    if (!consentRecorded) {
-      await botSay('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.', {
-        isValid: bootstrapIsCurrent
-      });
-      return;
+    try {
+      const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
+      if (!bootstrapIsCurrent() || !activeSessionId) return;
+      const consentRecorded = await recordHumanContactConsent(activeSessionId);
+      if (!bootstrapIsCurrent()) return;
+      if (!consentRecorded) {
+        await botSay('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.', {
+          isValid: bootstrapIsCurrent
+        });
+        return;
+      }
+
+      if (!bootstrapIsCurrent()) return;
+      if (!teamRelay.requestHandoff()) return;
+      setCurrentStep('free-chat');
+
+      if (!bootstrapIsCurrent()) return;
+      void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
+
+      const connectMsg: ChatMessage = {
+        id: nextId(),
+        sender: 'bot',
+        text: `Your private relay is ready. ${DATA_USE_NOTICE_COPY.humanDisclosure}`,
+        timestamp: Date.now(),
+        isSystem: true
+      };
+      const next = [...messagesRef.current, connectMsg];
+      messagesRef.current = next;
+      setMessages(next);
+    } finally {
+      if (humanBootstrapInFlightGenerationRef.current === bootstrapGeneration) {
+        humanBootstrapInFlightGenerationRef.current = null;
+      }
     }
-
-    if (!bootstrapIsCurrent()) return;
-    if (!teamRelay.requestHandoff()) return;
-    setCurrentStep('free-chat');
-
-    if (!bootstrapIsCurrent()) return;
-    void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
-
-    const connectMsg: ChatMessage = {
-      id: nextId(),
-      sender: 'bot',
-      text: `Your private relay is ready. ${DATA_USE_NOTICE_COPY.humanDisclosure}`,
-      timestamp: Date.now(),
-      isSystem: true
-    };
-    const next = [...messagesRef.current, connectMsg];
-    messagesRef.current = next;
-    setMessages(next);
   }
 
   function handleDraftEdit(key: string, value: string) {
