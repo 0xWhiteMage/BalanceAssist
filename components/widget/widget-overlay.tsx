@@ -9,7 +9,6 @@ import {
   FileRequestBanner,
   FileRequestInputHint,
   HumanFooter,
-  TeamTypingIndicator,
   UploadPolicyModal,
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
@@ -28,7 +27,7 @@ import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-dr
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
-import type { ConsentRecord } from '@/lib/privacy/notice';
+import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 
@@ -162,6 +161,7 @@ export function WidgetOverlay({
   const [inputValue, setInputValue] = useState('');
   const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [entryPath, setEntryPath] = useState<'ai' | 'human' | null>(null);
   const teamRelay = useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage });
   const {
     isTeamConnected, requested: humanRequested, status: humanStatus, waitingForReply: teamWaitingForReply,
@@ -244,6 +244,17 @@ export function WidgetOverlay({
       setView('calendly');
     }
   }, [configuredCalendlyUrl, isTeamConnected, humanScheduleRequestOpen, view]);
+
+  useEffect(() => {
+    if (!noticeConsent || !entryPath) return;
+    if (entryPath === 'ai') {
+      void startConversation();
+      return;
+    }
+    void handleTeamConnect();
+  // Entry choice is intentionally the only trigger for either processing path.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryPath, noticeConsent]);
 
   useEffect(() => {
     if (isTeamConnected || briefApproved) return;
@@ -368,7 +379,10 @@ export function WidgetOverlay({
 
     const activeSessionId = await loadOrCreateSession();
     if (cancelRef.current) return;
-    if (!activeSessionId) return;
+    if (!activeSessionId) {
+      setEntryPath(null);
+      return;
+    }
 
     setHasStarted(true);
     await advanceStep('intro', createDefaultLeadDraft());
@@ -395,6 +409,7 @@ export function WidgetOverlay({
 
   function handleOpen() {
     cancelRef.current = false;
+    teamRelay.resume();
     setIsOpen(true);
   }
 
@@ -523,12 +538,11 @@ export function WidgetOverlay({
   async function handleTeamConnect() {
     if (humanRequested || !noticeConsent) return;
     const activeSessionId = await loadOrCreateSession();
-    if (!activeSessionId) return;
-
-    if (!await recordProducerTransferConsent(activeSessionId)) {
-      await botSay('Sorry — we could not confirm consent to share messages with the Balance team. Please try again.');
+    if (!activeSessionId) {
+      setEntryPath(null);
       return;
     }
+
     if (!teamRelay.requestHandoff()) return;
     setCurrentStep('free-chat');
 
@@ -537,7 +551,7 @@ export function WidgetOverlay({
     const connectMsg: ChatMessage = {
       id: nextId(),
       sender: 'bot',
-      text: 'Your request to contact the Balance team is ready. Send a message and we will confirm when the team replies.',
+      text: `Your private relay is ready. ${DATA_USE_NOTICE_COPY.humanDisclosure}`,
       timestamp: Date.now(),
       isSystem: true
     };
@@ -1031,9 +1045,22 @@ export function WidgetOverlay({
     e.target.value = '';
   }
 
+  function chooseAi(record: ConsentRecord) {
+    setEntryPath('ai');
+    setNoticeConsent(record);
+  }
+
+  function chooseHuman() {
+    setEntryPath('human');
+    // The existing session contract requires consentVersion and consentedAt. This
+    // records first-party relay-session disclosure, not AI processing consent.
+    setNoticeConsent({ consentVersion: 'human-relay-1.1', consentedAt: new Date().toISOString() });
+  }
+
   const canInteract = !isSessionExpired && (hasStarted || humanRequested);
-  const showNoticeGate = !noticeConsent;
-  const showStartChoices = noticeConsent !== null && !canInteract && messages.length === 0;
+  const showNoticeGate = entryPath === null;
+  const showStartChoices = false;
+  const showHumanFallback = entryPath === 'human' && !humanRequested;
   const showAttachmentButton = false;
 
   return (
@@ -1227,7 +1254,7 @@ export function WidgetOverlay({
                 }}
               >
                 {showNoticeGate ? (
-                  <DataUseNotice onConsent={setNoticeConsent} />
+                  <DataUseNotice onConsent={chooseAi} onHuman={chooseHuman} onLeave={handleClose} />
                 ) : showStartChoices ? (
                   <div
                     data-testid="widget-start-options"
@@ -1294,6 +1321,8 @@ export function WidgetOverlay({
                       Talk to a human
                     </button>
                   </div>
+                ) : showHumanFallback ? (
+                  <HumanFallbacks calendlyUrl={configuredCalendlyUrl} unavailable={sessionUnavailable} />
                 ) : (
                   <div role="log" aria-live="polite" aria-relevant="additions text" style={{ display: 'contents' }}>
                     {messages.map((msg) => (
@@ -1307,7 +1336,7 @@ export function WidgetOverlay({
                       </div>
                     )}
 
-                    {!isTyping && isTeamConnected && teamWaitingForReply && <div role="status" aria-label="Balance team is preparing a reply"><TeamTypingIndicator /></div>}
+                    {!isTyping && isTeamConnected && teamWaitingForReply && <div role="status">Waiting for a Balance team reply</div>}
 
                     {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
                   </div>
@@ -1443,6 +1472,7 @@ export function WidgetOverlay({
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  disabled={humanStatus === 'sending'}
                   placeholder={humanRequested ? 'Message the team request...' : 'Type your message...'}
                   style={{
                     flex: 1,
@@ -1460,17 +1490,17 @@ export function WidgetOverlay({
                 />
                 <button
                   onClick={handleSubmitText}
-                  disabled={!inputValue.trim() || isTyping}
+                  disabled={!inputValue.trim() || isTyping || humanStatus === 'sending'}
                   style={{
                     width: '44px',
                     height: '44px',
                     borderRadius: '50%',
                     border: 'none',
                     background:
-                      inputValue.trim() && !isTyping
+                      inputValue.trim() && !isTyping && humanStatus !== 'sending'
                         ? `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`
                         : 'rgba(255, 255, 255, 0.08)',
-                    cursor: inputValue.trim() && !isTyping ? 'pointer' : 'default',
+                    cursor: inputValue.trim() && !isTyping && humanStatus !== 'sending' ? 'pointer' : 'default',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1479,12 +1509,13 @@ export function WidgetOverlay({
                   aria-label="Send message"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke={inputValue.trim() && !isTyping ? '#101010' : brandTokens.colors.mutedText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke={inputValue.trim() && !isTyping && humanStatus !== 'sending' ? '#101010' : brandTokens.colors.mutedText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </button>
               </div>
 
               <HumanFooter isTeamConnected={humanRequested} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+              {humanRequested && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} />}
             </>
           )}
         </div>
@@ -1543,6 +1574,16 @@ export function WidgetOverlay({
           </svg>
         </button>
       )}
+    </div>
+  );
+}
+
+function HumanFallbacks({ calendlyUrl, unavailable = false }: { calendlyUrl: string | null; unavailable?: boolean }) {
+  return (
+    <div role={unavailable ? 'status' : undefined} style={{ display: 'grid', gap: 8, padding: 12, fontSize: 12, lineHeight: 1.5 }}>
+      <p style={{ margin: 0 }}>{unavailable ? 'The private relay could not start. You can still contact the team directly.' : 'Prefer another route? Contact the team directly.'}</p>
+      <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
+      {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
     </div>
   );
 }

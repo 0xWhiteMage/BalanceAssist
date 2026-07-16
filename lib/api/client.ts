@@ -177,7 +177,13 @@ export type TeamPollState = {
   scheduleRequestOpen: boolean;
 };
 
-export async function relayUserMessage(sessionId: string, text: string, requestId: string): Promise<boolean> {
+export type RelayMessageResult = {
+  persisted: boolean;
+  queued: boolean;
+  delivered: boolean;
+};
+
+export async function relayUserMessage(sessionId: string, text: string, requestId: string): Promise<RelayMessageResult> {
   try {
     const response = await fetchWithTimeout('/api/telegram/relay', {
       method: 'POST',
@@ -185,10 +191,15 @@ export async function relayUserMessage(sessionId: string, text: string, requestI
       body: JSON.stringify({ sessionId, text }),
       keepalive: true
     });
-    if (!response.ok) return false;
-    return Boolean((await response.json() as { ok?: boolean }).ok);
+    if (!response.ok) return { persisted: false, queued: false, delivered: false };
+    const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean; telegramSent?: boolean };
+    return {
+      persisted: data.ok === true && data.persisted === true,
+      queued: data.queued === true,
+      delivered: data.telegramSent === true
+    };
   } catch {
-    return false;
+    return { persisted: false, queued: false, delivered: false };
   }
 }
 

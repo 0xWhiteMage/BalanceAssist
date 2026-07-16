@@ -46,8 +46,8 @@ function chatSessionResponse() {
 }
 
 async function startAiConversation() {
-  fireEvent.click(await screen.findByTestId('consent-button'));
-  fireEvent.click(await screen.findByRole('button', { name: /start with balance assist/i }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 
   const input = (await waitFor(() => {
     const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
@@ -72,8 +72,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     }) as unknown as typeof fetch;
     render(<WidgetOverlay autoOpen={true} />);
 
-    fireEvent.click(await screen.findByTestId('consent-button'));
-    fireEvent.click(await screen.findByRole('button', { name: /talk to a human/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Talk to the team without AI' }));
 
     const input = await screen.findByPlaceholderText(/message the team request/i);
     fireEvent.change(input, { target: { value: 'Please call me' } });

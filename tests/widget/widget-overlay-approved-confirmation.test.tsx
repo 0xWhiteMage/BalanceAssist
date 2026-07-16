@@ -127,8 +127,8 @@ function mockWidgetFetch() {
 }
 
 async function startAiConversation() {
-  fireEvent.click(await screen.findByTestId('consent-button'));
-  fireEvent.click(await screen.findByRole('button', { name: /start with balance assist/i }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 
   const input = (await waitFor(() => {
     const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;

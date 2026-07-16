@@ -98,6 +98,29 @@ describe('useWidgetSessionDraft', () => {
 });
 
 describe('useTeamRelay', () => {
+  test('keeps saved, queued, delivered, and replied relay states distinct', async () => {
+    const relay = vi.fn()
+      .mockResolvedValueOnce({ persisted: true, queued: false, delivered: false })
+      .mockResolvedValueOnce({ persisted: true, queued: true, delivered: false })
+      .mockResolvedValueOnce({ persisted: true, queued: true, delivered: true });
+    const poll = vi.fn(async () => ({ messages: [{ id: 1, sender: 'team' as const, text: 'Reply', createdAt: '2026-07-16T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: relay
+    }));
+    act(() => result.current.requestHandoff());
+
+    await act(async () => { await result.current.send('Saved only'); });
+    expect(result.current.status).toBe('saved');
+    await act(async () => { await result.current.send('Queued'); });
+    expect(result.current.status).toBe('queued');
+    await act(async () => { await result.current.send('Delivered'); });
+    expect(result.current.status).toBe('delivered');
+    await act(async () => {
+      await result.current.poll();
+    });
+    expect(result.current.status).toBe('replied');
+  });
+
   test('returns a rejected relay send to the requested retryable state', async () => {
     const relay = vi.fn<(sessionId: string, text: string, requestId: string) => Promise<boolean>>(async () => false);
     const { result } = renderHook(() => useTeamRelay({
@@ -122,6 +145,20 @@ describe('useTeamRelay', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
 
     expect(poll).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  test('preserves an active relay when temporarily stopped and resumes polling when reopened', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn(async () => ({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result } = renderHook(() => useTeamRelay({ sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn() }));
+    act(() => result.current.requestHandoff());
+    act(() => result.current.stop());
+    expect(result.current.requested).toBe(true);
+    act(() => result.current.resume());
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+    expect(poll).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
 

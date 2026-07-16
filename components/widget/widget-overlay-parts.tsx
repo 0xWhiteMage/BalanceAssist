@@ -1,6 +1,5 @@
 import Image from 'next/image';
 import React, { useRef, useState } from 'react';
-import { TypingDots } from '@/components/chat/typing-dots';
 import { brandTokens } from '@/lib/brand-tokens';
 import {
   serviceOptions
@@ -61,7 +60,7 @@ export function WidgetOverlayHeader({
             style={{
               margin: 0,
               fontSize: '10px',
-              color: isTeamConnected ? '#4ade80' : brandTokens.colors.warmGold,
+              color: brandTokens.colors.warmGold,
               textTransform: 'uppercase',
               letterSpacing: '0.16em',
               display: 'flex',
@@ -69,8 +68,7 @@ export function WidgetOverlayHeader({
               gap: '4px'
             }}
           >
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />
-            {isTeamConnected ? 'Team connected' : 'Online'}
+            {isTeamConnected ? 'Human relay' : 'AI brief assistant'}
           </p>
         </div>
       </div>
@@ -115,26 +113,6 @@ export function BotAvatarSmall() {
         unoptimized
         style={{ objectFit: 'contain', filter: 'brightness(0) saturate(100%)' }}
       />
-    </div>
-  );
-}
-
-export function TeamTypingIndicator() {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-      <span
-        style={{
-          marginLeft: '4px',
-          fontSize: '10px',
-          fontWeight: 600,
-          color: brandTokens.colors.warmGold,
-          textTransform: 'uppercase',
-          letterSpacing: '0.16em'
-        }}
-      >
-        Balance Studio Team
-      </span>
-      <TypingDots />
     </div>
   );
 }
@@ -288,7 +266,7 @@ export function HumanFooter({
   onConnect
 }: {
   isTeamConnected: boolean;
-  humanStatus: 'idle' | 'requested' | 'sending' | 'delivered' | 'pending' | 'awaiting' | 'replied';
+  humanStatus: 'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'replied';
   onConnect: () => void;
 }) {
   return (
@@ -352,7 +330,7 @@ export function HumanFooter({
               color:
                 humanStatus === 'replied'
                   ? '#4ade80'
-                  : humanStatus === 'awaiting' || humanStatus === 'pending' || humanStatus === 'sending' || humanStatus === 'requested'
+                  : humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested'
                     ? brandTokens.colors.warmGold
                     : brandTokens.colors.mutedText
             }}
@@ -368,7 +346,7 @@ export function HumanFooter({
                 }}
               />
             )}
-            {(humanStatus === 'awaiting' || humanStatus === 'pending' || humanStatus === 'sending' || humanStatus === 'requested') && (
+            {(humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested') && (
               <span
                 style={{
                   width: '6px',
@@ -385,10 +363,10 @@ export function HumanFooter({
                 ? 'Team contact requested'
                 : humanStatus === 'sending'
                   ? 'Sending message'
-              : humanStatus === 'awaiting'
-                ? 'Awaiting reply'
-                : humanStatus === 'pending'
-                  ? 'Message delivered; awaiting reply'
+                : humanStatus === 'saved'
+                  ? 'Message saved'
+                : humanStatus === 'queued'
+                  ? 'Queued for the Balance team'
                 : humanStatus === 'delivered'
                   ? 'Message delivered'
                   : 'Connected to team'}

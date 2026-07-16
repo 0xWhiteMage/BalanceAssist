@@ -14,27 +14,38 @@ describe('DataUseNotice', () => {
     expect(screen.getByText(DATA_USE_NOTICE_COPY.title)).toBeInTheDocument();
   });
 
-  test('renders an "I understand" button', () => {
+  test('offers equal AI, human, and leave choices before AI consent', () => {
     render(<DataUseNotice onConsent={() => {}} />);
-    const button = screen.getByTestId('consent-button');
-    expect(button).toBeInTheDocument();
-    expect(button.textContent).toBe(DATA_USE_NOTICE_COPY.acknowledgeButton);
+
+    expect(screen.getByRole('button', { name: 'Build a brief with AI' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Leave' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /I understand/i })).not.toBeInTheDocument();
   });
 
-  test('invokes onConsent with consent record when the button is clicked', () => {
+  test('records AI consent only after Continue with AI', () => {
     const onConsent = vi.fn();
     render(<DataUseNotice onConsent={onConsent} />);
-    fireEvent.click(screen.getByTestId('consent-button'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
+    expect(screen.getByText(/DeepSeek processes AI-mode messages/i)).toBeInTheDocument();
+    expect(onConsent).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with AI' }));
     expect(onConsent).toHaveBeenCalledOnce();
     const record = onConsent.mock.calls[0][0];
     expect(record.consentVersion).toBe(CONSENT_VERSION);
     expect(record.consentedAt).toBeDefined();
   });
 
-  test('hides the consent button after acknowledging', () => {
-    render(<DataUseNotice onConsent={() => {}} />);
-    fireEvent.click(screen.getByTestId('consent-button'));
-    expect(screen.queryByTestId('consent-button')).not.toBeInTheDocument();
+  test('takes the human path without recording AI consent', () => {
+    const onConsent = vi.fn();
+    const onHuman = vi.fn();
+    render(<DataUseNotice onConsent={onConsent} onHuman={onHuman} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+    expect(onHuman).toHaveBeenCalledOnce();
+    expect(onConsent).not.toHaveBeenCalled();
   });
 
   test('includes data-testid="data-use-notice" on the wrapper', () => {
@@ -51,8 +62,8 @@ describe('DataUseNotice', () => {
 
   test('discloses deletion status, its 24-hour SLA, and external-copy limits', () => {
     render(<DataUseNotice onConsent={vi.fn()} />);
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/deletion request.*within 24 hours/i);
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/telegram.*backups/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/request deletion/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/backups/i);
   });
 
   test('names Monday.com as a recipient of an approved project transfer', () => {

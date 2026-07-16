@@ -1,17 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TeamMessage, TeamPollState } from '@/lib/api/client';
+import type { RelayMessageResult, TeamMessage, TeamPollState } from '@/lib/api/client';
 
 type Dependencies = {
   sessionId: string | null;
   fetchTeamMessages: (sessionId: string, sinceId?: number) => Promise<TeamPollState>;
-  relayUserMessage: (sessionId: string, text: string, requestId: string) => Promise<boolean>;
+  relayUserMessage: (sessionId: string, text: string, requestId: string) => Promise<RelayMessageResult | boolean>;
 };
 
 export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }: Dependencies) {
   const [requested, setRequested] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'requested' | 'sending' | 'pending' | 'replied'>('idle');
+  const [status, setStatus] = useState<'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'replied'>('idle');
   const [isTeamConnected, setIsTeamConnected] = useState(false);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [fileRequestOpen, setFileRequestOpen] = useState(false);
@@ -22,6 +22,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const pollingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryRef = useRef<{ text: string; requestId: string } | null>(null);
+  const [pollingEnabled, setPollingEnabled] = useState(true);
 
   const poll = useCallback(async () => {
     if (!sessionId || pollingRef.current) return;
@@ -49,7 +50,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   }, [fetchTeamMessages, sessionId]);
 
   useEffect(() => {
-    if (!requested || !sessionId) return;
+    if (!requested || !sessionId || !pollingEnabled) return;
     let cancelled = false;
     const schedule = () => {
       timerRef.current = setTimeout(async () => {
@@ -62,7 +63,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
       cancelled = true;
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [poll, requested, sessionId, waitingForReply]);
+  }, [poll, pollingEnabled, requested, sessionId, waitingForReply]);
 
   const requestHandoff = useCallback(() => {
     if (requested) return false;
@@ -80,10 +81,11 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
       requestId: crypto.randomUUID()
     };
     retryRef.current = retry;
-    const sent = await relayUserMessage(sessionId, text, retry.requestId);
+    const result = await relayUserMessage(sessionId, text, retry.requestId);
+    const sent = typeof result === 'boolean' ? result : result.persisted;
     if (sent) {
       retryRef.current = null;
-      setStatus('pending');
+      setStatus(typeof result === 'boolean' || result.queued ? (typeof result !== 'boolean' && result.delivered ? 'delivered' : 'queued') : 'saved');
     }
     else {
       setWaitingForReply(false);
@@ -96,23 +98,25 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     if (timerRef.current) clearTimeout(timerRef.current);
     sinceIdRef.current = 0;
     retryRef.current = null;
-    setRequested(false); setStatus('idle'); setIsTeamConnected(false); setWaitingForReply(false);
+    setRequested(false); setStatus('idle'); setIsTeamConnected(false); setWaitingForReply(false); setPollingEnabled(true);
     setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false); setMessages([]);
   }, []);
 
   const stop = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
-    setRequested(false);
     setWaitingForReply(false);
+    setPollingEnabled(false);
   }, []);
+
+  const resume = useCallback(() => setPollingEnabled(true), []);
 
   const clearRequests = useCallback(() => {
     setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false);
   }, []);
 
   const markUploadPending = useCallback(() => {
-    setWaitingForReply(false); setStatus('pending');
+    setWaitingForReply(false); setStatus('queued');
   }, []);
 
   const markUploadFailed = useCallback(() => {
@@ -123,6 +127,6 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
 
   return {
     requested, status, isTeamConnected, waitingForReply, fileRequestOpen, fileRequestNote, scheduleRequestOpen, messages,
-    requestHandoff, send, poll, reset, stop, clearRequests, markUploadPending, markUploadFailed, markRequested
+    requestHandoff, send, poll, reset, stop, resume, clearRequests, markUploadPending, markUploadFailed, markRequested
   };
 }
