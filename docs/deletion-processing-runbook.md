@@ -6,7 +6,7 @@ GitHub Actions invokes the internal deletion worker every five minutes. Investig
 
 The service deletes the temporary session, its owned application rows, and known private attachment objects within 24 hours. It cannot retract content already transferred to Telegram or erase provider backups immediately; those systems follow their own retention and deletion processes. Jobs retain only opaque identifiers, lifecycle state, lease data, and timestamps, never deleted draft, contact, attachment, or raw-error data.
 
-The reviewed protected cleanup chain is `038` through `043`, ending with `043_deletion_state_batched_cleanup.sql`. Apply it only through the approved `Production cleanup migrations` workflow, which verifies each allowlisted version, filename, and SHA-256 source hash before applying and confirms every version is recorded. Ordinary releases remain blocked until all six versions are recorded.
+The reviewed protected cleanup chain is `038` through `043`, ending with `043_deletion_state_batched_cleanup.sql`. Apply it only through the approved `Production cleanup migrations` workflow, which verifies each allowlisted version, filename, SHA-256 source hash, and the exact `supabase/production-cleanup-038-043.sql` artifact before applying and confirms every version is recorded. A fresh, release-SHA-bound backup attestation is required before execution and retained with the release record. If the managed workflow is unavailable after that attestation and protected approval, use only the exact artifact in the Supabase SQL Editor, never individual pasted migrations. Ordinary releases remain blocked until all six versions are recorded.
 
 ## Monday CRM Obligations
 

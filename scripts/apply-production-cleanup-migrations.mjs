@@ -14,6 +14,7 @@ const reviewedCleanupMigrations = new Map([
   ['042', { filename: '042_deletion_recovery_ownership.sql', sha256: '551540ad4fd8996206ff75760a2614b5f76e786dd9f8ebe898284b4282da025d' }],
   ['043', { filename: '043_deletion_state_batched_cleanup.sql', sha256: '85e7e1d658e9671f17c489f50b4a2486516ec4b721b5ad0b131df01e0de40257' }]
 ]);
+const reviewedCleanupArtifactSha256 = '96616d13bba56e14dc95b3d9cae0161e0b7b13e50cfe0758886ff93d06ad27f5';
 
 export const cleanupMigrationVersions = [...reviewedCleanupMigrations.keys()];
 
@@ -39,13 +40,23 @@ function assertReviewedSource(migration) {
   }
 }
 
+function assertReviewedArtifact(artifactPath) {
+  const artifact = readFileSync(artifactPath, 'utf8').replace(/\r\n/g, '\n');
+  const artifactHash = createHash('sha256').update(artifact).digest('hex');
+  if (artifactHash !== reviewedCleanupArtifactSha256) {
+    throw new Error('cleanup migration artifact does not match its reviewed artifact');
+  }
+}
+
 export async function applyProductionCleanupMigrations({
   connectionString = process.env.PRODUCTION_DATABASE_URL,
   migrationsDir = resolve(process.cwd(), 'supabase/migrations'),
+  artifactPath = resolve(process.cwd(), 'supabase/production-cleanup-038-043.sql'),
   dryRun = false
 } = {}) {
   const migrations = selectCleanupMigrations(getIncrementalMigrations(migrationsDir));
   migrations.forEach(assertReviewedSource);
+  assertReviewedArtifact(artifactPath);
   if (dryRun) return { planned: migrations.map(({ filename }) => filename), schemaVersion: cleanupMigrationVersions.at(-1) };
   if (!connectionString) throw new Error('PRODUCTION_DATABASE_URL is required in the protected production-cleanup-migrations environment.');
 

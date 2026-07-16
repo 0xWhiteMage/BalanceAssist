@@ -96,12 +96,13 @@ CRM migrations use the separate protected `production-crm-migrations` workflow. 
 
 ### One-time cleanup migration runbook
 
-`038_durable_deletion_jobs.sql` through `043_deletion_state_batched_cleanup.sql` are reviewed destructive cleanup migrations. They are a one-time sequence, not a general-purpose SQL path. Do not add versions or modify their reviewed content: the dedicated runner permits only these filenames, versions, and SHA-256 source hashes.
+`038_durable_deletion_jobs.sql` through `043_deletion_state_batched_cleanup.sql` are reviewed destructive cleanup migrations. They are a one-time sequence, not a general-purpose SQL path. Do not add versions or modify their reviewed content: the dedicated runner permits only these filenames, versions, SHA-256 source hashes, and the exact `supabase/production-cleanup-038-043.sql` artifact.
 
 1. Take and validate a production backup, review the deletion/audit state, and retain the evidence with the release record.
 2. Create the protected `production-cleanup-migrations` environment secret `PRODUCTION_BACKUP_AUDIT_REFERENCE` before dispatch. Its exact format is `BACKUP_AUDIT:<UTC ISO-8601 timestamp>|<provider>|<backup-or-audit-id>|<release SHA>`; the timestamp must be current, not future, and no more than 24 hours old, and the SHA must exactly match the selected cleanup release. Do not place this record in the dispatch form or workflow output.
-3. Manually dispatch `Production cleanup migrations` with the exact lowercase 40-character SHA already reachable from protected `main`. The workflow rejects any run whose workflow definition is not `refs/heads/main`, then waits for approval of the protected `production-cleanup-migrations` environment. It dry-runs the exact six reviewed migrations, validates the protected backup/audit reference, applies them transactionally, verifies that `038,039,040,041,042,043` are recorded in `public.schema_migrations`, and places only the migration result in the job summary.
+3. Manually dispatch `Production cleanup migrations` with the exact lowercase 40-character SHA already reachable from protected `main`. The workflow rejects any run whose workflow definition is not `refs/heads/main`, then waits for approval of the protected `production-cleanup-migrations` environment. It dry-runs the exact six reviewed migrations, validates the protected backup/audit reference, then uses the managed Supabase CLI with `SUPABASE_ACCESS_TOKEN` to execute the exact transaction artifact and verify `038,039,040,041,042,043` are recorded in `public.schema_migrations`.
 4. Confirm the post-migration health smoke passes. This workflow does not build or deploy the application, change a Vercel alias, or configure any webhook.
+5. If the managed workflow is unavailable after the same backup attestation and protected approval, use only `supabase/production-cleanup-038-043.sql` in the Supabase SQL Editor. Do not paste individual migrations or omit the backup attestation; retain the attestation with the release record.
 
 After the recorded-version verification succeeds, dispatch the ordinary production release for later additive migrations as needed.
 

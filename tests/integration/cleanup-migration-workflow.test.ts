@@ -38,8 +38,8 @@ describe('production cleanup migration workflow', () => {
     expect(validate?.run).toContain('git merge-base --is-ancestor "$RELEASE_REF" origin/main');
     expect(validate?.run).toContain('release_sha="$(git rev-parse "$RELEASE_REF^{commit}")"');
 
-    const cleanup = jobs.cleanup?.steps?.find((step) => step.name === 'Dry-run, apply, and verify reviewed cleanup migrations');
-    expect(cleanup?.env?.PRODUCTION_DATABASE_URL).toBe('${{ secrets.PRODUCTION_DATABASE_URL }}');
+    const cleanup = jobs.cleanup?.steps?.find((step) => step.name === 'Validate backup and apply reviewed cleanup artifact');
+    expect(cleanup?.env?.SUPABASE_ACCESS_TOKEN).toBe('${{ secrets.SUPABASE_ACCESS_TOKEN }}');
     expect(cleanup?.env?.PRODUCTION_BACKUP_AUDIT_REFERENCE).toBe('${{ secrets.PRODUCTION_BACKUP_AUDIT_REFERENCE }}');
     expect(cleanup?.run).toContain('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"');
     expect(cleanup?.run).toContain('IFS=\'|\' read -r backup_at backup_provider backup_id backup_release_sha');
@@ -48,9 +48,10 @@ describe('production cleanup migration workflow', () => {
     expect(cleanup?.run).toContain('test "$backup_release_sha" = "$RELEASE_SHA"');
     expect(cleanup?.run).not.toContain('echo "$PRODUCTION_BACKUP_AUDIT_REFERENCE"');
     expect(cleanup?.run).toContain('node scripts/apply-production-cleanup-migrations.mjs --dry-run');
-    expect(cleanup?.run).toContain('node scripts/apply-production-cleanup-migrations.mjs');
-    expect(cleanup?.run).toContain('038,039,040,041,042,043');
-    expect(cleanup?.run).toContain('$GITHUB_STEP_SUMMARY');
+    expect(cleanup?.run).toContain('npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes');
+    expect(cleanup?.run).toContain('npx --no-install supabase db query --linked --file supabase/production-cleanup-038-043.sql');
+    expect(source).not.toContain('PRODUCTION_DATABASE_URL');
+    expect(source).not.toMatch(/node scripts\/apply-production-cleanup-migrations\.mjs(?!\s+--dry-run)/);
 
     expect(jobs.smoke?.steps?.find((step) => step.name === 'Smoke post-cleanup production health')?.run).toContain('$PRODUCTION_URL/api/health');
     expect(source).not.toMatch(/\bvercel\b|deploy\s|alias\s|telegram|webhook|npm run build/i);
