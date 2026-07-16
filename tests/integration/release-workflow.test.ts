@@ -98,6 +98,9 @@ describe('production release workflows', () => {
     expect(immutableSmoke?.run).toContain('POST');
     expect(immutableSmoke?.run).toContain('$DEPLOYMENT_URL/api/sessions');
     expect(immutableSmoke?.run).toContain('origin: https://balance-assist.vercel.app');
+    expect(immutableSmoke?.run).toContain('{\\"sourceUrl\\":\\"https://balance-assist.vercel.app/session-smoke\\",\\"consentVersion\\":\\"1.1\\",\\"consentedAt\\":\\"$consented_at\\"}');
+    expect(immutableSmoke?.run).toContain('date -u +%Y-%m-%dT%H:%M:%SZ');
+    expect(immutableSmoke?.run).not.toContain('consents');
     expect(immutableSmoke?.run).toContain('session.persisted !== true');
     expect(immutableSmoke?.run).toContain('set-cookie:');
     expect(immutableSmoke?.run).toContain('HttpOnly');
@@ -111,6 +114,9 @@ describe('production release workflows', () => {
     expect(aliasSmoke?.run).toContain('POST');
     expect(aliasSmoke?.run).toContain('$PRODUCTION_URL/api/sessions');
     expect(aliasSmoke?.run).toContain('origin: https://balance-assist.vercel.app');
+    expect(aliasSmoke?.run).toContain('{\\"sourceUrl\\":\\"https://balance-assist.vercel.app/session-smoke\\",\\"consentVersion\\":\\"1.1\\",\\"consentedAt\\":\\"$consented_at\\"}');
+    expect(aliasSmoke?.run).toContain('date -u +%Y-%m-%dT%H:%M:%SZ');
+    expect(aliasSmoke?.run).not.toContain('consents');
     expect(aliasSmoke?.run).toContain('session.persisted !== true');
     expect(aliasSmoke?.run).toContain('set-cookie:');
     expect(aliasSmoke?.run).toContain('HttpOnly');

@@ -179,7 +179,7 @@ jobs:
           session_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
             --header "content-type: application/json" \
             --header "origin: https://balance-assist.vercel.app" \
-            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"release-smoke-v1\",\"consentedAt\":\"$consented_at\"}" \
+            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"1.1\",\"consentedAt\":\"$consented_at\"}" \
             --cookie-jar "$probe_dir/cookies" \
             --dump-header "$probe_dir/session-headers" \
             --output "$probe_dir/session.json" \
@@ -294,7 +294,7 @@ jobs:
           session_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
             --header "content-type: application/json" \
             --header "origin: https://balance-assist.vercel.app" \
-            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"release-smoke-v1\",\"consentedAt\":\"$consented_at\"}" \
+            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"1.1\",\"consentedAt\":\"$consented_at\"}" \
             --cookie-jar "$probe_dir/cookies" \
             --dump-header "$probe_dir/session-headers" \
             --output "$probe_dir/session.json" \
