@@ -71,9 +71,8 @@ Replace the direct execution block with:
 set -euo pipefail
 test -n "$SUPABASE_ACCESS_TOKEN"
 node scripts/apply-production-crm-migrations.mjs --dry-run
-mkdir -p supabase/.temp
-printf '%s' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref
-npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql
+npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes
+npx --no-install supabase db query --linked --file supabase/production-monday-crm-044-053.sql
 ```
 
 The project ref is public infrastructure metadata and must match the production project verified during release. Do not place the access token, database password, or connection URI in repository files or logs.
@@ -123,10 +122,11 @@ Expected: JSON plan containing only `044`, `047`, `048`, `049`, `052`, and `053`
 
 **Step 2: Verify Supabase Management API access with a read-only query**
 
-With `SUPABASE_ACCESS_TOKEN` configured locally and `supabase/.temp/project-ref` containing the production ref, run:
+With `SUPABASE_ACCESS_TOKEN` configured locally, establish an ephemeral CLI link first:
 
 ```powershell
-npx supabase db query --linked "select current_database() as database, current_user as user" --output json
+npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes
+npx --no-install supabase db query --linked "select current_database() as database, current_user as user" --output json
 ```
 
 Expected: `postgres` database and `postgres` user. Do not print any credentials.

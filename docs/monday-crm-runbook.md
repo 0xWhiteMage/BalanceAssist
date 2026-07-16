@@ -21,7 +21,9 @@ schema signatures, and records only the approved CRM versions. Use
 check only; do not apply production migrations from a workstation. The workflow
 uses `SUPABASE_ACCESS_TOKEN` only as its protected
 `production-crm-migrations` environment secret and executes the checked-in SQL
-artifact through the Supabase Management API, not a direct database URL.
+artifact through the Supabase Management API, not a direct database URL. It
+creates its ephemeral project link through the official Supabase CLI rather
+than writing CLI metadata directly.
 
 On 2026-07-15, the provisioner verified account `3603500`, workspace
 `7318184`, private board `18421762586`, and service-user access. It created the

@@ -55,6 +55,5 @@ jobs:
           set -euo pipefail
           test -n "$SUPABASE_ACCESS_TOKEN"
           node scripts/apply-production-crm-migrations.mjs --dry-run
-          mkdir -p supabase/.temp
-          printf '%s\n' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref
+          npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes
           npx --no-install supabase db query --linked --file supabase/production-monday-crm-044-053.sql

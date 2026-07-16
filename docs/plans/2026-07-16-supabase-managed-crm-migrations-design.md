@@ -27,8 +27,8 @@ The artifact already contains the required safeguards:
 2. The migration job receives only `SUPABASE_ACCESS_TOKEN` from the
    `production-crm-migrations` environment.
 3. It verifies the reviewed source hashes and artifact contents locally.
-4. It creates the temporary Supabase linked-project reference from the checked
-   in production project ref, without storing credentials in the repository.
+4. It creates an ephemeral Supabase CLI link from the checked-in production
+   project ref, without storing credentials in the repository.
 5. It runs the checked-in SQL artifact through `supabase db query --linked`.
 
 ## Security And Operations
