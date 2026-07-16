@@ -1512,16 +1512,42 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
-  it('claims a human-contact relay without producer-transfer consent', async () => {
+  it('claims and reserves a human-contact relay without producer-transfer consent', async () => {
     const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://relay-consent.example.test', now() + interval '1 hour') returning id");
     const sessionId = session.rows[0].id;
     try {
       await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
       const relay = await client!.query("select * from public.relay_human_message($1, 'human-contact-only', 'Please contact me')", [sessionId]);
       const claim = await client!.query('select * from public.claim_next_handoff()');
+      const reserved = await client!.query('select public.reserve_handoff_send($1, $2) as reserved', [relay.rows[0].handoff_id, claim.rows[0].claim_token]);
+      const state = await client!.query('select state, last_error from public.handoff_outbox where id = $1', [relay.rows[0].handoff_id]);
 
       expect(relay.rows[0]).toMatchObject({ persisted: true, consent_required: false });
-      expect(claim.rows).toEqual([expect.objectContaining({ id: relay.rows[0].handoff_id, resolution: 'claimed' })]);
+      expect(claim.rows).toEqual([expect.objectContaining({ id: relay.rows[0].handoff_id, resolution: 'claimed', claim_token: expect.any(String) })]);
+      expect(reserved.rows).toEqual([{ reserved: true }]);
+      expect(state.rows).toEqual([{ state: 'sending', last_error: null }]);
+    } finally {
+      await deleteSessionForTest(client!, sessionId);
+    }
+  });
+
+  it('rejects a claimed human-contact relay when consent is revoked before reservation', async () => {
+    const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://relay-revocation.example.test', now() + interval '1 hour') returning id");
+    const sessionId = session.rows[0].id;
+    try {
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
+      const relay = await client!.query("select * from public.relay_human_message($1, 'human-contact-revoked', 'Please contact me')", [sessionId]);
+      const claim = await client!.query('select * from public.claim_next_handoff()');
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', false, '1.0')", [sessionId]);
+      const reserved = await client!.query('select public.reserve_handoff_send($1, $2) as reserved', [relay.rows[0].handoff_id, claim.rows[0].claim_token]);
+      const state = await client!.query(
+        'select state, last_error, claim_token, claim_expires_at from public.handoff_outbox where id = $1',
+        [relay.rows[0].handoff_id]
+      );
+
+      expect(claim.rows).toEqual([expect.objectContaining({ id: relay.rows[0].handoff_id, resolution: 'claimed', claim_token: expect.any(String) })]);
+      expect(reserved.rows).toEqual([{ reserved: false }]);
+      expect(state.rows).toEqual([{ state: 'failed', last_error: 'human_contact_revoked', claim_token: null, claim_expires_at: null }]);
     } finally {
       await deleteSessionForTest(client!, sessionId);
     }
