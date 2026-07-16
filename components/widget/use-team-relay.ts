@@ -27,15 +27,17 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const retryRef = useRef<{ text: string; requestId: string } | null>(null);
   const pendingSendGenerationRef = useRef<number | null>(null);
   const sessionIdRef = useRef(sessionId);
-  const identityRef = useRef({});
-  const identity = identityRef.current;
+  const [identity, setIdentity] = useState(0);
+  const identityRef = useRef(identity);
   const [pollingEnabled, setPollingEnabled] = useState(true);
 
   useEffect(() => {
     if (sessionIdRef.current === sessionId) return;
     sessionIdRef.current = sessionId;
     generationRef.current += 1;
-    identityRef.current = {};
+    const nextIdentity = identityRef.current + 1;
+    identityRef.current = nextIdentity;
+    setIdentity(nextIdentity);
     pollingRef.current = null;
     sinceIdRef.current = 0;
     retryRef.current = null;
@@ -138,7 +140,9 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const reset = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     generationRef.current += 1;
-    identityRef.current = {};
+    const nextIdentity = identityRef.current + 1;
+    identityRef.current = nextIdentity;
+    setIdentity(nextIdentity);
     pollingRef.current = null;
     sinceIdRef.current = 0;
     retryRef.current = null;

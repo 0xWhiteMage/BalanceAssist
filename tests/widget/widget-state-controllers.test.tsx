@@ -268,6 +268,51 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('idle');
   });
 
+  test('provides working current callbacks immediately after an idle reset', async () => {
+    const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
+    const poll = vi.fn(async () => ({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: relay
+    }));
+    const retainedSend = result.current.send;
+    const retainedPoll = result.current.poll;
+
+    act(() => result.current.reset());
+    await expect(retainedSend('Old message')).resolves.toBe('invalidated');
+    await retainedPoll();
+    let outcome: unknown;
+    await act(async () => { outcome = await result.current.send('Current message'); });
+    await act(async () => { await result.current.poll(); });
+
+    expect(outcome).toBe('persisted');
+    expect(relay).toHaveBeenCalledWith('session-1', 'Current message', expect.any(String));
+    expect(poll).toHaveBeenCalledWith('session-1', 0);
+    expect(result.current.status).toBe('delivered');
+  });
+
+  test('provides working current callbacks immediately after an idle session change', async () => {
+    const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
+    const poll = vi.fn(async () => ({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) => useTeamRelay({ sessionId, fetchTeamMessages: poll, relayUserMessage: relay }),
+      { initialProps: { sessionId: 'session-1' } }
+    );
+    const retainedSend = result.current.send;
+    const retainedPoll = result.current.poll;
+
+    rerender({ sessionId: 'session-2' });
+    await expect(retainedSend('Old message')).resolves.toBe('invalidated');
+    await retainedPoll();
+    let outcome: unknown;
+    await act(async () => { outcome = await result.current.send('Current message'); });
+    await act(async () => { await result.current.poll(); });
+
+    expect(outcome).toBe('persisted');
+    expect(relay).toHaveBeenCalledWith('session-2', 'Current message', expect.any(String));
+    expect(poll).toHaveBeenCalledWith('session-2', 0);
+    expect(result.current.status).toBe('delivered');
+  });
+
   test('reset invalidates pending send and poll without leaking state or sinceId', async () => {
     const pendingPoll = deferred<{
       outgoingStatus: 'delivered';
