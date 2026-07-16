@@ -9,7 +9,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    exclude: ['.worktrees/**', 'tests/e2e/**', 'node_modules/**']
+    exclude: ['.opencode-review-*/**', '.worktrees/**', 'tests/e2e/**', 'node_modules/**']
   },
   resolve: {
     alias: {
