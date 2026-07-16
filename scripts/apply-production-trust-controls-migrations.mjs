@@ -10,9 +10,9 @@ import { getIncrementalMigrations } from './apply-test-migrations.mjs';
 const trustControlsMigration = {
   version: '054',
   filename: '054_human_contact_consent.sql',
-  sha256: '01a877429484600d66682573a608d5b0ce70da31aa7bfdf09b31130b31d330a1'
+  sha256: '05878715cca807eeed3f90cb3049cc7b33f96835475cf87f8c568afa38dedafd'
 };
-const reviewedTrustControlsArtifactSha256 = '39dad19296a9fb9442a628c5cfc0d65fc7acd3884cd3ce9b4f3da6d25dda2cb2';
+const reviewedTrustControlsArtifactSha256 = 'a45d75808c2969cdef69cfb68d99b25155bc61d608e1780d62572cac7cecfe61';
 const advisoryLock = 90442054;
 
 export const trustControlsMigrationVersion = trustControlsMigration.version;

@@ -73,6 +73,13 @@ describe('DataUseNotice', () => {
     expect(CONSENT_VERSION).toBe('1.1');
   });
 
+  test('distinguishes AI session processing from team-contact relay delivery', () => {
+    render(<DataUseNotice onConsent={vi.fn()} />);
+
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI stays in this temporary session pending producer-transfer approval/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/team contact.*relay message.*Balance Assist team/i);
+  });
+
   test('links to the privacy page for more detail', () => {
     render(<DataUseNotice onConsent={() => {}} />);
     expect(screen.getByRole('link', { name: /privacy/i })).toHaveAttribute('href', DATA_USE_NOTICE_COPY.privacyLink);

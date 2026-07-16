@@ -4,6 +4,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { getSessionConsent } from '@/lib/privacy/session-consent';
 
 const lifecycleMigrationPath = resolve(process.cwd(), 'supabase/migrations/049_monday_crm_lifecycle.sql');
+const humanContactMigrationPath = resolve(process.cwd(), 'supabase/migrations/054_human_contact_consent.sql');
 const deletionRunbookPath = resolve(process.cwd(), 'docs/deletion-processing-runbook.md');
 
 describe('getSessionConsent', () => {
@@ -90,5 +91,18 @@ describe('Monday consent revocation migration', () => {
     expect(runbook).toMatch(/independent.*privacy.*reviewer/i);
     expect(runbook).toMatch(/opaque CRM ID.*restricted/i);
     expect(runbook).toMatch(/do not.*record.*PII/i);
+  });
+});
+
+describe('human contact consent migration', () => {
+  test('preserves producer-transfer CRM cleanup and authorizes relay outbox work separately', () => {
+    const migration = readFileSync(humanContactMigrationPath, 'utf8');
+
+    expect(migration).toMatch(/DECLARE lead_row public\.crm_leads%ROWTYPE/i);
+    expect(migration).toMatch(/p_scope = 'producer_transfer' AND NOT p_granted/i);
+    expect(migration).toMatch(/PERFORM public\.queue_crm_lead_deletion\(lead_row\.id, 'system:producer-transfer-revoked'\)/i);
+    expect(migration).toMatch(/CREATE OR REPLACE FUNCTION public\.claim_next_handoff\(\)/i);
+    expect(migration).toMatch(/CREATE OR REPLACE FUNCTION public\.reserve_handoff_send\(p_handoff_id uuid, p_claim_token uuid\)/i);
+    expect([...migration.matchAll(/CASE WHEN handoff\.payload->>'type' = 'relay' THEN 'human_contact' ELSE 'producer_transfer' END/gi)]).toHaveLength(2);
   });
 });
