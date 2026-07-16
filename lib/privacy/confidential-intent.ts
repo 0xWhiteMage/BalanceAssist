@@ -15,6 +15,10 @@ const NEGATED_PHRASES = [
   /\b(?:contains?|includes?|has|have) no personal data\b/g,
   /\b(?:does not|doesn't|do not|don't) contain personal data\b/g,
   /\b(?:is|are|was|were) not (?:highly )?sensitive\b/g,
+  /\b(?:is|are|was|were) (?:not|no longer) (?:under|covered by|subject to|bound by|protected by) (?:an? )?(?:nda|non disclosure agreement)\b/g,
+  /\b(?:this|that|it) (?:is|was) (?:not|no longer) (?:an? )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/g,
+  /\b(?:am|is|are|was|were) not (?:sharing|sending|uploading|providing|processing) (?:an? |the |our |my |client )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/g,
+  /\b(?:project|campaign|product|film|video|footage|media|assets?|creative|launch) (?:is|are|was|were) (?:not|no longer) (?:unreleased|pre release|unannounced)\b/g,
   /\b(?:has|have) already been released\b/g,
   /\b(?:is|are|was|were) already released\b/g
 ];
@@ -34,10 +38,11 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
   {
     category: 'confidential',
     patterns: [
-      /\b(?:contains?|includes?|uploading|sharing|sending|providing|process(?:ing)?) (?:strictly |highly )?confidential (?:client )?(?:information|data|documents?|materials?|content|details|brief|files?)\b/,
+      /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:strictly |highly )?confidential (?:client )?(?:information|data|documents?|materials?|content|details|brief|files?)\b/,
       /\b(?:this|that|it|these|those) (?:is|are) (?:strictly |highly )?confidential\b/,
-      /\b(?:the|our|my|client) (?:attached )?(?:project|brief|file|document|material|information|campaign|product)(?: details)? (?:is|are|contains?|includes?) (?:strictly |highly )?confidential(?: (?:information|data|documents?|materials?|content|details|brief|files?))?\b/,
-      /\b(?:confidential client|client confidential) (?:information|data|documents?|materials?|content|details|brief|files?)\b/
+      /\b(?:this|that|the|our|my|client|these|those) (?:attached )?(?:projects?|briefs?|files?|documents?|materials?|information|campaigns?|products?|content)(?: details)? (?:is|are|contains?|includes?) (?:strictly |highly )?confidential(?: (?:information|data|documents?|materials?|content|details|briefs?|files?))?\b/,
+      /\b(?:confidential client|client confidential) (?:information|data|documents?|materials?|content|details|briefs?|files?)\b/,
+      /^(?:[a-z0-9]+ )*confidential (?:client )?(?:briefs?|files?|documents?|materials?|information|data|content|details)(?: [a-z0-9]+)* (?:pdf|txt|csv|docx|xlsx|pptx|png|jpe?g|gif|webp|mov|mp4)$/
     ]
   },
   {
@@ -52,16 +57,18 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
   {
     category: 'personal-data',
     patterns: [
-      /\b(?:contains?|includes?|share|send|upload|provide|process(?:ing)?) (?:private )?(?:personal data|personally identifying information|identifying details|contact details|contact information)\b/,
-      /\b(?:this|that|the|our|my|client) (?:attached )?(?:brief|file|document|material)? ?(?:contains?|includes?|has) (?:private )?(?:personal data|personally identifying information|identifying details|contact details|contact information)\b/
+      /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:private )?(?:personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)\b/,
+      /\b(?:this|that|the|our|my|client) (?:attached )?(?:brief|file|document|material)? ?(?:contains?|includes?|has) (?:private )?(?:personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)\b/,
+      /^(?:[a-z0-9]+ )*(?:personal data|personally identifiable information|identifying details|contact details|contact information)(?: [a-z0-9]+)* (?:pdf|txt|csv|docx|xlsx|pptx|png|jpe?g|gif|webp)$/
     ]
   },
   {
     category: 'sensitive',
     patterns: [
-      /\b(?:contains?|includes?|share|send|upload(?:ing)?|provide|process(?:ing)?) (?:highly )?sensitive (?:client )?(?:information|data|documents?|materials?|content|details|files?)\b/,
+      /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:highly )?sensitive (?:client )?(?:information|data|documents?|materials?|content|details|files?)\b/,
       /\b(?:this|that|it|these|those) (?:is|are) (?:highly )?sensitive\b/,
-      /\b(?:the|our|my|client) (?:attached )?(?:brief|file|document|material|information|data)(?: details)? (?:is|are|contains?|includes?) (?:highly )?sensitive(?: (?:information|data|documents?|materials?|content|details|files?))?\b/
+      /\b(?:the|our|my|client) (?:attached )?(?:brief|file|document|material|information|data)(?: details)? (?:is|are|contains?|includes?) (?:highly )?sensitive(?: (?:information|data|documents?|materials?|content|details|files?))?\b/,
+      /^(?:[a-z0-9]+ )*(?:highly )?sensitive (?:client )?(?:information|data|documents?|materials?|content|details|files?)(?: [a-z0-9]+)* (?:pdf|txt|csv|docx|xlsx|pptx|png|jpe?g|gif|webp)$/
     ]
   }
 ];
@@ -70,6 +77,7 @@ function normalizeForClassification(value: string): string {
   return value
     .normalize('NFKC')
     .toLowerCase()
+    .replace(/\p{Cf}/gu, '')
     .replace(/[’‘`]/g, "'")
     .replace(/\bn\s*[.\-]?\s*d\s*[.\-]?\s*a\b/g, 'nda')
     .replace(/[‐‑‒–—−-]+/g, ' ')

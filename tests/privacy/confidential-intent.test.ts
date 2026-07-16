@@ -26,6 +26,44 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialIntent(input)).toBe(expected);
   });
 
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['This brief is confidential.', 'confidential'],
+    ['These files are confidential.', 'confidential'],
+    ['I need to upload confidential documents.', 'confidential'],
+    ['I am sharing an unreleased campaign.', 'unreleased'],
+    ['I need to send personal data.', 'personal-data'],
+    ['I am providing sensitive client information.', 'sensitive'],
+    ['This work is covered by an NDA.', 'nda']
+  ])('classifies common direct statement or action %j as %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
+  test.each<[string, 'personal-data']>([
+    ['This file contains personally identifiable information.', 'personal-data'],
+    ['I need to upload personally identifiable information.', 'personal-data']
+  ])('classifies personally identifiable information %j as %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['confidential-brief.pdf', 'confidential'],
+    ['nda-protected-material.docx', 'nda'],
+    ['unreleased-campaign.mov', 'unreleased'],
+    ['personal-data.csv', 'personal-data'],
+    ['sensitive-client-information.txt', 'sensitive']
+  ])('classifies realistic filename %j as %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['This brief is confiden\u200btial.', 'confidential'],
+    ['This file contains personal\u2060 data.', 'personal-data'],
+    ['This project is under N\u200b.\u2060D.A.', 'nda'],
+    ['I am sharing an unre\u2060leased campaign.', 'unreleased']
+  ])('removes Unicode format characters before classifying %j as %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
   test.each([
     'THIS PROJECT IS UNDER AN NDA',
     'This\tproject\nis under NDA.',
@@ -54,6 +92,28 @@ describe('classifyConfidentialIntent', () => {
     'Please contact me about the project.'
   ])('allows benign, negated, and substring near-matches: %j', (input) => {
     expect(classifyConfidentialIntent(input)).toBe('allow');
+  });
+
+  test.each([
+    'This project is not under NDA.',
+    'These files are no longer covered by an NDA.',
+    'This campaign is not unreleased.',
+    'The footage is not pre-release.',
+    'The project is no longer unannounced.',
+    'This is not an unreleased campaign.',
+    'This is no longer an unannounced project.',
+    'I am not sharing pre-release footage.'
+  ])('allows bounded NDA and unreleased negations: %j', (input) => {
+    expect(classifyConfidentialIntent(input)).toBe('allow');
+  });
+
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['This project is not under NDA, but the attached brief is confidential.', 'confidential'],
+    ['The campaign is no longer unreleased, but this file contains personal data.', 'personal-data'],
+    ['This footage is not pre-release, but I am sending sensitive client data.', 'sensitive'],
+    ['This contains no personal data, but it is an unreleased campaign.', 'unreleased']
+  ])('does not let a bounded negation hide a separate positive phrase: %j', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
   });
 
   test('does not let one negated phrase hide a separate positive phrase', () => {
