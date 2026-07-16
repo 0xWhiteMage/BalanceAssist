@@ -66,4 +66,11 @@ describe('production cleanup migration workflow', () => {
       'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020'
     ]);
   });
+
+  it('documents the managed Supabase token for cleanup without assigning a direct database URL', async () => {
+    const readme = await readFile(resolve(process.cwd(), 'README.md'), 'utf8');
+
+    expect(readme).toContain('| `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations` and `production-cleanup-migrations` environments only; runs reviewed SQL through the Supabase Management API |');
+    expect(readme).not.toContain('| `PRODUCTION_DATABASE_URL` | `production-migrations` and `production-cleanup-migrations`');
+  });
 });

@@ -82,8 +82,8 @@ In **Settings → Secrets and variables → Actions** add:
 | `TELEGRAM_BOT_TOKEN` | Same as in Vercel env |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `production` environment only; immutable Vercel deploy and alias promotion |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `production` environment only; bounded schema/service-role readiness probes |
-| `PRODUCTION_DATABASE_URL` | `production-migrations` and `production-cleanup-migrations` environments only; never repository configuration |
-| `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations` environment only; runs the reviewed CRM SQL through the Supabase Management API |
+| `PRODUCTION_DATABASE_URL` | `production-migrations` environment only; never repository configuration |
+| `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations` and `production-cleanup-migrations` environments only; runs reviewed SQL through the Supabase Management API |
 | `PRODUCTION_BACKUP_AUDIT_REFERENCE` | `production-cleanup-migrations` environment only; protected backup/audit record bound to the cleanup release SHA |
 
 Set the protected `production` environment variable `VERCEL_GIT_DEPLOYMENTS_DISABLED_AT` to a UTC ISO-8601 dashboard-audit timestamp (for example, `2026-07-14T12:00:00Z`). The release gate rejects absent, malformed, future, or more-than-90-day-old attestations. Recheck the Vercel setting before each release and quarterly; a failed gate or a Vercel Git deployment outside a release is an alert requiring the setting to be disabled and the release/audit history to be reviewed.
