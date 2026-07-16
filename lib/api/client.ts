@@ -183,6 +183,7 @@ export type TeamMessage = {
 };
 
 export type TeamPollState = {
+  outgoingStatus: 'queued' | 'delivered' | null;
   messages: TeamMessage[];
   fileRequestOpen: boolean;
   fileRequestNote: string | null;
@@ -204,11 +205,11 @@ export async function relayUserMessage(sessionId: string, text: string, requestI
       keepalive: true
     });
     if (!response.ok) return { persisted: false, queued: false, delivered: false };
-    const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean; telegramSent?: boolean };
+    const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean };
     return {
       persisted: data.ok === true && data.persisted === true,
       queued: data.queued === true,
-      delivered: data.telegramSent === true
+      delivered: false
     };
   } catch {
     return { persisted: false, queued: false, delivered: false };
@@ -230,18 +231,22 @@ export async function fetchTeamMessages(
     });
 
     if (!response.ok) {
-      return { messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false };
+      throw new Error('relay_status_unavailable');
     }
 
     const data = (await response.json()) as TeamPollState;
+    if (data.outgoingStatus !== 'queued' && data.outgoingStatus !== 'delivered' && data.outgoingStatus !== null) {
+      throw new Error('relay_status_unavailable');
+    }
     return {
+      outgoingStatus: data.outgoingStatus,
       messages: data.messages ?? [],
       fileRequestOpen: Boolean(data.fileRequestOpen),
       fileRequestNote: data.fileRequestNote ?? null,
       scheduleRequestOpen: Boolean(data.scheduleRequestOpen)
     };
   } catch {
-    return { messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false };
+    throw new Error('relay_status_unavailable');
   }
 }
 

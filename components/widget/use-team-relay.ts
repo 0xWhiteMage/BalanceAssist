@@ -32,6 +32,12 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
       setFileRequestOpen(next.fileRequestOpen);
       setFileRequestNote(next.fileRequestNote);
       setScheduleRequestOpen(next.scheduleRequestOpen);
+      setStatus((current) => {
+        if (current === 'replied') return current;
+        if (next.outgoingStatus === 'delivered') return 'delivered';
+        if (next.outgoingStatus === 'queued' && current !== 'delivered') return 'queued';
+        return current;
+      });
       if (next.messages.length > 0) {
         sinceIdRef.current = Math.max(sinceIdRef.current, ...next.messages.map((message) => message.id));
         setMessages((existing) => {
@@ -85,7 +91,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     const sent = typeof result === 'boolean' ? result : result.persisted;
     if (sent) {
       retryRef.current = null;
-      setStatus(typeof result === 'boolean' || result.queued ? (typeof result !== 'boolean' && result.delivered ? 'delivered' : 'queued') : 'saved');
+      setStatus(typeof result === 'boolean' || result.queued ? 'queued' : 'saved');
     }
     else {
       setWaitingForReply(false);

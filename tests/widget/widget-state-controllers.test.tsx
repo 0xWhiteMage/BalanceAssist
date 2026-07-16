@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
+import { fetchTeamMessages, relayUserMessage } from '@/lib/api/client';
 import type { ConsentRecord } from '@/lib/privacy/notice';
 
 const consent: ConsentRecord = {
@@ -98,26 +99,89 @@ describe('useWidgetSessionDraft', () => {
 });
 
 describe('useTeamRelay', () => {
-  test('keeps saved, queued, delivered, and replied relay states distinct', async () => {
-    const relay = vi.fn()
-      .mockResolvedValueOnce({ persisted: true, queued: false, delivered: false })
-      .mockResolvedValueOnce({ persisted: true, queued: true, delivered: false })
-      .mockResolvedValueOnce({ persisted: true, queued: true, delivered: true });
-    const poll = vi.fn(async () => ({ messages: [{ id: 1, sender: 'team' as const, text: 'Reply', createdAt: '2026-07-16T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+  test('promotes queued to delivered only from polling and then to replied', async () => {
+    const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
+    const poll = vi.fn()
+      .mockResolvedValueOnce({ outgoingStatus: 'queued', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: 'delivered', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: 'delivered', messages: [{ id: 1, sender: 'team' as const, text: 'Reply', createdAt: '2026-07-16T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
     const { result } = renderHook(() => useTeamRelay({
       sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: relay
     }));
     act(() => result.current.requestHandoff());
 
-    await act(async () => { await result.current.send('Saved only'); });
-    expect(result.current.status).toBe('saved');
-    await act(async () => { await result.current.send('Queued'); });
+    await act(async () => { await result.current.send('Hello'); });
     expect(result.current.status).toBe('queued');
-    await act(async () => { await result.current.send('Delivered'); });
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('queued');
+    await act(async () => { await result.current.poll(); });
     expect(result.current.status).toBe('delivered');
-    await act(async () => {
-      await result.current.poll();
-    });
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('replied');
+  });
+
+  test('preserves queued after a rejected poll and retries on the next timer tick', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn()
+      .mockRejectedValueOnce(new Error('relay_status_unavailable'))
+      .mockResolvedValueOnce({ outgoingStatus: 'queued', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+    const { result, unmount } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1',
+      fetchTeamMessages: poll,
+      relayUserMessage: vi.fn(async () => ({ persisted: true, queued: true, delivered: false }))
+    }));
+    act(() => result.current.requestHandoff());
+    await act(async () => { await result.current.send('Hello'); });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.status).toBe('queued');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    expect(poll).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe('queued');
+    unmount();
+    vi.useRealTimers();
+  });
+
+  test('does not demote delivered when a later poll is queued', async () => {
+    const poll = vi.fn()
+      .mockResolvedValueOnce({ outgoingStatus: 'delivered', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: 'queued', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn()
+    }));
+
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('delivered');
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('delivered');
+  });
+
+  test('does not fabricate delivery from an inconclusive successful poll', async () => {
+    const poll = vi.fn(async () => ({ outgoingStatus: null, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1',
+      fetchTeamMessages: poll,
+      relayUserMessage: vi.fn(async () => ({ persisted: true, queued: true, delivered: false }))
+    }));
+    act(() => result.current.requestHandoff());
+    await act(async () => { await result.current.send('Hello'); });
+    await act(async () => { await result.current.poll(); });
+
+    expect(result.current.status).toBe('queued');
+  });
+
+  test('keeps replied after later outgoing delivery evidence', async () => {
+    const poll = vi.fn()
+      .mockResolvedValueOnce({ outgoingStatus: 'queued', messages: [{ id: 1, sender: 'team' as const, text: 'Reply', createdAt: '2026-07-16T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: 'delivered', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn()
+    }));
+
+    await act(async () => { await result.current.poll(); });
+    expect(result.current.status).toBe('replied');
+    await act(async () => { await result.current.poll(); });
     expect(result.current.status).toBe('replied');
   });
 
@@ -138,7 +202,7 @@ describe('useTeamRelay', () => {
 
   test('stops controller polling when closed', async () => {
     vi.useFakeTimers();
-    const poll = vi.fn(async () => ({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const poll = vi.fn(async () => ({ outgoingStatus: null, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
     const { result } = renderHook(() => useTeamRelay({ sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn() }));
     act(() => result.current.requestHandoff());
     act(() => result.current.stop());
@@ -150,7 +214,7 @@ describe('useTeamRelay', () => {
 
   test('preserves an active relay when temporarily stopped and resumes polling when reopened', async () => {
     vi.useFakeTimers();
-    const poll = vi.fn(async () => ({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const poll = vi.fn(async () => ({ outgoingStatus: null, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
     const { result } = renderHook(() => useTeamRelay({ sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn() }));
     act(() => result.current.requestHandoff());
     act(() => result.current.stop());
@@ -165,8 +229,8 @@ describe('useTeamRelay', () => {
   test('continues polling after an empty response and marks connected only after a team reply', async () => {
     vi.useFakeTimers();
     const poll = vi.fn()
-      .mockResolvedValueOnce({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
-      .mockResolvedValueOnce({ messages: [{ id: 3, sender: 'team' as const, text: 'We can help', createdAt: '2026-07-14T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
+      .mockResolvedValueOnce({ outgoingStatus: null, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
+      .mockResolvedValueOnce({ outgoingStatus: null, messages: [{ id: 3, sender: 'team' as const, text: 'We can help', createdAt: '2026-07-14T10:00:00.000Z' }], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false });
     const { result, unmount } = renderHook(() => useTeamRelay({
       sessionId: 'session-1',
       fetchTeamMessages: poll,
@@ -185,5 +249,56 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('replied');
     unmount();
     vi.useRealTimers();
+  });
+});
+
+describe('relay API client', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('never reports delivered from the relay POST response', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      persisted: true,
+      queued: true,
+      telegramSent: true
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(relayUserMessage('session-1', 'Hello', 'request-1')).resolves.toEqual({
+      persisted: true,
+      queued: true,
+      delivered: false
+    });
+  });
+
+  test('returns only a valid outgoing poll status', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      outgoingStatus: 'queued',
+      messages: [],
+      fileRequestOpen: false,
+      fileRequestNote: null,
+      scheduleRequestOpen: false
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(fetchTeamMessages('session-1')).resolves.toEqual({
+      outgoingStatus: 'queued',
+      messages: [],
+      fileRequestOpen: false,
+      fileRequestNote: null,
+      scheduleRequestOpen: false
+    });
+  });
+
+  test.each([
+    ['an HTTP failure', async () => new Response('{}', { status: 503 })],
+    ['a network failure', async () => { throw new TypeError('offline'); }],
+    ['an invalid status', async () => new Response(JSON.stringify({ outgoingStatus: 'sent', messages: [] }), { status: 200 })]
+  ])('throws the stable unavailable error for %s', async (_case, fetchResult) => {
+    global.fetch = vi.fn(fetchResult);
+
+    await expect(fetchTeamMessages('session-1')).rejects.toThrowError('relay_status_unavailable');
   });
 });
