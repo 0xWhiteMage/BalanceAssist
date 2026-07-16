@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import type { ConsentRecord } from '@/lib/privacy/notice';
@@ -9,6 +9,9 @@ import type { ProjectDraftResponse, SessionResponse } from '@/lib/api/client';
 
 type DraftUpdate = { field: string; value: string; provenance: 'user-stated' | 'inferred' | 'confirmed' | 'cleared' };
 type DraftUpdateResult = ({ ok: true } & ProjectDraftResponse) | ({ ok: false; conflict: true } & ProjectDraftResponse) | { ok: false; conflict: false };
+type BootstrapValidity = () => boolean;
+
+const alwaysValid: BootstrapValidity = () => true;
 
 type Dependencies = {
   createSession: (payload: { sourceUrl: string; referrer?: string; consentVersion?: string; consentedAt?: string }) => Promise<SessionResponse | null>;
@@ -40,9 +43,17 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const expiresAtRef = useRef<string | null>(null);
   const draftVersionRef = useRef(0);
   const bootstrapRef = useRef<Promise<string | null> | null>(null);
+  const bootstrapGenerationRef = useRef(0);
   const approveInFlightRef = useRef(false);
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
+
+  const invalidateBootstrap = useCallback(() => {
+    bootstrapGenerationRef.current += 1;
+    bootstrapRef.current = null;
+  }, []);
+
+  useEffect(() => invalidateBootstrap, [invalidateBootstrap]);
 
   const applyCanonicalDraft = useCallback((values: Record<string, string>, version: number, canonical?: ProjectDraftResponse) => {
     const nextDraft = { ...createDefaultLeadDraft(), ...values } as LeadDraft;
@@ -68,23 +79,29 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     }
   }, []);
 
-  const setActiveSession = useCallback((session: SessionResponse) => {
+  const setActiveSession = useCallback((session: SessionResponse, isValid: BootstrapValidity = alwaysValid) => {
+    if (!isValid()) return false;
     sessionIdRef.current = session.sessionId;
     expiresAtRef.current = session.expiresAt ?? null;
     setSessionId(session.sessionId);
     setExpiresAt(session.expiresAt ?? null);
     setSessionUnavailable(false);
+    return true;
   }, []);
 
-  const hydrateDraft = useCallback(async (id: string) => {
+  const hydrateDraft = useCallback(async (id: string, isValid: BootstrapValidity = alwaysValid) => {
     const canonical = await dependencies.fetchProjectDraft(id);
+    if (!isValid()) return;
     if (canonical && (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0)) {
       setReferenceLinks(canonical.referenceLinks ?? []);
       applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
     }
   }, [applyCanonicalDraft, dependencies]);
 
-  const ensureSession = useCallback(async () => {
+  const ensureSession = useCallback(async (isValid: BootstrapValidity = alwaysValid) => {
+    const generation = bootstrapGenerationRef.current;
+    const operationIsValid = () => isValid() && generation === bootstrapGenerationRef.current;
+    if (!operationIsValid()) return null;
     if (sessionIdRef.current && !isExpired(expiresAtRef.current)) return sessionIdRef.current;
     if (sessionIdRef.current) {
       sessionIdRef.current = null;
@@ -99,31 +116,36 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
       consentVersion: noticeConsent.consentVersion,
       consentedAt: noticeConsent.consentedAt
     });
+    if (!operationIsValid()) return null;
     if (!session?.sessionId || session.persisted !== true) {
       setSessionUnavailable(true);
       return null;
     }
-    setActiveSession(session);
+    if (!setActiveSession(session, operationIsValid)) return null;
     return session.sessionId;
   }, [dependencies, noticeConsent, setActiveSession]);
 
-  const loadOrCreateSession = useCallback(() => {
+  const loadOrCreateSession = useCallback((isValid: BootstrapValidity = alwaysValid) => {
+    const generation = bootstrapGenerationRef.current;
+    const operationIsValid = () => isValid() && generation === bootstrapGenerationRef.current;
+    if (!operationIsValid()) return Promise.resolve(null);
     if (sessionIdRef.current && !isExpired(expiresAtRef.current)) return Promise.resolve(sessionIdRef.current);
     if (!noticeConsent || typeof window === 'undefined') return Promise.resolve(null);
-    if (bootstrapRef.current) return bootstrapRef.current;
-    const bootstrap = (async () => {
-      try {
-        const current = await dependencies.getCurrentSession();
-        if (current?.sessionId && !isExpired(current.expiresAt)) {
-          setActiveSession(current);
-          await hydrateDraft(current.sessionId);
-          return current.sessionId;
-        }
-        return await ensureSession();
-      } finally {
-        bootstrapRef.current = null;
+    const runBootstrap = async () => {
+      const current = await dependencies.getCurrentSession();
+      if (!operationIsValid()) return null;
+      if (current?.sessionId && !isExpired(current.expiresAt)) {
+        if (!setActiveSession(current, operationIsValid)) return null;
+        await hydrateDraft(current.sessionId, operationIsValid);
+        return operationIsValid() ? current.sessionId : null;
       }
-    })();
+      return ensureSession(operationIsValid);
+    };
+    if (isValid !== alwaysValid) return runBootstrap();
+    if (bootstrapRef.current) return bootstrapRef.current;
+    const bootstrap = runBootstrap().finally(() => {
+      if (bootstrapRef.current === bootstrap) bootstrapRef.current = null;
+    });
     bootstrapRef.current = bootstrap;
     return bootstrap;
   }, [dependencies, ensureSession, hydrateDraft, noticeConsent, setActiveSession]);
@@ -180,6 +202,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }, []);
 
   const reset = useCallback(() => {
+    invalidateBootstrap();
     sessionIdRef.current = null;
     expiresAtRef.current = null;
     draftVersionRef.current = 0;
@@ -192,11 +215,11 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     setBriefApproved(false);
     setReferenceLinks([]);
     setApproval({});
-  }, []);
+  }, [invalidateBootstrap]);
 
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, draftVersion,
-    hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession,
+    hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession, invalidateBootstrap,
     applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),

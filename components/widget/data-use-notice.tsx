@@ -4,11 +4,18 @@ import { useState } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
 import { DATA_USE_NOTICE_COPY, CONSENT_VERSION, type ConsentRecord } from '@/lib/privacy/notice';
 
-export function DataUseNotice({ onConsent }: { onConsent: (record: ConsentRecord) => void }) {
-  const [agreed, setAgreed] = useState(false);
+export function DataUseNotice({
+  onConsent,
+  onHuman,
+  onLeave
+}: {
+  onConsent: (record: ConsentRecord) => void;
+  onHuman: () => void;
+  onLeave: () => void;
+}) {
+  const [showAiDisclosure, setShowAiDisclosure] = useState(false);
 
   function handleAcknowledge() {
-    setAgreed(true);
     onConsent({
       consentedAt: new Date().toISOString(),
       consentVersion: CONSENT_VERSION
@@ -59,26 +66,40 @@ export function DataUseNotice({ onConsent }: { onConsent: (record: ConsentRecord
       >
         {DATA_USE_NOTICE_COPY.privacyLinkLabel}
       </a>
-      {!agreed && (
-        <button
-          type="button"
-          data-testid="consent-button"
-          onClick={handleAcknowledge}
-          style={{
-            padding: '8px 16px',
-            borderRadius: '20px',
-            border: 'none',
-            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-            color: '#101010',
-            fontSize: '12px',
-            fontWeight: 600,
-            fontFamily: brandTokens.typography.ui,
-            cursor: 'pointer'
-          }}
-        >
-          {DATA_USE_NOTICE_COPY.acknowledgeButton}
-        </button>
+      {showAiDisclosure ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.lightText }}>
+            {DATA_USE_NOTICE_COPY.aiDisclosure}
+          </p>
+          <button type="button" className="balance-entry-action" onClick={handleAcknowledge} style={entryActionStyle}>
+            Continue with AI
+          </button>
+          <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>
+            Talk to the team without AI
+          </button>
+          <button type="button" className="balance-entry-action" onClick={onLeave} style={entryActionStyle}>Leave</button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <button type="button" className="balance-entry-action" onClick={() => setShowAiDisclosure(true)} style={entryActionStyle}>Build a brief with AI</button>
+          <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>Talk to the team without AI</button>
+          <button type="button" className="balance-entry-action" onClick={onLeave} style={entryActionStyle}>Leave</button>
+        </div>
       )}
     </div>
   );
 }
+
+const entryActionStyle = {
+  width: '100%',
+  minHeight: '44px',
+  padding: '10px 16px',
+  borderRadius: '20px',
+  border: `1px solid ${brandTokens.colors.warmGold}`,
+  background: 'transparent',
+  color: brandTokens.colors.lightText,
+  fontSize: '12px',
+  fontWeight: 600,
+  fontFamily: brandTokens.typography.ui,
+  cursor: 'pointer'
+};

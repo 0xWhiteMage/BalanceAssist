@@ -9,15 +9,164 @@ test('widget landing shows human escalation', async ({ page }) => {
 test('direct human contact keeps a usable pending request input without claiming a team connection', async ({ page }) => {
   await page.route('**/api/sessions/inspect', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ exists: false }) }));
   await page.route('**/api/sessions', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessionId: 'human-request-session', persisted: true }) }));
-  await page.route('**/api/projects/human-request-session/consent', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, consent: { producerTransfer: true } }) }));
+  await page.route('**/api/projects/human-request-session/consent', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, consent: { humanContact: true, producerTransfer: false } }) }));
   await page.goto('/preview');
 
-  await page.getByTestId('consent-button').click();
-  await page.getByRole('button', { name: 'Talk to a human', exact: true }).click();
+  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
 
   await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
   await expect(page.getByRole('status')).toContainText('Team contact requested');
   await expect(page.getByText('Team connected', { exact: true })).toHaveCount(0);
+});
+
+test('human recovery persists on mobile when session creation fails', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(new URL(request.url()).pathname));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/api/sessions/inspect', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, exists: false })
+  }));
+  await page.route('**/api/sessions', (route) => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: false, code: 'session_unavailable' })
+  }));
+  await page.goto('/preview');
+
+  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
+
+  const notice = page.getByText('The private relay could not start. You can still contact the team directly.');
+  const email = page.getByRole('link', { name: 'Email the team', exact: true });
+  const booking = page.getByRole('link', { name: 'Book a call', exact: true });
+  await expect(notice).toBeVisible();
+  await expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+  await expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
+  await expect(page.getByPlaceholder(/message the team request|type a message/i)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Build a brief with AI' })).toHaveCount(0);
+
+  await email.focus();
+  await expect(email).toBeFocused();
+  await email.evaluate((link) => link.addEventListener('click', (event) => event.preventDefault(), { once: true }));
+  await email.click();
+  await booking.evaluate((link) => link.addEventListener('click', (event) => event.preventDefault(), { once: true }));
+  await booking.click();
+  await page.waitForTimeout(1_000);
+
+  await expect(notice).toBeVisible();
+  await expect(email).toBeVisible();
+  await expect(booking).toBeVisible();
+  expect(requests.filter((pathname) => pathname === '/api/sessions')).toHaveLength(1);
+  expect(requests.some((pathname) => ['/api/chat', '/api/telegram/relay', '/api/telegram/messages'].includes(pathname))).toBe(false);
+});
+
+test('equal entry actions have mobile bounds, visible keyboard focus, and keyboard activation', async ({ page }) => {
+  await page.route('**/api/sessions/inspect', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, exists: false })
+  }));
+  await page.route('**/api/sessions', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ sessionId: 'entry-action-session', persisted: true })
+  }));
+  await page.route('**/api/projects/entry-action-session/consent', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, consent: { humanContact: true, producerTransfer: false } })
+  }));
+  await page.goto('/preview');
+
+  const initialNames = ['Build a brief with AI', 'Talk to the team without AI', 'Leave'];
+  const disclosedNames = ['Continue with AI', 'Talk to the team without AI', 'Leave'];
+  const actions = page.locator('[data-testid="data-use-notice"] .balance-entry-action');
+  const panelBackgrounds = ['#101010', '#1d1d1d'];
+
+  function contrastRatio(foreground: string, background: string) {
+    function channels(color: string) {
+      if (color.startsWith('#')) {
+        return color.match(/[a-f\d]{2}/gi)?.map((value) => Number.parseInt(value, 16)) ?? [];
+      }
+      return color.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [];
+    }
+
+    function luminance(color: string) {
+      const [red, green, blue] = channels(color).map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    }
+
+    const foregroundLuminance = luminance(foreground);
+    const backgroundLuminance = luminance(background);
+    return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+      (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+  }
+
+  async function expectActionOrderSizeAndFocus(names: string[]) {
+    await expect(actions).toHaveText(names);
+    await page.getByRole('link', { name: /privacy/i }).focus();
+
+    for (const name of names) {
+      const action = page.getByRole('button', { name, exact: true });
+      const bounds = await action.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.width).toBeGreaterThanOrEqual(44);
+      expect(bounds!.height).toBeGreaterThanOrEqual(44);
+
+      await page.keyboard.press('Tab');
+      await expect(action).toBeFocused();
+      const focusStyle = await action.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number.parseFloat(style.outlineWidth),
+          outlineOffset: Number.parseFloat(style.outlineOffset),
+          outlineColor: style.outlineColor
+        };
+      });
+      expect(focusStyle.outlineStyle).not.toBe('none');
+      expect(focusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
+      expect(focusStyle.outlineOffset).toBeGreaterThanOrEqual(2);
+      expect(focusStyle.outlineColor).toBe('rgb(219, 181, 128)');
+      for (const background of panelBackgrounds) {
+        expect(contrastRatio(focusStyle.outlineColor, background)).toBeGreaterThanOrEqual(3);
+      }
+    }
+  }
+
+  async function reloadEntry() {
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Build a brief with AI', exact: true })).toBeVisible();
+  }
+
+  await expectActionOrderSizeAndFocus(initialNames);
+  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Space');
+  await expectActionOrderSizeAndFocus(disclosedNames);
+
+  await page.getByRole('button', { name: 'Continue with AI', exact: true }).press('Enter');
+  await expect(page.getByRole('button', { name: 'Attach references' })).toBeVisible();
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Enter');
+  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Enter');
+  await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Space');
+  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Leave', exact: true }).press('Space');
+  await expect(page.getByRole('dialog', { name: 'Balance Assist' })).toHaveCount(0);
+
+  await reloadEntry();
+  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Space');
+  await page.getByRole('button', { name: 'Leave', exact: true }).press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Balance Assist' })).toHaveCount(0);
 });
 
 test('restores focus after closing its nested reference dialog without force clicks', async ({ page }) => {
@@ -29,8 +178,8 @@ test('restores focus after closing its nested reference dialog without force cli
   });
   await page.goto('/preview');
 
-  await page.getByTestId('consent-button').click();
-  await page.getByRole('button', { name: /start with balance assist/i }).click();
+  await page.getByRole('button', { name: 'Build a brief with AI' }).click();
+  await page.getByRole('button', { name: 'Continue with AI' }).click();
   const attachment = page.getByRole('button', { name: 'Attach references' });
   await attachment.focus();
   await attachment.press('Enter');
@@ -64,8 +213,8 @@ test('stores an available private upload through the keyboard path', async ({ pa
   });
   await page.goto('/preview');
 
-  await page.getByTestId('consent-button').click();
-  await page.getByRole('button', { name: /start with balance assist/i }).click();
+  await page.getByRole('button', { name: 'Build a brief with AI' }).click();
+  await page.getByRole('button', { name: 'Continue with AI' }).click();
   const attachment = page.getByRole('button', { name: 'Attach references' });
   await attachment.focus();
   await attachment.press('Enter');

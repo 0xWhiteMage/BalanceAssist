@@ -30,14 +30,23 @@ describe('production migration policy', () => {
       .toThrow('053 is pending; run Production CRM migrations before this release');
   });
 
-  it('does not select reviewed CRM migrations for the ordinary runner', () => {
+  it('requires the reviewed trust-controls migration before ordinary production releases', () => {
+    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053', '054'];
+
+    expect(productionMigrations.assertReviewedTrustControlsMigrationRecorded).toBeTypeOf('function');
+    expect(() => productionMigrations.assertReviewedTrustControlsMigrationRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedTrustControlsMigrationRecorded(recordedVersions.filter((version) => version !== '054')))
+      .toThrow('054 is pending; run Production trust controls migrations before this release');
+  });
+
+  it('does not select reviewed CRM or trust-controls migrations for the ordinary runner', () => {
     expect(productionMigrations.selectOrdinaryProductionMigrations([
       { version: '043', filename: '043_deletion_state_batched_cleanup.sql', path: '/tmp/043' },
       { version: '044', filename: '044_monday_crm_projection_tables.sql', path: '/tmp/044' },
       { version: '047', filename: '047_atomic_crm_approval.sql', path: '/tmp/047' },
       { version: '053', filename: '053_monday_reconciliation.sql', path: '/tmp/053' },
       { version: '054', filename: '054_additive.sql', path: '/tmp/054' }
-    ]).map(({ version }) => version)).toEqual(['043', '054']);
+    ]).map(({ version }) => version)).toEqual(['043']);
   });
 
   it('queries the migration tracker before evaluating production migration files', async () => {

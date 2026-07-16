@@ -266,7 +266,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                '048_monday_sync_state_machine.sql',
                 '049_monday_crm_lifecycle.sql',
                 '052_monday_scheduler_health.sql',
-                '053_monday_reconciliation.sql'
+                '053_monday_reconciliation.sql',
+                '054_human_contact_consent.sql'
     ]);
   });
 
@@ -1279,8 +1280,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         [sessionId]
       );
 
-      expect(granted.rows).toEqual([{ analysis: true, producer_transfer: false }]);
-      expect(revoked.rows).toEqual([{ analysis: false, producer_transfer: false }]);
+      expect(granted.rows).toEqual([{ analysis: true, human_contact: false, producer_transfer: false }]);
+      expect(revoked.rows).toEqual([{ analysis: false, human_contact: false, producer_transfer: false }]);
       await expect(client!.query('update public.session_consents set granted = true where id = $1', [ledger.rows[0].id])).rejects.toThrow('append-only');
       await expect(client!.query('delete from public.session_consents where id = $1', [ledger.rows[0].id])).rejects.toThrow('append-only');
     } finally {
@@ -1484,7 +1485,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
   it('persists relay messages and their outbox rows atomically by request identity, not text', async () => {
     const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://atomic-relay.example.test', now() + interval '1 hour') returning id");
     const sessionId = session.rows[0].id;
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
     const { Client } = await import('pg');
     const retryClient = new Client({ connectionString: grantConnectionString });
     await retryClient.connect();
@@ -1507,6 +1508,67 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       expect(persisted.rows).toEqual([{ messages: '2', handoffs: '2' }]);
     } finally {
       await retryClient.end();
+      await deleteSessionForTest(client!, sessionId);
+    }
+  });
+
+  it('claims and reserves a human-contact relay without producer-transfer consent', async () => {
+    const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://relay-consent.example.test', now() + interval '1 hour') returning id");
+    const sessionId = session.rows[0].id;
+    try {
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
+      const relay = await client!.query("select * from public.relay_human_message($1, 'human-contact-only', 'Please contact me')", [sessionId]);
+      const claim = await client!.query('select * from public.claim_next_handoff()');
+      const reserved = await client!.query('select public.reserve_handoff_send($1, $2) as reserved', [relay.rows[0].handoff_id, claim.rows[0].claim_token]);
+      const state = await client!.query('select state, last_error from public.handoff_outbox where id = $1', [relay.rows[0].handoff_id]);
+
+      expect(relay.rows[0]).toMatchObject({ persisted: true, consent_required: false });
+      expect(claim.rows).toEqual([expect.objectContaining({ id: relay.rows[0].handoff_id, resolution: 'claimed', claim_token: expect.any(String) })]);
+      expect(reserved.rows).toEqual([{ reserved: true }]);
+      expect(state.rows).toEqual([{ state: 'sending', last_error: null }]);
+    } finally {
+      await deleteSessionForTest(client!, sessionId);
+    }
+  });
+
+  it('rejects a claimed human-contact relay when consent is revoked before reservation', async () => {
+    const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://relay-revocation.example.test', now() + interval '1 hour') returning id");
+    const sessionId = session.rows[0].id;
+    try {
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
+      const relay = await client!.query("select * from public.relay_human_message($1, 'human-contact-revoked', 'Please contact me')", [sessionId]);
+      const claim = await client!.query('select * from public.claim_next_handoff()');
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', false, '1.0')", [sessionId]);
+      const reserved = await client!.query('select public.reserve_handoff_send($1, $2) as reserved', [relay.rows[0].handoff_id, claim.rows[0].claim_token]);
+      const state = await client!.query(
+        'select state, last_error, claim_token, claim_expires_at from public.handoff_outbox where id = $1',
+        [relay.rows[0].handoff_id]
+      );
+
+      expect(claim.rows).toEqual([expect.objectContaining({ id: relay.rows[0].handoff_id, resolution: 'claimed', claim_token: expect.any(String) })]);
+      expect(reserved.rows).toEqual([{ reserved: false }]);
+      expect(state.rows).toEqual([{ state: 'failed', last_error: 'human_contact_revoked', claim_token: null, claim_expires_at: null }]);
+    } finally {
+      await deleteSessionForTest(client!, sessionId);
+    }
+  });
+
+  it('queues CRM deletion when producer-transfer consent is revoked', async () => {
+    const session = await client!.query("insert into public.sessions (source_url) values ('https://crm-revocation.example.test') returning id");
+    const sessionId = session.rows[0].id;
+    const crmLead = await client!.query("insert into public.crm_leads (source_session_id, desired_revision, review_due_at) values ($1, 1, now() + interval '1 day') returning id", [sessionId]);
+    const crmLeadId = crmLead.rows[0].id;
+    try {
+      await client!.query("select * from public.record_session_consent($1, 'producer_transfer', true, '1.1')", [sessionId]);
+      await client!.query("select * from public.record_session_consent($1, 'producer_transfer', false, '1.1')", [sessionId]);
+      const lead = await client!.query('select lifecycle_state from public.crm_leads where id = $1', [crmLeadId]);
+      const deletion = await client!.query("select operation, state from public.monday_sync_outbox where crm_lead_id = $1 and operation = 'delete'", [crmLeadId]);
+
+      expect(lead.rows).toEqual([{ lifecycle_state: 'deletion_requested' }]);
+      expect(deletion.rows).toEqual([{ operation: 'delete', state: 'pending' }]);
+    } finally {
+      await client!.query('delete from public.monday_sync_outbox where crm_lead_id = $1', [crmLeadId]);
+      await client!.query('delete from public.crm_leads where id = $1', [crmLeadId]);
       await deleteSessionForTest(client!, sessionId);
     }
   });

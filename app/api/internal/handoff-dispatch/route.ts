@@ -7,8 +7,7 @@ import { ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
 import { getMaxRetries, type HandoffSLA } from '@/lib/handoff/sla';
 import { validateAdminRequestAny } from '@/lib/security/config';
 import { getSessionConsent } from '@/lib/privacy/session-consent';
-
-export const HANDOFF_DISPATCH_BATCH_SIZE = 2;
+import { HANDOFF_DISPATCH_BATCH_SIZE } from '@/lib/handoff/dispatch-budget';
 
 export async function POST(request: Request) {
   const requestId = extractRequestId(request);

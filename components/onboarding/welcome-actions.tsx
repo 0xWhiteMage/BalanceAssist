@@ -13,8 +13,8 @@ export type WelcomeAction = {
 export const defaultWelcomeActions: WelcomeAction[] = [
   {
     id: 'project-brief',
-    title: brandTokens.copy.primaryCta,
-    description: 'Answer a few guided questions.'
+    title: 'Build a brief with AI',
+    description: 'Create a non-confidential, high-level project brief.'
   },
   {
     id: 'services',
@@ -28,8 +28,8 @@ export const defaultWelcomeActions: WelcomeAction[] = [
   },
   {
     id: 'human-handoff',
-    title: brandTokens.copy.humanCta,
-    description: 'Connect with our team.'
+    title: 'Talk to the team without AI',
+    description: 'Send a message directly to the Balance team.'
   }
 ];
 

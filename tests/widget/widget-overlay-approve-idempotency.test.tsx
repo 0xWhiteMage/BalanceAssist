@@ -15,7 +15,7 @@ vi.mock('@/lib/api/client', async () => {
   return {
     ...actual,
     finalizeLead: finalizeLeadMock,
-    fetchTeamMessages: vi.fn(async () => ({ messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })),
+    fetchTeamMessages: vi.fn(async () => ({ outgoingStatus: null, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })),
     logEvent: vi.fn(async () => ({ ok: true, eventName: 'mock-event' })),
     createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '', persisted: true })),
     getCurrentSession: vi.fn(async () => null)
@@ -93,8 +93,8 @@ function mockWidgetFetch() {
 }
 
 async function startAiConversation() {
-  fireEvent.click(await screen.findByTestId('consent-button'));
-  fireEvent.click(await screen.findByRole('button', { name: /start with balance assist/i }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 
   const input = (await waitFor(() => {
     const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;

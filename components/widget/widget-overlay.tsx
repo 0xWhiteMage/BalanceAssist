@@ -8,8 +8,8 @@ import {
   BotAvatarSmall,
   FileRequestBanner,
   FileRequestInputHint,
+  HumanFallbacks,
   HumanFooter,
-  TeamTypingIndicator,
   UploadPolicyModal,
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
@@ -23,12 +23,12 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
-import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
-import type { ConsentRecord } from '@/lib/privacy/notice';
+import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 
@@ -162,6 +162,7 @@ export function WidgetOverlay({
   const [inputValue, setInputValue] = useState('');
   const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [entryPath, setEntryPath] = useState<'ai' | 'human' | null>(null);
   const teamRelay = useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage });
   const {
     isTeamConnected, requested: humanRequested, status: humanStatus, waitingForReply: teamWaitingForReply,
@@ -180,7 +181,11 @@ export function WidgetOverlay({
   const submitInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sessionBootstrapPromiseRef = useRef<Promise<string | null> | null>(null);
+  const bootstrapGenerationRef = useRef(0);
+  const aiBootstrapInFlightGenerationRef = useRef<number | null>(null);
+  const aiBootstrapCompletedRef = useRef(false);
+  const humanBootstrapInFlightGenerationRef = useRef<number | null>(null);
+  const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -246,6 +251,17 @@ export function WidgetOverlay({
   }, [configuredCalendlyUrl, isTeamConnected, humanScheduleRequestOpen, view]);
 
   useEffect(() => {
+    if (!noticeConsent || !entryPath) return;
+    if (entryPath === 'ai') {
+      void startConversation();
+      return;
+    }
+    void handleTeamConnect();
+  // Entry choice is intentionally the only trigger for either processing path.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryPath, noticeConsent]);
+
+  useEffect(() => {
     if (isTeamConnected || briefApproved) return;
     if (isBriefReadyForApproval(draft) && railMode === 'essentials') {
       setRailMode('summary');
@@ -284,6 +300,7 @@ export function WidgetOverlay({
 
   useEffect(() => {
     return () => {
+      bootstrapGenerationRef.current += 1;
       cancelRef.current = true;
       if (advanceTimerRef.current) {
         clearTimeout(advanceTimerRef.current);
@@ -305,15 +322,22 @@ export function WidgetOverlay({
         isDisclaimer?: boolean;
         isSystem?: boolean;
         delay?: number;
+        isValid?: () => boolean;
       }
     ): Promise<void> => {
-      if (cancelRef.current) return;
+      const isValid = options?.isValid ?? (() => true);
+      if (cancelRef.current || !isValid()) return;
 
+      const botSayGeneration = botSayGenerationRef.current + 1;
+      botSayGenerationRef.current = botSayGeneration;
       setIsTyping(true);
       const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
       await sleep(delay);
 
-      if (cancelRef.current) return;
+      if (cancelRef.current || !isValid()) {
+        if (botSayGenerationRef.current === botSayGeneration) setIsTyping(false);
+        return;
+      }
 
       setIsTyping(false);
       const botMessage: ChatMessage = {
@@ -326,6 +350,7 @@ export function WidgetOverlay({
         isDisclaimer: options?.isDisclaimer
       };
       const nextMessages = [...messagesRef.current, botMessage];
+      if (cancelRef.current || !isValid()) return;
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
     },
@@ -333,27 +358,29 @@ export function WidgetOverlay({
   );
 
   const advanceStep = useCallback(
-    async (stepId: ConversationStepId, draftForMessages: LeadDraft) => {
-      if (cancelRef.current) return;
+    async (stepId: ConversationStepId, draftForMessages: LeadDraft, isValid: () => boolean = () => true) => {
+      if (cancelRef.current || !isValid()) return;
 
       setCurrentStep(stepId);
       const step = conversationSteps[stepId];
       const texts = resolveBotTexts(stepId, draftForMessages);
 
       for (let i = 0; i < texts.length; i++) {
-        if (cancelRef.current) return;
+        if (cancelRef.current || !isValid()) return;
         const isLast = i === texts.length - 1;
         await botSay(texts[i], {
           isDisclaimer: stepId === 'intro' && i === 1,
-          inlineCards: isLast ? step.inlineCards : undefined
+          inlineCards: isLast ? step.inlineCards : undefined,
+          isValid
         });
       }
 
       if (texts.length === 0 && step.inlineCards) {
-        if (cancelRef.current) return;
-        await botSay('', { inlineCards: step.inlineCards });
+        if (cancelRef.current || !isValid()) return;
+        await botSay('', { inlineCards: step.inlineCards, isValid });
       }
 
+      if (!isValid()) return;
       setAllowAttachment(Boolean(step.allowAttachment));
     },
     [botSay]
@@ -363,18 +390,36 @@ export function WidgetOverlay({
   const loadOrCreateSession = sessionDraft.loadOrCreateSession;
 
   const startConversation = useCallback(async () => {
-    if (hasStarted || isTeamConnected || !noticeConsent) return;
+    if (aiBootstrapCompletedRef.current || isTeamConnected || !noticeConsent) return;
+    const bootstrapGeneration = bootstrapGenerationRef.current;
+    if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
+    aiBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     cancelRef.current = false;
+    const bootstrapIsCurrent = () =>
+      bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
 
-    const activeSessionId = await loadOrCreateSession();
-    if (cancelRef.current) return;
-    if (!activeSessionId) return;
+    try {
+      const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
+      if (!bootstrapIsCurrent()) return;
+      if (!activeSessionId) {
+        setEntryPath(null);
+        return;
+      }
 
-    setHasStarted(true);
-    await advanceStep('intro', createDefaultLeadDraft());
-  }, [advanceStep, hasStarted, isTeamConnected, loadOrCreateSession, noticeConsent]);
+      setHasStarted(true);
+      await advanceStep('intro', createDefaultLeadDraft(), bootstrapIsCurrent);
+      if (bootstrapIsCurrent()) aiBootstrapCompletedRef.current = true;
+    } finally {
+      if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) {
+        aiBootstrapInFlightGenerationRef.current = null;
+      }
+    }
+  }, [advanceStep, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
   function handleClose() {
+    bootstrapGenerationRef.current += 1;
+    sessionDraft.invalidateBootstrap();
+    if (!aiBootstrapCompletedRef.current) setHasStarted(false);
     if (sessionId) {
       void logEvent({ sessionId, eventName: 'widget_closed' });
     }
@@ -395,13 +440,17 @@ export function WidgetOverlay({
 
   function handleOpen() {
     cancelRef.current = false;
+    teamRelay.resume();
     setIsOpen(true);
+    if (entryPath === 'ai' && noticeConsent && !aiBootstrapCompletedRef.current) void startConversation();
   }
 
   useDialogFocus({ active: isOpen, dialogRef: widgetContainerRef, onDismiss: handleClose });
   useDialogFocus({ active: attachmentOpen, dialogRef: attachmentDialogRef, onDismiss: () => setAttachmentOpen(false) });
 
   function handleReset() {
+    bootstrapGenerationRef.current += 1;
+    aiBootstrapCompletedRef.current = false;
     sessionDraft.reset();
     teamRelay.reset();
     cancelRef.current = true;
@@ -418,6 +467,7 @@ export function WidgetOverlay({
     setMessages([]);
     setCurrentStep('intro');
     setHasStarted(false);
+    setEntryPath(null);
     setRailMode('essentials');
     setReferenceLinks([]);
     setReferenceFiles([]);
@@ -522,28 +572,45 @@ export function WidgetOverlay({
 
   async function handleTeamConnect() {
     if (humanRequested || !noticeConsent) return;
-    const activeSessionId = await loadOrCreateSession();
-    if (!activeSessionId) return;
+    const bootstrapGeneration = bootstrapGenerationRef.current;
+    if (humanBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
+    humanBootstrapInFlightGenerationRef.current = bootstrapGeneration;
+    const bootstrapIsCurrent = () =>
+      bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
+    try {
+      const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
+      if (!bootstrapIsCurrent() || !activeSessionId) return;
+      const consentRecorded = await recordHumanContactConsent(activeSessionId);
+      if (!bootstrapIsCurrent()) return;
+      if (!consentRecorded) {
+        await botSay('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.', {
+          isValid: bootstrapIsCurrent
+        });
+        return;
+      }
 
-    if (!await recordProducerTransferConsent(activeSessionId)) {
-      await botSay('Sorry — we could not confirm consent to share messages with the Balance team. Please try again.');
-      return;
+      if (!bootstrapIsCurrent()) return;
+      if (!teamRelay.requestHandoff()) return;
+      setCurrentStep('free-chat');
+
+      if (!bootstrapIsCurrent()) return;
+      void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
+
+      const connectMsg: ChatMessage = {
+        id: nextId(),
+        sender: 'bot',
+        text: `Your private relay is ready. ${DATA_USE_NOTICE_COPY.humanDisclosure}`,
+        timestamp: Date.now(),
+        isSystem: true
+      };
+      const next = [...messagesRef.current, connectMsg];
+      messagesRef.current = next;
+      setMessages(next);
+    } finally {
+      if (humanBootstrapInFlightGenerationRef.current === bootstrapGeneration) {
+        humanBootstrapInFlightGenerationRef.current = null;
+      }
     }
-    if (!teamRelay.requestHandoff()) return;
-    setCurrentStep('free-chat');
-
-    void logEvent({ sessionId: activeSessionId, eventName: 'human_handoff' });
-
-    const connectMsg: ChatMessage = {
-      id: nextId(),
-      sender: 'bot',
-      text: 'Your request to contact the Balance team is ready. Send a message and we will confirm when the team replies.',
-      timestamp: Date.now(),
-      isSystem: true
-    };
-    const next = [...messagesRef.current, connectMsg];
-    messagesRef.current = next;
-    setMessages(next);
   }
 
   function handleDraftEdit(key: string, value: string) {
@@ -833,13 +900,13 @@ export function WidgetOverlay({
           return;
         }
 
-        const ok = await teamRelay.send(trimmed);
-        if (!ok) {
+        const sendResult = await teamRelay.send(trimmed);
+        if (sendResult === 'failed') {
           await botSay('Sorry, I could not reach the team right now. Please email hello@balancestudio.tv.');
           return;
         }
 
-        void teamRelay.poll();
+        if (sendResult === 'persisted') void teamRelay.poll();
         return;
       }
 
@@ -1031,9 +1098,22 @@ export function WidgetOverlay({
     e.target.value = '';
   }
 
+  function chooseAi(record: ConsentRecord) {
+    setEntryPath('ai');
+    setNoticeConsent(record);
+  }
+
+  function chooseHuman() {
+    setEntryPath('human');
+    // The existing session contract requires consentVersion and consentedAt. This
+    // records first-party relay-session disclosure, not AI processing consent.
+    setNoticeConsent({ consentVersion: 'human-relay-1.1', consentedAt: new Date().toISOString() });
+  }
+
   const canInteract = !isSessionExpired && (hasStarted || humanRequested);
-  const showNoticeGate = !noticeConsent;
-  const showStartChoices = noticeConsent !== null && !canInteract && messages.length === 0;
+  const showNoticeGate = entryPath === null;
+  const showStartChoices = false;
+  const showHumanFallback = entryPath === 'human' && !humanRequested;
   const showAttachmentButton = false;
 
   return (
@@ -1227,7 +1307,7 @@ export function WidgetOverlay({
                 }}
               >
                 {showNoticeGate ? (
-                  <DataUseNotice onConsent={setNoticeConsent} />
+                  <DataUseNotice onConsent={chooseAi} onHuman={chooseHuman} onLeave={handleClose} />
                 ) : showStartChoices ? (
                   <div
                     data-testid="widget-start-options"
@@ -1294,6 +1374,8 @@ export function WidgetOverlay({
                       Talk to a human
                     </button>
                   </div>
+                ) : showHumanFallback ? (
+                  <HumanFallbacks calendlyUrl={configuredCalendlyUrl} unavailable={sessionUnavailable} />
                 ) : (
                   <div role="log" aria-live="polite" aria-relevant="additions text" style={{ display: 'contents' }}>
                     {messages.map((msg) => (
@@ -1307,7 +1389,7 @@ export function WidgetOverlay({
                       </div>
                     )}
 
-                    {!isTyping && isTeamConnected && teamWaitingForReply && <div role="status" aria-label="Balance team is preparing a reply"><TeamTypingIndicator /></div>}
+                    {!isTyping && isTeamConnected && teamWaitingForReply && <div role="status">Waiting for a Balance team reply</div>}
 
                     {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
                   </div>
@@ -1443,6 +1525,7 @@ export function WidgetOverlay({
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  disabled={humanStatus === 'sending'}
                   placeholder={humanRequested ? 'Message the team request...' : 'Type your message...'}
                   style={{
                     flex: 1,
@@ -1460,17 +1543,17 @@ export function WidgetOverlay({
                 />
                 <button
                   onClick={handleSubmitText}
-                  disabled={!inputValue.trim() || isTyping}
+                  disabled={!inputValue.trim() || isTyping || humanStatus === 'sending'}
                   style={{
                     width: '44px',
                     height: '44px',
                     borderRadius: '50%',
                     border: 'none',
                     background:
-                      inputValue.trim() && !isTyping
+                      inputValue.trim() && !isTyping && humanStatus !== 'sending'
                         ? `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`
                         : 'rgba(255, 255, 255, 0.08)',
-                    cursor: inputValue.trim() && !isTyping ? 'pointer' : 'default',
+                    cursor: inputValue.trim() && !isTyping && humanStatus !== 'sending' ? 'pointer' : 'default',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1479,12 +1562,13 @@ export function WidgetOverlay({
                   aria-label="Send message"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke={inputValue.trim() && !isTyping ? '#101010' : brandTokens.colors.mutedText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke={inputValue.trim() && !isTyping && humanStatus !== 'sending' ? '#101010' : brandTokens.colors.mutedText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </button>
               </div>
 
-              <HumanFooter isTeamConnected={humanRequested} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+              <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+              {humanRequested && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} deliveryUnavailable={humanStatus === 'unavailable'} />}
             </>
           )}
         </div>

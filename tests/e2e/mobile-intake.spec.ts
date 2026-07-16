@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
 async function enterAiIntake(page: Page) {
-  await page.getByTestId('consent-button').click();
-  await page.getByRole('button', { name: /start with balance assist/i }).click();
+  await page.getByRole('button', { name: 'Build a brief with AI' }).click();
+  await page.getByRole('button', { name: 'Continue with AI' }).click();
 
   const input = page.getByPlaceholder(/Type your message|Message the team/i);
   await expect(input).toBeVisible();
@@ -20,8 +20,8 @@ test.describe('mobile intake', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessionId: 'narrow-layout-session', persisted: true }) });
     });
     await page.goto('/preview');
-    await page.getByTestId('consent-button').click();
-    await page.getByRole('button', { name: /start with balance assist/i }).click();
+    await page.getByRole('button', { name: 'Build a brief with AI' }).click();
+    await page.getByRole('button', { name: 'Continue with AI' }).click();
 
     const attachment = page.getByRole('button', { name: 'Attach references' });
     await expect(attachment).toBeVisible();

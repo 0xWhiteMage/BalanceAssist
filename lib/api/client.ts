@@ -163,6 +163,18 @@ export async function recordProducerTransferConsent(sessionId: string): Promise<
   }
 }
 
+export async function recordHumanContactConsent(sessionId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'human_contact', granted: true, noticeVersion: CONSENT_VERSION })
+    });
+    if (!response.ok) return false;
+    const data = await response.json() as { ok?: boolean; consent?: { humanContact?: boolean } };
+    return data.ok === true && data.consent?.humanContact === true;
+  } catch { return false; }
+}
+
 export type TeamMessage = {
   id: number;
   sender: 'user' | 'team';
@@ -171,13 +183,33 @@ export type TeamMessage = {
 };
 
 export type TeamPollState = {
+  outgoingStatus: 'queued' | 'delivered' | 'unavailable' | null;
   messages: TeamMessage[];
   fileRequestOpen: boolean;
   fileRequestNote: string | null;
   scheduleRequestOpen: boolean;
 };
 
-export async function relayUserMessage(sessionId: string, text: string, requestId: string): Promise<boolean> {
+const teamPollStateSchema = z.object({
+  outgoingStatus: z.enum(['queued', 'delivered', 'unavailable']).nullable(),
+  messages: z.array(z.object({
+    id: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    sender: z.enum(['user', 'team']),
+    text: z.string(),
+    createdAt: z.string()
+  })),
+  fileRequestOpen: z.boolean(),
+  fileRequestNote: z.string().nullable(),
+  scheduleRequestOpen: z.boolean()
+});
+
+export type RelayMessageResult = {
+  persisted: boolean;
+  queued: boolean;
+  delivered: boolean;
+};
+
+export async function relayUserMessage(sessionId: string, text: string, requestId: string): Promise<RelayMessageResult> {
   try {
     const response = await fetchWithTimeout('/api/telegram/relay', {
       method: 'POST',
@@ -185,10 +217,15 @@ export async function relayUserMessage(sessionId: string, text: string, requestI
       body: JSON.stringify({ sessionId, text }),
       keepalive: true
     });
-    if (!response.ok) return false;
-    return Boolean((await response.json() as { ok?: boolean }).ok);
+    if (!response.ok) return { persisted: false, queued: false, delivered: false };
+    const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean };
+    return {
+      persisted: data.ok === true && data.persisted === true,
+      queued: data.queued === true,
+      delivered: false
+    };
   } catch {
-    return false;
+    return { persisted: false, queued: false, delivered: false };
   }
 }
 
@@ -207,18 +244,16 @@ export async function fetchTeamMessages(
     });
 
     if (!response.ok) {
-      return { messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false };
+      throw new Error('relay_status_unavailable');
     }
 
-    const data = (await response.json()) as TeamPollState;
-    return {
-      messages: data.messages ?? [],
-      fileRequestOpen: Boolean(data.fileRequestOpen),
-      fileRequestNote: data.fileRequestNote ?? null,
-      scheduleRequestOpen: Boolean(data.scheduleRequestOpen)
-    };
+    const parsed = teamPollStateSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      throw new Error('relay_status_unavailable');
+    }
+    return parsed.data;
   } catch {
-    return { messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false };
+    throw new Error('relay_status_unavailable');
   }
 }
 

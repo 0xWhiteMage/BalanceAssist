@@ -12,6 +12,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure'
   },
+  // test:e2e provisions Chromium only; keep device coverage on that supported browser dependency.
   projects: [
     {
       name: 'desktop-chromium',
@@ -22,11 +23,20 @@ export default defineConfig({
       name: 'mobile-chrome',
       use: { ...devices['Pixel 5'] },
       testMatch: /mobile-intake\.spec\.ts/
+    },
+    {
+      name: 'mobile-widget-chromium',
+      use: { ...devices['Pixel 5'] },
+      testMatch: /widget\.spec\.ts/
     }
   ],
   webServer: {
     command: 'npm run build && npm run start -- --hostname 127.0.0.1 --port 3000',
     url: 'http://127.0.0.1:3000',
+    env: {
+      ...process.env,
+      CALENDLY_URL: 'https://calendly.com/balance/test'
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 180000
   }
