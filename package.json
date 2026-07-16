@@ -57,6 +57,7 @@
     "jsdom": "26.1.0",
     "pg": "^8.22.0",
     "postcss": "8.5.16",
+    "supabase": "2.109.1",
     "tailwindcss": "3.4.17",
     "typescript": "5.8.3",
     "vercel": "56.1.0",

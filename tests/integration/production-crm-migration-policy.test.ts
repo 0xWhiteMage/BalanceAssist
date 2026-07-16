@@ -119,6 +119,7 @@ describe('production CRM migration policy', () => {
 
   it('protects managed production execution with a main-trusted workflow and approval environment', async () => {
     const source = await readFile(resolve(root, '.github/workflows/production-crm-migrations.yml'), 'utf8');
+    const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { devDependencies?: Record<string, string> };
     const workflow = parse(source) as Workflow;
     const migrate = workflow.jobs?.migrate;
     const migrationSteps = migrate?.steps?.filter((step) => step.run?.includes('node scripts/apply-production-crm-migrations.mjs --dry-run')) ?? [];
@@ -127,12 +128,13 @@ describe('production CRM migration policy', () => {
     const dryRunIndex = runCommands.indexOf('node scripts/apply-production-crm-migrations.mjs --dry-run');
     const postDryRunCommands = runCommands.slice(dryRunIndex + 1);
     const projectRefCommand = "printf '%s\\n' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref";
-    const artifactQueryCommand = 'npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql';
+    const artifactQueryCommand = 'npx --no-install supabase db query --linked --file supabase/production-monday-crm-044-053.sql';
     const projectRefCommands = postDryRunCommands.filter((command) => /\s>\s*supabase\/\.temp\/project-ref$/.test(command));
     const secretReferences = JSON.stringify(migrate).match(/\$\{\{\s*secrets\.[A-Z0-9_]+\s*\}\}/g) ?? [];
 
     expect(source).toContain('production-crm-migrations.yml@refs/heads/main');
     expect(migrate?.environment).toBe('production-crm-migrations');
+    expect(packageJson.devDependencies?.supabase).toBe('2.109.1');
     expect(migrate?.env).toBeUndefined();
     expect(migrationSteps).toHaveLength(1);
     expect(migrationStep?.env).toEqual({ SUPABASE_ACCESS_TOKEN: '${{ secrets.SUPABASE_ACCESS_TOKEN }}' });
@@ -144,6 +146,7 @@ describe('production CRM migration policy', () => {
     expect(projectRefCommands).toEqual([projectRefCommand]);
     expect(postDryRunCommands.indexOf(projectRefCommand)).toBeLessThan(postDryRunCommands.indexOf(artifactQueryCommand));
     expect(postDryRunCommands).toContain(artifactQueryCommand);
+    expect(runCommands.some((command) => /^npx\s+supabase\b/.test(command))).toBe(false);
     expect(postDryRunCommands.filter((command) => !/^(?:mkdir|printf)\b/.test(command))).toEqual([
       artifactQueryCommand
     ]);

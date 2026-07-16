@@ -57,4 +57,4 @@ jobs:
           node scripts/apply-production-crm-migrations.mjs --dry-run
           mkdir -p supabase/.temp
           printf '%s\n' 'vbdqjgwcmckutwehrbvo' > supabase/.temp/project-ref
-          npx supabase db query --linked --file supabase/production-monday-crm-044-053.sql
+          npx --no-install supabase db query --linked --file supabase/production-monday-crm-044-053.sql
