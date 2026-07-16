@@ -27,8 +27,8 @@ export type TelegramUpdate = {
   };
 };
 
-export const HANDOFF_SEND_TIMEOUT_MS = 45_000;
-export const TOPIC_CREATE_TIMEOUT_MS = 45_000;
+export const HANDOFF_SEND_TIMEOUT_MS = 15_000;
+export const TOPIC_CREATE_TIMEOUT_MS = 15_000;
 
 let testTelegramTransport: typeof fetch | undefined;
 

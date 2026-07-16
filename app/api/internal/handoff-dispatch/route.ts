@@ -8,6 +8,8 @@ import { getMaxRetries, type HandoffSLA } from '@/lib/handoff/sla';
 import { validateAdminRequestAny } from '@/lib/security/config';
 import { getSessionConsent } from '@/lib/privacy/session-consent';
 
+export const HANDOFF_DISPATCH_BATCH_SIZE = 2;
+
 export async function POST(request: Request) {
   const requestId = extractRequestId(request);
   const logger = createLogger('handoff-dispatch', requestId);
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
 
   const results: Array<{ id: string; status: string; escalated?: boolean; retryDelayMs?: number }> = [];
 
-  for (let batch = 0; batch < 5; batch++) {
+  for (let batch = 0; batch < HANDOFF_DISPATCH_BATCH_SIZE; batch++) {
     const handoff = await claimNextHandoff(supabase);
     if (!handoff) break;
 

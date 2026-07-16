@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { HANDOFF_SEND_TIMEOUT_MS, TOPIC_CREATE_TIMEOUT_MS } from '@/lib/telegram';
 
 type Workflow = {
   on?: {
@@ -50,6 +51,26 @@ describe('handoff dispatch workflow', () => {
     expect(step?.run).toContain("--data '{\"worker\":\"handoff-dispatch\"}'");
     expect(step?.run).not.toContain('secrets.');
     expect(step?.env?.CRON_SECRET).toBe('${{ secrets.CRON_SECRET }}');
+  });
+
+  it('keeps the dispatch time budget below its HTTP and workflow limits', async () => {
+    const workflowSource = await readFile(resolve(process.cwd(), '.github/workflows/handoff-dispatch.yml'), 'utf8');
+    const routeSource = await readFile(resolve(process.cwd(), 'app/api/internal/handoff-dispatch/route.ts'), 'utf8');
+    const workflow = parse(workflowSource) as Workflow;
+    const dispatch = workflow.jobs?.dispatch;
+    const step = dispatch?.steps?.find(({ name }) => name === 'Dispatch pending handoffs');
+    const maxTimes = [...(step?.run ?? '').matchAll(/--max-time (\d+)/g)].map((match) => Number(match[1]));
+    const batchSize = Number(routeSource.match(/HANDOFF_DISPATCH_BATCH_SIZE = (\d+)/)?.[1]);
+    const dispatchHttpTimeoutMs = maxTimes[0] * 1_000;
+    const heartbeatTimeoutMs = maxTimes[1] * 1_000;
+    const workflowTimeoutMs = (dispatch?.['timeout-minutes'] ?? 0) * 60_000;
+
+    expect(batchSize).toBe(2);
+    expect(HANDOFF_SEND_TIMEOUT_MS).toBe(15_000);
+    expect(TOPIC_CREATE_TIMEOUT_MS).toBe(15_000);
+    expect(maxTimes).toEqual([80, 15]);
+    expect(batchSize * (HANDOFF_SEND_TIMEOUT_MS + TOPIC_CREATE_TIMEOUT_MS)).toBeLessThan(dispatchHttpTimeoutMs);
+    expect(dispatchHttpTimeoutMs + heartbeatTimeoutMs).toBeLessThan(workflowTimeoutMs);
   });
 
   it('monitors scheduler health on the existing five-minute cadence and fails closed', async () => {
