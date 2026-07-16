@@ -473,7 +473,7 @@ DECLARE candidate public.monday_sync_outbox%ROWTYPE; sync_row public.monday_sync
   lead_row public.crm_leads%ROWTYPE; session_id uuid; now_at timestamptz := now();
 BEGIN
   IF p_lease_seconds NOT BETWEEN 30 AND 600 THEN RAISE EXCEPTION 'lease seconds out of range'; END IF;
-  IF cardinality(p_operations) IS NULL OR cardinality(p_operations) = 0 OR EXISTS (SELECT 1 FROM unnest(p_operations) operation WHERE operation NOT IN ('upsert', 'delete')) THEN RAISE EXCEPTION 'invalid Monday operations'; END IF;
+  IF cardinality(p_operations) IS NULL OR cardinality(p_operations) = 0 OR EXISTS (SELECT 1 FROM unnest(p_operations) AS requested_operation WHERE requested_operation NOT IN ('upsert', 'delete')) THEN RAISE EXCEPTION 'invalid Monday operations'; END IF;
   LOOP
     -- Discovery holds no lock. Locks below always follow session, aggregate, outbox.
     SELECT o.* INTO candidate FROM public.monday_sync_outbox o
@@ -699,9 +699,6 @@ ALTER TABLE public.deletion_jobs ADD COLUMN IF NOT EXISTS next_attempt_at timest
 CREATE INDEX IF NOT EXISTS deletion_jobs_due_idx ON public.deletion_jobs (next_attempt_at, requested_at)
   WHERE state IN ('requested', 'failed');
 
--- The 046 worker's output column is named operation; resolve its unqualified
--- validation reference as a column rather than the RETURNS TABLE variable.
-ALTER FUNCTION public.claim_next_monday_sync(integer, text[]) SET plpgsql.variable_conflict TO 'use_column';
 CREATE OR REPLACE FUNCTION public.claim_next_monday_sync(p_lease_seconds integer)
 RETURNS TABLE (id uuid, crm_lead_id uuid, revision integer, operation text, payload jsonb, provider_operation text, target_item_id text, item_name text, frozen_payload_hash text, request_key uuid, claim_token uuid, resolution text)
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$

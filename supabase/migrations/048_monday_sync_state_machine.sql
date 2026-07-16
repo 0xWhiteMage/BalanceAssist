@@ -51,7 +51,7 @@ DECLARE candidate public.monday_sync_outbox%ROWTYPE; sync_row public.monday_sync
   lead_row public.crm_leads%ROWTYPE; session_id uuid; now_at timestamptz := now();
 BEGIN
   IF p_lease_seconds NOT BETWEEN 30 AND 600 THEN RAISE EXCEPTION 'lease seconds out of range'; END IF;
-  IF cardinality(p_operations) IS NULL OR cardinality(p_operations) = 0 OR EXISTS (SELECT 1 FROM unnest(p_operations) operation WHERE operation NOT IN ('upsert', 'delete')) THEN RAISE EXCEPTION 'invalid Monday operations'; END IF;
+  IF cardinality(p_operations) IS NULL OR cardinality(p_operations) = 0 OR EXISTS (SELECT 1 FROM unnest(p_operations) AS requested_operation WHERE requested_operation NOT IN ('upsert', 'delete')) THEN RAISE EXCEPTION 'invalid Monday operations'; END IF;
   LOOP
     -- Discovery holds no lock. Locks below always follow session, aggregate, outbox.
     SELECT o.* INTO candidate FROM public.monday_sync_outbox o

@@ -16,9 +16,6 @@ ALTER TABLE public.deletion_jobs ADD COLUMN IF NOT EXISTS next_attempt_at timest
 CREATE INDEX IF NOT EXISTS deletion_jobs_due_idx ON public.deletion_jobs (next_attempt_at, requested_at)
   WHERE state IN ('requested', 'failed');
 
--- The 046 worker's output column is named operation; resolve its unqualified
--- validation reference as a column rather than the RETURNS TABLE variable.
-ALTER FUNCTION public.claim_next_monday_sync(integer, text[]) SET plpgsql.variable_conflict TO 'use_column';
 CREATE OR REPLACE FUNCTION public.claim_next_monday_sync(p_lease_seconds integer)
 RETURNS TABLE (id uuid, crm_lead_id uuid, revision integer, operation text, payload jsonb, provider_operation text, target_item_id text, item_name text, frozen_payload_hash text, request_key uuid, claim_token uuid, resolution text)
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$

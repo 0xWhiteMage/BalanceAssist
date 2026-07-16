@@ -71,6 +71,19 @@ describe('production CRM migration policy', () => {
     expect(artifact).not.toContain('051_');
   });
 
+  it('avoids forbidden PL/pgSQL settings with qualified Monday operation validation', async () => {
+    const stateMachine = await readFile(resolve(root, 'supabase/migrations/048_monday_sync_state_machine.sql'), 'utf8');
+    const lifecycle = await readFile(resolve(root, 'supabase/migrations/049_monday_crm_lifecycle.sql'), 'utf8');
+    const artifact = await readFile(resolve(root, 'supabase/production-monday-crm-044-053.sql'), 'utf8');
+
+    for (const source of [stateMachine, lifecycle, artifact]) {
+      expect(source).not.toContain('plpgsql.variable_conflict');
+    }
+    for (const source of [stateMachine, artifact]) {
+      expect(source).toContain("FROM unnest(p_operations) AS requested_operation WHERE requested_operation NOT IN ('upsert', 'delete')");
+    }
+  });
+
   it('rejects a SQL Editor artifact with appended SQL during dry-run verification', async () => {
     const artifact = await readFile(resolve(root, 'supabase/production-monday-crm-044-053.sql'), 'utf8');
     const artifactDir = await mkdtemp(resolve(tmpdir(), 'balance-assist-crm-artifact-'));

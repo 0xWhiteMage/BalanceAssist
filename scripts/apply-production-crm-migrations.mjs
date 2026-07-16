@@ -10,12 +10,12 @@ import { getIncrementalMigrations } from './apply-test-migrations.mjs';
 const reviewedCrmMigrations = new Map([
   ['044', { filename: '044_monday_crm_projection_tables.sql', sha256: '57a77b820a0b69282b79c3ba800f070d34f9cfc1c99005ff66f7bce3385e07ad' }],
   ['047', { filename: '047_atomic_crm_approval.sql', sha256: '0fe0cdfe7c50b77a1b50a1761beaccc89237015d3ad8bb9884e36f14682ec2da' }],
-  ['048', { filename: '048_monday_sync_state_machine.sql', sha256: '8aa7bc5bbe7c77d8704d8adebd02b5489c9f7917af624cee110e8520116f5a68' }],
-  ['049', { filename: '049_monday_crm_lifecycle.sql', sha256: 'a2058e2eb6c57860930e81e4e6a6e0990f17ca93a5b060ea59e716a4b81e015f' }],
+  ['048', { filename: '048_monday_sync_state_machine.sql', sha256: '862ac12a4f9c097ea3e432daab75204a65045d1a04a8ca5f05173ae446604494' }],
+  ['049', { filename: '049_monday_crm_lifecycle.sql', sha256: 'c7732eaf81273983745530132cce46dbd3dbfbc89c964ecf16b2bd004a7197b5' }],
   ['052', { filename: '052_monday_scheduler_health.sql', sha256: '06b8f73575bee85571aeff742aefd3b388a9961c94d73a07181fb9f328b2e617' }],
   ['053', { filename: '053_monday_reconciliation.sql', sha256: '8aa2544cc75f9c5ecec0759cdb885e2db18b8c04fda280e3f24442e7a13428a4' }]
 ]);
-const reviewedCrmArtifactSha256 = '5b9b08fe93820ebbc6c1be33f72e193408993110a3e1b33d869bf138e10f548b';
+const reviewedCrmArtifactSha256 = '84b9ffbe7984cf98835ab2edfd09a1cdd0a86649ef2095f85e3298b7ab6f8343';
 
 export const crmMigrationVersions = [...reviewedCrmMigrations.keys()];
 const advisoryLock = 90442053;
