@@ -310,4 +310,34 @@ describe('POST /api/telegram/webhook', () => {
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ ok: true, ignored: 'wrong-chat' });
   });
+
+  it('resolves a team reply by its persisted provider parent message when no topic is present', async () => {
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    process.env.TELEGRAM_CHAT_ID = '123456';
+    process.env.TELEGRAM_ALLOWED_USERNAMES = 'admin';
+    createServerSupabaseClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === 'processed_telegram_updates') return { insert: vi.fn(async () => ({ error: null })) };
+        if (table === 'sessions') return { select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: null, error: null })) })) })) };
+        if (table === 'human_messages') return {
+          select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: { session_id: 'sess-parent' }, error: null })) })) })),
+          insert: vi.fn(async () => ({ error: null }))
+        };
+        throw new Error(`Unexpected table: ${table}`);
+      })
+    });
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const response = await POST(new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-telegram-bot-api-secret-token': 'secret' },
+      body: JSON.stringify({ update_id: 10, message: {
+        message_id: 1000, chat: { id: 123456, type: 'supergroup' },
+        from: { username: 'admin', first_name: 'Admin' }, text: 'Reply',
+        reply_to_message: { message_id: 501 }
+      } })
+    }));
+
+    await expect(response.json()).resolves.toMatchObject({ ok: true, sessionId: 'sess-parent' });
+  });
 });

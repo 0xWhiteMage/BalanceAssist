@@ -8,7 +8,9 @@ const {
   reserveHandoffSendMock,
   markDeliveredMock,
   markFailedMock,
+  persistTelegramMessageDeliveryMock,
   sendTelegramMessageMock,
+  ensureTelegramTopicMock,
   getSessionConsentMock,
   validateAdminRequestAnyMock,
   emitEventMock
@@ -19,7 +21,9 @@ const {
   reserveHandoffSendMock: vi.fn(),
   markDeliveredMock: vi.fn(),
   markFailedMock: vi.fn(),
+  persistTelegramMessageDeliveryMock: vi.fn(),
   sendTelegramMessageMock: vi.fn(),
+  ensureTelegramTopicMock: vi.fn(),
   getSessionConsentMock: vi.fn(),
   validateAdminRequestAnyMock: vi.fn(() => ({ ok: true })),
   emitEventMock: vi.fn()
@@ -34,11 +38,13 @@ vi.mock('@/lib/handoff/outbox', () => ({
   claimNextHandoff: claimNextHandoffMock,
   reserveHandoffSend: reserveHandoffSendMock,
   markDelivered: markDeliveredMock,
-  markFailed: markFailedMock
+  markFailed: markFailedMock,
+  persistTelegramMessageDelivery: persistTelegramMessageDeliveryMock
 }));
 
 vi.mock('@/lib/telegram', () => ({
-  sendTelegramMessage: sendTelegramMessageMock
+  sendTelegramMessage: sendTelegramMessageMock,
+  ensureTelegramTopic: ensureTelegramTopicMock
 }));
 
 vi.mock('@/lib/privacy/session-consent', () => ({
@@ -59,13 +65,17 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     reserveHandoffSendMock.mockReset();
     markDeliveredMock.mockReset();
     markFailedMock.mockReset();
+    persistTelegramMessageDeliveryMock.mockReset();
     sendTelegramMessageMock.mockReset();
+    ensureTelegramTopicMock.mockReset();
     getSessionConsentMock.mockReset();
     emitEventMock.mockReset();
     validateAdminRequestAnyMock.mockReturnValue({ ok: true });
     reserveHandoffSendMock.mockResolvedValue(true);
     markDeliveredMock.mockResolvedValue(true);
     markFailedMock.mockResolvedValue({ shouldRetry: false, escalated: false, retryDelayMs: 0, applied: true });
+    persistTelegramMessageDeliveryMock.mockResolvedValue(true);
+    ensureTelegramTopicMock.mockResolvedValue(77);
     getSessionConsentMock.mockResolvedValue({ analysis: false, producerTransfer: true });
   });
 
@@ -126,6 +136,55 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
       { handoffId: 'ho-2', reason: 'telegram_send_failed' },
       'rid-dispatch'
     );
+  });
+
+  test('routes a persisted relay through its resolved topic and records the provider message before delivery', async () => {
+    claimNextHandoffMock
+      .mockResolvedValueOnce({
+        id: 'ho-relay',
+        session_id: 'sess-relay',
+        created_at: '2026-07-11T11:59:00.000Z',
+        claim_token: '66666666-6666-4666-8666-666666666666',
+        payload: { sessionId: 'sess-relay', type: 'relay', messageId: 42, summary: 'Private user message', threadId: null },
+        resolution: 'claimed'
+      })
+      .mockResolvedValueOnce(null);
+    sendTelegramMessageMock.mockResolvedValue({ messageId: 501 });
+
+    const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
+    const response = await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
+      method: 'POST',
+      headers: { authorization: 'Bearer cron-secret' }
+    }));
+
+    expect(response.status).toBe(200);
+    expect(ensureTelegramTopicMock).toHaveBeenCalledWith(expect.anything(), 'sess-relay', null, null, 'sess-rel');
+    expect(sendTelegramMessageMock).toHaveBeenCalledWith('Private user message', { threadId: 77 });
+    expect(persistTelegramMessageDeliveryMock).toHaveBeenCalledWith(expect.anything(), 42, 77, 501);
+    expect(persistTelegramMessageDeliveryMock.mock.invocationCallOrder[0]).toBeLessThan(markDeliveredMock.mock.invocationCallOrder[0]);
+  });
+
+  test('retries a relay when topic creation fails without sending an unthreaded message', async () => {
+    claimNextHandoffMock
+      .mockResolvedValueOnce({
+        id: 'ho-topic-failed',
+        session_id: 'sess-topic-failed',
+        claim_token: '77777777-7777-4777-8777-777777777777',
+        payload: { sessionId: 'sess-topic-failed', type: 'relay', messageId: 43, summary: 'Private user message', threadId: null },
+        resolution: 'claimed'
+      })
+      .mockResolvedValueOnce(null);
+    ensureTelegramTopicMock.mockResolvedValue(null);
+    markFailedMock.mockResolvedValue({ shouldRetry: true, escalated: false, retryDelayMs: 300000, applied: true });
+
+    const { POST } = await import('@/app/api/internal/handoff-dispatch/route');
+    await POST(new Request('http://localhost/api/internal/handoff-dispatch', {
+      method: 'POST',
+      headers: { authorization: 'Bearer cron-secret' }
+    }));
+
+    expect(sendTelegramMessageMock).not.toHaveBeenCalled();
+    expect(markFailedMock).toHaveBeenCalledWith(expect.anything(), 'ho-topic-failed', '77777777-7777-4777-8777-777777777777', 'telegram_topic_unavailable', expect.anything());
   });
 
   test('does not send a handoff suppressed at claim time for an expired or revoked session', async () => {

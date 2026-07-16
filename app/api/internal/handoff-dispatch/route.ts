@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
-import { claimNextHandoff, markDelivered, markFailed, reserveHandoffSend } from '@/lib/handoff/outbox';
+import { claimNextHandoff, markDelivered, markFailed, persistTelegramMessageDelivery, reserveHandoffSend } from '@/lib/handoff/outbox';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
-import { sendTelegramMessage } from '@/lib/telegram';
+import { ensureTelegramTopic, sendTelegramMessage } from '@/lib/telegram';
 import { getMaxRetries, type HandoffSLA } from '@/lib/handoff/sla';
 import { validateAdminRequestAny } from '@/lib/security/config';
 import { getSessionConsent } from '@/lib/privacy/session-consent';
@@ -72,11 +72,73 @@ export async function POST(request: Request) {
       }
 
       if (payload.type === 'approval' || payload.type === 'relay') {
+        const threadId = await ensureTelegramTopic(
+          supabase,
+          handoff.session_id,
+          null,
+          null,
+          handoff.session_id.slice(0, 8)
+        );
+        if (!threadId) {
+          const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, 'telegram_topic_unavailable', sla);
+          if (!outcome.applied) {
+            results.push({ id: handoff.id, status: 'stale' });
+            continue;
+          }
+          emitEvent(
+            outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
+            { handoffId: handoff.id, reason: 'telegram_topic_unavailable' },
+            requestId
+          );
+          logger.warn('Telegram topic unavailable', {
+            handoffId: handoff.id,
+            escalated: outcome.escalated,
+            shouldRetry: outcome.shouldRetry,
+            retryDelayMs: outcome.retryDelayMs,
+          });
+          results.push({
+            id: handoff.id,
+            status: outcome.escalated ? 'escalated' : outcome.shouldRetry ? 'retry_scheduled' : 'failed',
+            escalated: outcome.escalated,
+            retryDelayMs: outcome.retryDelayMs,
+          });
+          continue;
+        }
+
         const result = await sendTelegramMessage(payload.summary, {
-          threadId: payload.threadId ?? undefined
+          threadId
         });
 
         if (result) {
+          if (payload.type === 'relay' && (
+            typeof payload.messageId !== 'number' ||
+            !await persistTelegramMessageDelivery(supabase, payload.messageId, threadId, result.messageId)
+          )) {
+            const outcome = await markFailed(supabase, handoff.id, handoff.claim_token, 'telegram_delivery_persist_failed', sla);
+            if (!outcome.applied) {
+              results.push({ id: handoff.id, status: 'stale' });
+              continue;
+            }
+            emitEvent(
+              outcome.escalated ? 'handoff_escalated' : 'handoff_failed',
+              { handoffId: handoff.id, reason: 'telegram_delivery_persist_failed' },
+              requestId
+            );
+            logger.warn('Telegram delivery persistence failed', {
+              handoffId: handoff.id,
+              escalated: outcome.escalated,
+              shouldRetry: outcome.shouldRetry,
+              retryDelayMs: outcome.retryDelayMs,
+            });
+            results.push({
+              id: handoff.id,
+              status: outcome.escalated ? 'escalated' : outcome.shouldRetry ? 'retry_scheduled' : 'failed',
+              escalated: outcome.escalated,
+              retryDelayMs: outcome.retryDelayMs,
+            });
+            continue;
+          }
+
           const applied = await markDelivered(supabase, handoff.id, handoff.claim_token);
           if (!applied) {
             logger.warn('Skipped stale handoff completion', { handoffId: handoff.id });

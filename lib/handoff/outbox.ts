@@ -15,16 +15,19 @@ export type HandoffPayload = {
   type: 'approval' | 'relay';
   summary: string;
   threadId?: number | null;
+  messageId?: number | null;
 };
 
 export type HandoffFailureCode =
   | 'handoff_processing_failed'
   | 'handoff_type_invalid'
   | 'producer_transfer_revoked'
+  | 'telegram_topic_unavailable'
+  | 'telegram_delivery_persist_failed'
   | 'telegram_send_failed';
 
 function normalizeFailureCode(value: string): HandoffFailureCode {
-  return value === 'handoff_type_invalid' || value === 'producer_transfer_revoked' || value === 'telegram_send_failed'
+  return value === 'handoff_type_invalid' || value === 'producer_transfer_revoked' || value === 'telegram_topic_unavailable' || value === 'telegram_delivery_persist_failed' || value === 'telegram_send_failed'
     ? value
     : 'handoff_processing_failed';
 }
@@ -112,6 +115,21 @@ export async function markDelivered(
     .eq('id', handoffId)
     .eq('state', 'sending')
     .eq('claim_token', claimToken)
+    .select('id')
+    .maybeSingle();
+  return !error && Boolean(data);
+}
+
+export async function persistTelegramMessageDelivery(
+  supabase: SupabaseServerClient,
+  messageId: number,
+  threadId: number,
+  telegramMessageId: number
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('human_messages')
+    .update({ telegram_thread_id: threadId, telegram_message_id: telegramMessageId })
+    .eq('id', messageId)
     .select('id')
     .maybeSingle();
   return !error && Boolean(data);
