@@ -190,6 +190,19 @@ export type TeamPollState = {
   scheduleRequestOpen: boolean;
 };
 
+const teamPollStateSchema = z.object({
+  outgoingStatus: z.enum(['queued', 'delivered']).nullable(),
+  messages: z.array(z.object({
+    id: z.number(),
+    sender: z.enum(['user', 'team']),
+    text: z.string(),
+    createdAt: z.string()
+  })),
+  fileRequestOpen: z.boolean(),
+  fileRequestNote: z.string().nullable(),
+  scheduleRequestOpen: z.boolean()
+});
+
 export type RelayMessageResult = {
   persisted: boolean;
   queued: boolean;
@@ -234,17 +247,11 @@ export async function fetchTeamMessages(
       throw new Error('relay_status_unavailable');
     }
 
-    const data = (await response.json()) as TeamPollState;
-    if (data.outgoingStatus !== 'queued' && data.outgoingStatus !== 'delivered' && data.outgoingStatus !== null) {
+    const parsed = teamPollStateSchema.safeParse(await response.json());
+    if (!parsed.success) {
       throw new Error('relay_status_unavailable');
     }
-    return {
-      outgoingStatus: data.outgoingStatus,
-      messages: data.messages ?? [],
-      fileRequestOpen: Boolean(data.fileRequestOpen),
-      fileRequestNote: data.fileRequestNote ?? null,
-      scheduleRequestOpen: Boolean(data.scheduleRequestOpen)
-    };
+    return parsed.data;
   } catch {
     throw new Error('relay_status_unavailable');
   }

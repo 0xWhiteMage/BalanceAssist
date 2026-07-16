@@ -19,16 +19,31 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const [scheduleRequestOpen, setScheduleRequestOpen] = useState(false);
   const [messages, setMessages] = useState<TeamMessage[]>([]);
   const sinceIdRef = useRef(0);
-  const pollingRef = useRef(false);
+  const generationRef = useRef(0);
+  const pollingRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryRef = useRef<{ text: string; requestId: string } | null>(null);
+  const sessionIdRef = useRef(sessionId);
   const [pollingEnabled, setPollingEnabled] = useState(true);
 
+  useEffect(() => {
+    if (sessionIdRef.current === sessionId) return;
+    sessionIdRef.current = sessionId;
+    generationRef.current += 1;
+    pollingRef.current = null;
+    sinceIdRef.current = 0;
+    retryRef.current = null;
+    setRequested(false); setStatus('idle'); setIsTeamConnected(false); setWaitingForReply(false); setPollingEnabled(true);
+    setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false); setMessages([]);
+  }, [sessionId]);
+
   const poll = useCallback(async () => {
-    if (!sessionId || pollingRef.current) return;
-    pollingRef.current = true;
+    if (!sessionId || pollingRef.current !== null) return;
+    const generation = generationRef.current;
+    pollingRef.current = generation;
     try {
       const next = await fetchTeamMessages(sessionId, sinceIdRef.current);
+      if (generation !== generationRef.current) return;
       setFileRequestOpen(next.fileRequestOpen);
       setFileRequestNote(next.fileRequestNote);
       setScheduleRequestOpen(next.scheduleRequestOpen);
@@ -51,7 +66,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
         }
       }
     } finally {
-      pollingRef.current = false;
+      if (pollingRef.current === generation) pollingRef.current = null;
     }
   }, [fetchTeamMessages, sessionId]);
 
@@ -74,14 +89,17 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const requestHandoff = useCallback(() => {
     if (requested) return false;
     setRequested(true);
-    setStatus('requested');
+    setStatus((current) => current === 'replied' ? current : 'requested');
     return true;
   }, [requested]);
 
   const send = useCallback(async (text: string) => {
     if (!sessionId) return false;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    pollingRef.current = null;
     setWaitingForReply(true);
-    setStatus('sending');
+    setStatus((current) => current === 'replied' ? current : 'sending');
     const retry = retryRef.current?.text === text ? retryRef.current : {
       text,
       requestId: crypto.randomUUID()
@@ -89,19 +107,25 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     retryRef.current = retry;
     const result = await relayUserMessage(sessionId, text, retry.requestId);
     const sent = typeof result === 'boolean' ? result : result.persisted;
+    if (generation !== generationRef.current) return sent;
     if (sent) {
       retryRef.current = null;
-      setStatus(typeof result === 'boolean' || result.queued ? 'queued' : 'saved');
+      setStatus((current) => {
+        if (current === 'replied' || current === 'delivered') return current;
+        return typeof result === 'boolean' || result.queued ? 'queued' : 'saved';
+      });
     }
     else {
       setWaitingForReply(false);
-      setStatus('requested');
+      setStatus((current) => current === 'replied' || current === 'delivered' ? current : 'requested');
     }
     return sent;
   }, [relayUserMessage, sessionId]);
 
   const reset = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    generationRef.current += 1;
+    pollingRef.current = null;
     sinceIdRef.current = 0;
     retryRef.current = null;
     setRequested(false); setStatus('idle'); setIsTeamConnected(false); setWaitingForReply(false); setPollingEnabled(true);
@@ -122,14 +146,14 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   }, []);
 
   const markUploadPending = useCallback(() => {
-    setWaitingForReply(false); setStatus('queued');
+    setWaitingForReply(false); setStatus((current) => current === 'replied' ? current : 'queued');
   }, []);
 
   const markUploadFailed = useCallback(() => {
-    setWaitingForReply(false); setStatus('requested');
+    setWaitingForReply(false); setStatus((current) => current === 'replied' ? current : 'requested');
   }, []);
 
-  const markRequested = useCallback(() => setStatus('requested'), []);
+  const markRequested = useCallback(() => setStatus((current) => current === 'replied' ? current : 'requested'), []);
 
   return {
     requested, status, isTeamConnected, waitingForReply, fileRequestOpen, fileRequestNote, scheduleRequestOpen, messages,
