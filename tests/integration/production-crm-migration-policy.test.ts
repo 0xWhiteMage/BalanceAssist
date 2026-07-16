@@ -58,7 +58,7 @@ describe('production CRM migration policy', () => {
       schemaVersion: '053'
     });
 
-    const artifact = await readFile(resolve(root, 'supabase/production-monday-crm-044-053.sql'), 'utf8');
+    const artifact = (await readFile(resolve(root, 'supabase/production-monday-crm-044-053.sql'), 'utf8')).replace(/\r\n/g, '\n');
     for (const [version, filename] of crmMigrations) {
       const source = await readFile(resolve(root, 'supabase/migrations', filename), 'utf8');
       expect(artifact).toContain(`-- BEGIN ${version} ${filename}`);
