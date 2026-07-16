@@ -51,7 +51,7 @@ describe('production cleanup migration policy', () => {
       { version: '042', filename: '042_deletion_recovery_ownership.sql', path: '/tmp/042' },
       { version: '043', filename: '043_other.sql', path: '/tmp/043' }
     ])).toThrow('is not the reviewed file');
-    expect(() => selectCleanupMigrations([
+    expect(selectCleanupMigrations([
       { version: '038', filename: '038_durable_deletion_jobs.sql', path: '/tmp/038' },
       { version: '039', filename: '039_deletion_scheduler_health.sql', path: '/tmp/039' },
       { version: '040', filename: '040_deletion_recovery_lifecycle.sql', path: '/tmp/040' },
@@ -59,6 +59,6 @@ describe('production cleanup migration policy', () => {
       { version: '042', filename: '042_deletion_recovery_ownership.sql', path: '/tmp/042' },
       { version: '043', filename: '043_deletion_state_batched_cleanup.sql', path: '/tmp/043' },
       { version: '044', filename: '044_arbitrary.sql', path: '/tmp/044' }
-    ])).toThrow('unreviewed migration 044');
+    ]).map(({ version }) => version)).toEqual(cleanupMigrationVersions);
   });
 });

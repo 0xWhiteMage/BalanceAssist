@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { jsonWithCors } from '@/lib/api/route-helpers';
 import { normalizeVersionedDraft, type VersionedDraft } from '@/lib/conversation/draft-versioning';
 import { requireSession } from '@/lib/api/require-session';
@@ -20,6 +21,76 @@ type SessionDraftRow = {
   draft: unknown;
   draft_version: number | null;
 };
+
+type ReferenceLinkRow = { id: string; kind: string; url: string };
+
+function canonicalReferenceSetHash(links: Array<Pick<ReferenceLinkRow, 'kind' | 'url'>>): string {
+  const canonicalLinks = links
+    .map((link) => ({ kind: link.kind, url: normalizeReferenceUrl(link.url) }))
+    .filter((link): link is { kind: string; url: string } => link.url !== null)
+    .sort((left, right) => left.url.localeCompare(right.url) || left.kind.localeCompare(right.kind));
+  return createHash('sha256').update(JSON.stringify(canonicalLinks)).digest('hex');
+}
+
+function normalizeReferenceUrl(value: string): string | null {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'https:' || url.port) return null;
+    const host = url.hostname.toLowerCase().replace(/\.$/, '');
+    if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.test')) return null;
+    const query = url.search.length > 1 ? url.search.slice(1).split('&').sort().join('&') : '';
+    return `https://${host}${url.pathname}${query ? `?${query}` : ''}`;
+  } catch {
+    return null;
+  }
+}
+
+async function loadApprovalMetadata(supabase: any, sessionId: string) {
+  try {
+    const { data: links, error: linksError } = await supabase
+      .from('reference_links')
+      .select('id, kind, url')
+      .eq('session_id', sessionId);
+    if (linksError) return { referenceLinks: [] as ReferenceLinkRow[] };
+
+    const referenceLinks = Array.isArray(links) ? links as ReferenceLinkRow[] : [];
+    const { data: crmLead, error: crmError } = await supabase
+      .from('crm_leads')
+      .select('id')
+      .eq('source_session_id', sessionId)
+      .maybeSingle();
+    if (crmError || !crmLead || typeof crmLead.id !== 'string') {
+      return { referenceLinks, canonicalReferenceSetHash: canonicalReferenceSetHash(referenceLinks) };
+    }
+
+    const { data: revision, error: revisionError } = await supabase
+      .from('crm_lead_revisions')
+      .select('revision, source_draft_version, approval_input_hash, payload')
+      .eq('crm_lead_id', crmLead.id)
+      .order('revision', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (revisionError || !revision) {
+      return { referenceLinks, canonicalReferenceSetHash: canonicalReferenceSetHash(referenceLinks) };
+    }
+
+    const approvedLinks = Array.isArray((revision.payload as { referenceLinks?: unknown } | null)?.referenceLinks)
+      ? (revision.payload as { referenceLinks: Array<{ url?: unknown; label?: unknown }> }).referenceLinks
+        .filter((link): link is { url: string; label?: string } => typeof link.url === 'string')
+        .map((link) => ({ kind: link.label ?? '', url: link.url }))
+      : [];
+    return {
+      referenceLinks,
+      canonicalReferenceSetHash: canonicalReferenceSetHash(referenceLinks),
+      approvedReferenceSetHash: canonicalReferenceSetHash(approvedLinks),
+      approvedDraftVersion: typeof revision.source_draft_version === 'number' ? revision.source_draft_version : undefined,
+      approvalInputHash: typeof revision.approval_input_hash === 'string' ? revision.approval_input_hash : undefined,
+      crmRevision: typeof revision.revision === 'number' ? revision.revision : undefined
+    };
+  } catch {
+    return { referenceLinks: [] as ReferenceLinkRow[] };
+  }
+}
 
 async function loadSessionDraft(supabase: { from: (table: string) => { select: (query: string) => { eq: (column: string, value: string) => { maybeSingle: () => Promise<{ data: unknown; error: { message: string } | null }> } } } }, sessionId: string) {
   const { data, error } = await supabase
@@ -72,12 +143,14 @@ export async function GET(
   if (draftState.error) {
     return jsonWithCors({ error: draftState.error }, { status: 404 });
   }
+  const approval = await loadApprovalMetadata(session.supabase, sessionId);
 
   return jsonWithCors({
     sessionId,
     draft: draftState.draft,
     draftVersion: draftState.draftVersion,
-    fieldCount: Object.keys(draftState.draft).length
+    fieldCount: Object.keys(draftState.draft).length,
+    ...approval
   });
 }
 

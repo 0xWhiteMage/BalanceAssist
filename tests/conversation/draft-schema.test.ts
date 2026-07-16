@@ -29,9 +29,14 @@ test('timeline passes through verbatim (no band normalization)', () => {
   expect(result.timelineBand).toBe('3 weeks');
 });
 
-test('budget passes through verbatim (no band normalization)', () => {
-  const result = sanitizeDraftUpdates({ budgetBand: '$5,000 SGD' });
-  expect(result.budgetBand).toBe('$5,000 SGD');
+test.each([
+  'under-20k',
+  '$20,000-$50,000',
+  'Not sure yet',
+  '$5,000 SGD',
+])('preserves canonical budget input verbatim: %s', (input) => {
+  const result = sanitizeDraftUpdates({ budgetBand: input });
+  expect(result.budgetBand).toBe(input);
 });
 
 test('consentToShare is stripped from sanitized draft updates', () => {

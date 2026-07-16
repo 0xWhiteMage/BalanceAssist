@@ -28,6 +28,14 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const [draftVersion, setDraftVersion] = useState(0);
   const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
+  const [referenceLinks, setReferenceLinks] = useState<NonNullable<ProjectDraftResponse['referenceLinks']>>([]);
+  const [approval, setApproval] = useState<{
+    approvedDraftVersion?: number;
+    approvalInputHash?: string;
+    canonicalReferenceSetHash?: string;
+    approvedReferenceSetHash?: string;
+    crmRevision?: number;
+  }>({});
   const sessionIdRef = useRef<string | null>(null);
   const expiresAtRef = useRef<string | null>(null);
   const draftVersionRef = useRef(0);
@@ -36,13 +44,28 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
 
-  const applyCanonicalDraft = useCallback((values: Record<string, string>, version: number) => {
+  const applyCanonicalDraft = useCallback((values: Record<string, string>, version: number, canonical?: ProjectDraftResponse) => {
     const nextDraft = { ...createDefaultLeadDraft(), ...values } as LeadDraft;
     setDraft(nextDraft);
     setDraftVersion(version);
     draftVersionRef.current = version;
     setHasProjectIntent(detectProjectIntent(nextDraft));
-    setBriefApproved(false);
+    if (canonical) {
+      const nextApproval = {
+        approvedDraftVersion: canonical.approvedDraftVersion,
+        approvalInputHash: canonical.approvalInputHash,
+        canonicalReferenceSetHash: canonical.canonicalReferenceSetHash,
+        approvedReferenceSetHash: canonical.approvedReferenceSetHash,
+        crmRevision: canonical.crmRevision
+      };
+      setApproval(nextApproval);
+      setBriefApproved(
+        nextApproval.approvedDraftVersion === version &&
+        nextApproval.canonicalReferenceSetHash === nextApproval.approvedReferenceSetHash
+      );
+    } else {
+      setBriefApproved(false);
+    }
   }, []);
 
   const setActiveSession = useCallback((session: SessionResponse) => {
@@ -56,7 +79,8 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const hydrateDraft = useCallback(async (id: string) => {
     const canonical = await dependencies.fetchProjectDraft(id);
     if (canonical && (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0)) {
-      applyCanonicalDraft(canonical.draft, canonical.draftVersion);
+      setReferenceLinks(canonical.referenceLinks ?? []);
+      applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
     }
   }, [applyCanonicalDraft, dependencies]);
 
@@ -145,6 +169,16 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     else approveInFlightRef.current = false;
   }, []);
 
+  const recordApproval = useCallback((result: { approvedDraftVersion?: number; crmRevision?: number }) => {
+    setApproval((current) => ({
+      ...current,
+      approvedDraftVersion: result.approvedDraftVersion,
+      crmRevision: result.crmRevision,
+      approvedReferenceSetHash: current.canonicalReferenceSetHash
+    }));
+    setBriefApproved(true);
+  }, []);
+
   const reset = useCallback(() => {
     sessionIdRef.current = null;
     expiresAtRef.current = null;
@@ -156,12 +190,14 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     setDraftVersion(0);
     setHasProjectIntent(false);
     setBriefApproved(false);
+    setReferenceLinks([]);
+    setApproval({});
   }, []);
 
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, draftVersion,
     hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession,
-    applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, reset,
+    applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),
     requestProjectDeletion: () => sessionIdRef.current ? dependencies.requestProjectDeletion(sessionIdRef.current) : Promise.resolve({ ok: false })

@@ -6,7 +6,7 @@ import { useTeamRelay } from '@/components/widget/use-team-relay';
 import type { ConsentRecord } from '@/lib/privacy/notice';
 
 const consent: ConsentRecord = {
-  consentVersion: '1.0',
+  consentVersion: '1.1',
   consentedAt: '2026-07-14T10:00:00.000Z'
 };
 
@@ -80,7 +80,7 @@ describe('useWidgetSessionDraft', () => {
   });
 
   test('does not reuse an expired session and creates a fresh one', async () => {
-    const createSession = vi.fn(async () => ({ sessionId: 'fresh-session', status: 'new', sourceUrl: '', persisted: true, expiresAt: '2026-07-15T10:00:00.000Z' }));
+    const createSession = vi.fn(async () => ({ sessionId: 'fresh-session', status: 'new', sourceUrl: '', persisted: true }));
     const { result } = renderHook(() => useWidgetSessionDraft({
       createSession,
       getCurrentSession: vi.fn(async () => ({ sessionId: 'expired-session', status: 'open', sourceUrl: '', expiresAt: '2026-07-13T10:00:00.000Z' })),
@@ -92,6 +92,7 @@ describe('useWidgetSessionDraft', () => {
 
     expect(createSession).toHaveBeenCalledOnce();
     expect(result.current.sessionId).toBe('fresh-session');
+    expect(result.current.expiresAt).toBeNull();
     expect(result.current.isSessionExpired).toBe(false);
   });
 });

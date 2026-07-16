@@ -1,5 +1,14 @@
 # Producer Review Runbook
 
+## Monday CRM Release Gate
+
+Do not tell a producer that Monday has received a brief when approval only reports
+that the transfer is queued. Before enabling Monday upserts, BD must review the
+PII-free canary evidence, confirm owner, stage, follow-up, and notes were not
+overwritten, and sign off on assignment and daily triage. Privacy must separately
+approve the scrub-and-delete evidence and retention behavior. Historical `1.0`
+producer-transfer consent never authorizes Monday disclosure.
+
 ## Use This Runbook When
 
 - briefs are persisted but producer handoffs are not arriving

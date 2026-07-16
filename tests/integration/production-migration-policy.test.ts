@@ -22,6 +22,24 @@ describe('production migration policy', () => {
       .toThrow('043 is pending; run Production cleanup migrations before this release');
   });
 
+  it('requires every reviewed CRM migration before ordinary production releases', () => {
+    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053'];
+
+    expect(() => productionMigrations.assertReviewedCrmMigrationsRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedCrmMigrationsRecorded(recordedVersions.filter((version) => version !== '053')))
+      .toThrow('053 is pending; run Production CRM migrations before this release');
+  });
+
+  it('does not select reviewed CRM migrations for the ordinary runner', () => {
+    expect(productionMigrations.selectOrdinaryProductionMigrations([
+      { version: '043', filename: '043_deletion_state_batched_cleanup.sql', path: '/tmp/043' },
+      { version: '044', filename: '044_monday_crm_projection_tables.sql', path: '/tmp/044' },
+      { version: '047', filename: '047_atomic_crm_approval.sql', path: '/tmp/047' },
+      { version: '053', filename: '053_monday_reconciliation.sql', path: '/tmp/053' },
+      { version: '054', filename: '054_additive.sql', path: '/tmp/054' }
+    ]).map(({ version }) => version)).toEqual(['043', '054']);
+  });
+
   it('queries the migration tracker before evaluating production migration files', async () => {
     const source = await readFile(resolve(process.cwd(), 'scripts/apply-production-migrations.mjs'), 'utf8');
 

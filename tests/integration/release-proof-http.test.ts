@@ -130,7 +130,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     const sessionResponse = await fetch(`${appUrl}/api/sessions`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ sourceUrl: appUrl, consentVersion: '1.0', consentedAt: new Date().toISOString() })
+      body: JSON.stringify({ sourceUrl: appUrl, consentVersion: '1.1', consentedAt: new Date().toISOString() })
     });
     const session = await sessionResponse.json() as { sessionId: string };
     sessionId = session.sessionId;
@@ -142,11 +142,11 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
       .resolves.toMatchObject({ data: expect.objectContaining({ capability_hash: expect.any(String) }), error: null });
     await expect(fetch(`${appUrl}/api/projects/${sessionId}/consent`, {
       method: 'POST', headers: authorizedHeaders,
-      body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.0' })
+      body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.1' })
     })).resolves.toHaveProperty('status', 200);
     await expect(fetch(`${appUrl}/api/projects/${sessionId}/consent`, {
       method: 'POST', headers: authorizedHeaders,
-      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.0' })
+      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.1' })
     })).resolves.toHaveProperty('status', 200);
     const attachment = new FormData();
     attachment.set('sessionId', sessionId);
@@ -168,6 +168,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
       body: JSON.stringify({ sessionId, qualificationStatus: 'qualified' })
     });
     expect(finalized.status).toBe(200);
+    await expect(finalized.json()).resolves.toMatchObject({ queued: true, crmQueued: true, crmRevision: 1 });
     await expect(supabase!.from('handoff_outbox').select('state').eq('session_id', sessionId).single())
       .resolves.toMatchObject({ data: { state: 'pending' }, error: null });
 

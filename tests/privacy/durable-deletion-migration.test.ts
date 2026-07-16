@@ -10,6 +10,7 @@ describe('durable deletion jobs migration', () => {
     expect(migration).toMatch(/state.*requested.*claimed.*processing.*completed.*failed/is);
     expect(migration).toMatch(/attempts.*lease_token.*lease_expires_at.*requested_at.*completed_at/is);
     expect(migration).toMatch(/UNIQUE INDEX.*deletion_jobs.*session_id/is);
+    expect(migration).not.toMatch(/session_id uuid UNIQUE/i);
     expect(migration).toMatch(/request_deletion_job.*ON CONFLICT/is);
     expect(migration).toMatch(/claim_deletion_job.*FOR UPDATE SKIP LOCKED/is);
     expect(migration).toMatch(/complete_deletion_job.*p_lease_token/is);

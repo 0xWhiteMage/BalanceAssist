@@ -12,6 +12,7 @@ vi.mock('@/lib/api/require-session', () => ({
 function buildSupabase(options?: { draft?: Record<string, unknown>; draftVersion?: number; consentTransitions?: Array<{ scope: string; granted: boolean }> }) {
   const inserts: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
+  const deletedLinkScopes: Array<{ id: string; sessionId: string }> = [];
   const draft = options?.draft ?? {};
   const draftVersion = options?.draftVersion ?? 0;
   const consentTransitions = options?.consentTransitions ?? [];
@@ -19,6 +20,7 @@ function buildSupabase(options?: { draft?: Record<string, unknown>; draftVersion
   return {
     inserts,
     updates,
+    deletedLinkScopes,
     client: {
       from: vi.fn((table: string) => {
         if (table === 'sessions') {
@@ -41,6 +43,31 @@ function buildSupabase(options?: { draft?: Record<string, unknown>; draftVersion
               eq: vi.fn(() => ({
                 order: vi.fn(async () => ({ data: consentTransitions, error: null }))
               }))
+            }))
+          };
+        }
+
+        if (table === 'reference_links') {
+          return {
+            insert: vi.fn((row: Record<string, unknown>) => {
+              inserts.push(row);
+              return {
+                select: vi.fn(() => ({
+                  single: vi.fn(async () => ({ data: { id: '11111111-1111-4111-8111-111111111111', ...row }, error: null }))
+                }))
+              };
+            }),
+            delete: vi.fn(() => ({
+              eq: vi.fn((column: string, id: string) => {
+                expect(column).toBe('id');
+                return {
+                  eq: vi.fn((sessionColumn: string, sessionId: string) => {
+                    expect(sessionColumn).toBe('session_id');
+                    deletedLinkScopes.push({ id, sessionId });
+                    return { select: vi.fn(async () => ({ data: [{ id }], error: null })) };
+                  })
+                };
+              })
             }))
           };
         }
@@ -96,6 +123,7 @@ describe('POST /api/attachments/link', () => {
       url: 'https://youtu.be/abc',
       kind: 'youtube'
     });
+    expect(data.link).toMatchObject({ id: '11111111-1111-4111-8111-111111111111', sessionId: 'sess-1' });
   });
 
   test('uses the authenticated session when sessionId is omitted', async () => {
@@ -217,5 +245,24 @@ describe('POST /api/attachments/link', () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(inserts).toHaveLength(1);
+  });
+
+  test('deletes only a link owned by the authenticated session', async () => {
+    const { client, deletedLinkScopes } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-auth', capability: 'sess-auth.secret' },
+      supabase: client
+    });
+
+    const { DELETE } = await import('@/app/api/attachments/link/[linkId]/route');
+    const linkId = '11111111-1111-4111-8111-111111111111';
+    const res = await DELETE(new Request(`http://localhost/api/attachments/link/${linkId}`, { method: 'DELETE' }), {
+      params: Promise.resolve({ linkId })
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, deletedLinkId: linkId });
+    expect(deletedLinkScopes).toEqual([{ id: linkId, sessionId: 'sess-auth' }]);
   });
 });

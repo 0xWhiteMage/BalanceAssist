@@ -1,8 +1,11 @@
 import { applyMigrations, getIncrementalMigrations } from './apply-test-migrations.mjs';
+import { copyFile, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
+import { crmMigrationVersions } from './apply-production-crm-migrations.mjs';
 
 const policyBaseline = 37n;
 const reviewedCleanupVersions = ['038', '039', '040', '041', '042', '043'];
@@ -13,6 +16,18 @@ export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
   if (pending.length) {
     throw new Error(`${pending.join(', ')} is pending; run Production cleanup migrations before this release.`);
   }
+}
+
+export function assertReviewedCrmMigrationsRecorded(recordedVersions) {
+  const recorded = new Set(recordedVersions);
+  const pending = crmMigrationVersions.filter((version) => !recorded.has(version));
+  if (pending.length) {
+    throw new Error(`${pending.join(', ')} is pending; run Production CRM migrations before this release.`);
+  }
+}
+
+export function selectOrdinaryProductionMigrations(migrations) {
+  return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version));
 }
 
 export function assertExpandOnlyMigration(source, filename) {
@@ -57,16 +72,23 @@ export async function applyProductionMigrations(connectionString = process.env.P
 
   const recordedVersions = await getRecordedMigrationVersions(connectionString);
   assertReviewedCleanupMigrationsRecorded(recordedVersions);
+  assertReviewedCrmMigrationsRecorded(recordedVersions);
 
-  const migrations = getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations'));
+  const migrations = selectOrdinaryProductionMigrations(getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')));
   for (const migration of migrations) {
     if (BigInt(migration.version) > policyBaseline && !reviewedCleanupVersions.includes(migration.version)) {
       assertExpandOnlyMigration(readFileSync(migration.path, 'utf8'), migration.filename);
     }
   }
 
-  const { applied } = await applyMigrations({ connectionString });
-  return { applied, schemaVersion: migrations.at(-1)?.version };
+  const stagingDir = await mkdtemp(resolve(tmpdir(), 'balance-assist-ordinary-production-'));
+  try {
+    await Promise.all(migrations.map((migration) => copyFile(migration.path, resolve(stagingDir, migration.filename))));
+    const { applied } = await applyMigrations({ connectionString, migrationsDir: stagingDir });
+    return { applied, schemaVersion: migrations.at(-1)?.version };
+  } finally {
+    await rm(stagingDir, { force: true, recursive: true });
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

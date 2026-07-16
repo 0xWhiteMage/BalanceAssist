@@ -69,6 +69,8 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
+      - name: Verify Monday release-proof controls
+        run: npm test -- tests/integration/monday-release-proof.test.ts
       - run: npm run test:supabase
       - run: npm run build
       - run: npx playwright install --with-deps chromium

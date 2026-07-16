@@ -90,7 +90,14 @@ function buildReferenceLinkSupabase() {
         return {
           insert: vi.fn((row: Record<string, unknown>) => {
             inserts.push({ table, row });
-            return Promise.resolve({ error: null });
+            return {
+              select: vi.fn(() => ({
+                single: vi.fn(async () => ({
+                  data: { id: 'link-1', ...row },
+                  error: null
+                }))
+              }))
+            };
           })
         };
       })
@@ -218,7 +225,11 @@ describe('session-scoped API routes', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, persisted: true });
+    expect(body).toMatchObject({
+      ok: true,
+      persisted: true,
+      link: { id: 'link-1', sessionId: 'sess-link-auth' }
+    });
     expect(requireSessionMock).toHaveBeenCalledWith(request, undefined);
     expect(inserts).toContainEqual({
       table: 'reference_links',

@@ -25,6 +25,10 @@ export type FinalizeLeadResponse = {
   handoffId?: string;
   score?: number | null;
   recommendedNextStep?: string | null;
+  crmRecordId?: string;
+  crmQueued?: boolean;
+  crmRevision?: number;
+  approvedDraftVersion?: number;
 };
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -148,7 +152,7 @@ export async function recordProducerTransferConsent(sessionId: string): Promise<
     const response = await fetchWithTimeout(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.0' })
+      body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: CONSENT_VERSION })
     });
     if (!response.ok) return false;
 
@@ -252,9 +256,22 @@ export type ReferenceLinkPayload = {
   kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other';
 };
 
-export async function addReferenceLink(payload: ReferenceLinkPayload): Promise<boolean> {
-  const result = await postJson<{ ok?: boolean; persisted?: boolean }>('/api/attachments/link', payload);
-  return Boolean(result?.ok);
+export type ReferenceLink = ReferenceLinkPayload & { id: string };
+
+export async function addReferenceLink(payload: ReferenceLinkPayload): Promise<ReferenceLink | null> {
+  const result = await postJson<{ ok?: boolean; persisted?: boolean; link?: ReferenceLink }>('/api/attachments/link', payload);
+  return result?.ok === true && result.link ? result.link : null;
+}
+
+export async function deleteReferenceLink(linkId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`/api/attachments/link/${encodeURIComponent(linkId)}`, {
+      method: 'DELETE'
+    });
+    return response.ok && (await response.json() as { ok?: boolean }).ok === true;
+  } catch {
+    return false;
+  }
 }
 
 export async function resetProject(sessionId: string): Promise<boolean> {
@@ -295,6 +312,12 @@ export type ProjectDraftResponse = {
   draft: Record<string, string>;
   draftVersion: number;
   fieldCount: number;
+  referenceLinks?: ReferenceLink[];
+  approvedDraftVersion?: number;
+  approvalInputHash?: string;
+  canonicalReferenceSetHash?: string;
+  approvedReferenceSetHash?: string;
+  crmRevision?: number;
 };
 
 function flattenDraftValues(value: unknown): Record<string, string> {
@@ -324,11 +347,17 @@ export async function fetchProjectDraft(sessionId: string): Promise<ProjectDraft
       return null;
     }
 
-    const data = (await response.json()) as { draft?: unknown; draftVersion?: number; fieldCount?: number };
+    const data = (await response.json()) as ProjectDraftResponse & { draft?: unknown; draftVersion?: number; fieldCount?: number };
     return {
       draft: flattenDraftValues(data.draft),
       draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length
+      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
+      referenceLinks: Array.isArray(data.referenceLinks) ? data.referenceLinks : [],
+      approvedDraftVersion: data.approvedDraftVersion,
+      approvalInputHash: data.approvalInputHash,
+      canonicalReferenceSetHash: data.canonicalReferenceSetHash,
+      approvedReferenceSetHash: data.approvedReferenceSetHash,
+      crmRevision: data.crmRevision
     };
   } catch {
     return null;
@@ -361,7 +390,8 @@ export async function updateProjectDraft(
         conflict: true,
         draft: flattenDraftValues(data.draft),
         draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-        fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length
+        fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
+        referenceLinks: []
       };
     }
 
@@ -373,7 +403,8 @@ export async function updateProjectDraft(
       ok: true,
       draft: flattenDraftValues(data.draft),
       draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length
+      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
+      referenceLinks: []
     };
   } catch {
     return { ok: false, conflict: false };
@@ -459,3 +490,4 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
   };
 }
 import { z } from 'zod';
+import { CONSENT_VERSION } from '@/lib/privacy/notice';

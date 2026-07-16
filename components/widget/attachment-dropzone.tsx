@@ -9,6 +9,7 @@ import {
   type AttachmentConsent
 } from '@/lib/uploads/consent';
 import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
+import { CONSENT_VERSION } from '@/lib/privacy/notice';
 
 export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
@@ -102,7 +103,7 @@ export function AttachmentDropzone({
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope, granted: true, noticeVersion: '1.0' })
+      body: JSON.stringify({ scope, granted: true, noticeVersion: CONSENT_VERSION })
     });
     if (!res.ok) {
       setError('Unable to save your consent. Please try again before continuing.');

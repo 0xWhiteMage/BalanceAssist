@@ -39,6 +39,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx vitest run
+      - run: npm test -- tests/integration/monday-release-proof.test.ts
 
   database:
     runs-on: ubuntu-latest

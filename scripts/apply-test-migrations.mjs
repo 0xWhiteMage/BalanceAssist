@@ -42,7 +42,8 @@ export function getIncrementalMigrations(migrationsDir) {
 export async function applyMigrations({
   connectionString = process.env.TEST_DATABASE_URL,
   migrationsDir = resolve(process.cwd(), 'supabase/migrations'),
-  throughVersion
+  throughVersion,
+  bootstrapStorage = false
 } = {}) {
   if (!connectionString) {
     throw new Error('TEST_DATABASE_URL is required. Set it to a disposable PostgreSQL database before running database migrations or tests.');
@@ -53,6 +54,7 @@ export async function applyMigrations({
   );
   const client = new Client({ connectionString });
   const applied = [];
+  let storageBootstrapped = false;
 
   await client.connect();
   try {
@@ -94,12 +96,50 @@ export async function applyMigrations({
         continue;
       }
 
+      if (bootstrapStorage && !storageBootstrapped && BigInt(migration.version) >= 33n) {
+        await client.query(`
+          CREATE SCHEMA IF NOT EXISTS storage;
+          CREATE TABLE IF NOT EXISTS storage.buckets (
+            id text PRIMARY KEY,
+            name text NOT NULL,
+            public boolean NOT NULL DEFAULT false
+          );
+          CREATE TABLE IF NOT EXISTS storage.objects (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            bucket_id text NOT NULL,
+            name text NOT NULL
+          );
+          INSERT INTO storage.buckets (id, name, public)
+          VALUES ('temporary-attachments', 'temporary-attachments', false)
+          ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
+          ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+          REVOKE ALL PRIVILEGES ON TABLE storage.objects FROM PUBLIC;
+          DO $$
+          DECLARE policy_record record;
+          BEGIN
+            FOR policy_record IN
+              SELECT policyname
+              FROM pg_policies
+              WHERE schemaname = 'storage'
+                AND tablename = 'objects'
+                AND roles && ARRAY['public'::name, 'anon'::name, 'authenticated'::name]
+            LOOP
+              EXECUTE format('DROP POLICY %I ON storage.objects', policy_record.policyname);
+            END LOOP;
+          END $$;
+        `);
+        storageBootstrapped = true;
+      }
       await client.query(readFileSync(migration.path, 'utf8'));
       await client.query(
         'INSERT INTO public.schema_migrations (version, filename) VALUES ($1, $2)',
         [migration.version, migration.filename]
       );
       applied.push(migration.filename);
+    }
+
+    if (storageBootstrapped && (await client.query("SELECT to_regclass('public.private_attachment_storage_readiness') AS relation")).rows[0]?.relation) {
+      await client.query("UPDATE public.private_attachment_storage_readiness SET status = 'ready' WHERE bucket = 'temporary-attachments'");
     }
 
     await client.query('COMMIT');
@@ -113,7 +153,7 @@ export async function applyMigrations({
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  applyMigrations().then(
+  applyMigrations({ bootstrapStorage: true }).then(
     ({ applied }) => {
       console.log(applied.length ? `Applied migrations: ${applied.join(', ')}` : 'No unapplied migrations.');
     },

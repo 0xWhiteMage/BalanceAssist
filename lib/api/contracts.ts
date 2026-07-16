@@ -27,7 +27,7 @@ export const eventPayloadSchema = z.object({
 
 export const finalizeLeadPayloadSchema = z.object({
   sessionId: z.string().min(1)
-});
+}).strict();
 
 export const chatResponsePayloadSchema = z
   .object({

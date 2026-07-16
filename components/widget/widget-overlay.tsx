@@ -156,7 +156,7 @@ export function WidgetOverlay({
   const {
     draft, setDraft, noticeConsent, setNoticeConsent, hasProjectIntent, setHasProjectIntent,
     briefApproved, setBriefApproved, sessionId, sessionUnavailable, isSessionExpired,
-    draftVersion, setDraftVersion
+    draftVersion, setDraftVersion, approval
   } = sessionDraft;
   const [isTyping, setIsTyping] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -174,6 +174,7 @@ export function WidgetOverlay({
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
+  const [crmQueued, setCrmQueued] = useState(false);
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
   const submitInFlightRef = useRef<boolean>(false);
@@ -600,6 +601,7 @@ export function WidgetOverlay({
 
   async function appendReferenceLink(link: ReferenceLink) {
     setReferenceLinks((prev) => [...prev, link]);
+    setBriefApproved(false);
   }
 
   function appendReferenceFile(file: ReferenceFile) {
@@ -651,6 +653,8 @@ export function WidgetOverlay({
       }
 
       sessionDraft.finishApproval(true);
+      sessionDraft.recordApproval(finalizeResponse);
+      setCrmQueued(finalizeResponse.crmQueued === true);
       if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
       } else if (finalizeResponse.queued === true) {
@@ -1188,6 +1192,9 @@ export function WidgetOverlay({
                   }}
                   onChange={handleDraftEdit}
                   telegramBroadcastStatus={telegramBroadcastStatus}
+                  crmQueued={crmQueued}
+                  crmRevision={approval.crmRevision}
+                  requiresReapproval={approval.crmRevision !== undefined && !briefApproved}
                   onBookCatchUp={() => {
                     if (!configuredCalendlyUrl) {
                       void botSay('Scheduling is currently unavailable. Please ask the Balance team to arrange a time.');

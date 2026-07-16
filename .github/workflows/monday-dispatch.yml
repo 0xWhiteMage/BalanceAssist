@@ -1,0 +1,33 @@
+name: Monday dispatch
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: monday-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Dispatch pending Monday CRM work
+        shell: bash
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "${PRODUCTION_URL}/api/internal/monday-dispatch"
+          curl --fail --silent --show-error --max-time 30 --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --header "Content-Type: application/json" \
+            --data '{"worker":"monday-dispatch"}' \
+            "${PRODUCTION_URL}/api/internal/scheduler-heartbeat"

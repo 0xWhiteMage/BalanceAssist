@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 type MigrationRunner = {
-  applyMigrations(options: { connectionString: string; migrationsDir: string }): Promise<unknown>;
+  applyMigrations(options: { connectionString: string; migrationsDir: string; bootstrapStorage?: boolean }): Promise<unknown>;
 };
 
 const connectionString = process.env.TEST_DATABASE_URL;
@@ -44,7 +44,7 @@ describe.skipIf(!connectionString)('rate-limit database boundary', () => {
 
     await admin.query(`create database ${databaseName}`);
     const runner = await loadRunner();
-    await runner.applyMigrations({ connectionString: databaseUrl, migrationsDir });
+    await runner.applyMigrations({ connectionString: databaseUrl, migrationsDir, bootstrapStorage: true });
     client = new Client({ connectionString: databaseUrl });
     await client.connect();
   });

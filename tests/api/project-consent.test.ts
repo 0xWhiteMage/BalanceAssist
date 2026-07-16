@@ -34,7 +34,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     const response = await POST(new Request('https://www.balancestudio.tv/api/projects/session-1/consent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', origin: 'https://www.balancestudio.tv' },
-      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.0' })
+      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.1' })
     }), { params: Promise.resolve({ sessionId: 'session-1' }) });
 
     expect(response.status).toBe(200);
@@ -42,7 +42,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
       p_session_id: 'session-1',
       p_scope: 'analysis',
       p_granted: true,
-      p_notice_version: '1.0'
+      p_notice_version: '1.1'
     });
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
@@ -74,7 +74,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     const response = await POST(new Request('https://www.balancestudio.tv/api/projects/session-1/consent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', origin: 'https://www.balancestudio.tv' },
-      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.0' })
+      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.1' })
     }), { params: Promise.resolve({ sessionId: 'session-1' }) });
 
     expect(response.status).toBe(401);

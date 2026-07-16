@@ -55,6 +55,13 @@ describe('DataUseNotice', () => {
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/telegram.*backups/i);
   });
 
+  test('names Monday.com as a recipient of an approved project transfer', () => {
+    render(<DataUseNotice onConsent={vi.fn()} />);
+
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/monday\.com/i);
+    expect(CONSENT_VERSION).toBe('1.1');
+  });
+
   test('links to the privacy page for more detail', () => {
     render(<DataUseNotice onConsent={() => {}} />);
     expect(screen.getByRole('link', { name: /privacy/i })).toHaveAttribute('href', DATA_USE_NOTICE_COPY.privacyLink);

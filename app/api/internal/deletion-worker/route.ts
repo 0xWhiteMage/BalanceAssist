@@ -5,6 +5,7 @@ import { privateUploadBucketFromEnv } from '@/lib/uploads/private-storage';
 
 type DeletionJob = { id: string; session_id: string | null; cleanup_owner_id: string | null; lease_token: string | null };
 const CLEANUP_PAGE_SIZE = 100;
+const MONDAY_DELETION_RETRY_MS = 5 * 60 * 1000;
 
 export async function POST(request: Request) {
   const auth = validateAdminRequestAny(request, ['CRON_SECRET', 'INTERNAL_DISPATCH_SECRET']);
@@ -56,7 +57,16 @@ export async function POST(request: Request) {
       }
     }
     const deletedSession = await db.rpc('delete_session_for_deletion_job', { p_job_id: job.id, p_lease_token: job.lease_token });
-    if (deletedSession.error || !deletedSession.data) return fail();
+    if (deletedSession.error) return fail();
+    if (!deletedSession.data) {
+      const deferred = await db.rpc('defer_deletion_job', {
+        p_job_id: job.id,
+        p_lease_token: job.lease_token,
+        p_next_attempt_at: new Date(Date.now() + MONDAY_DELETION_RETRY_MS).toISOString(),
+      });
+      if (deferred.error || !deferred.data) return fail();
+      return NextResponse.json({ ok: true, processed: false, jobId: job.id, status: 'deferred' });
+    }
     const completed = await db.rpc('complete_deletion_job', { p_job_id: job.id, p_lease_token: job.lease_token });
     if (completed.error || !completed.data) return NextResponse.json({ ok: false, error: 'Deletion completion deferred' }, { status: 503 });
     return NextResponse.json({ ok: true, processed: true, jobId: job.id, status: 'completed' });

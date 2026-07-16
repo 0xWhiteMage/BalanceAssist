@@ -69,6 +69,23 @@ describe('test migration runner', () => {
     expect(() => runner.getIncrementalMigrations(migrationsDir)).toThrow(/Duplicate migration version 001/);
   });
 
+  it('preserves the root test database migration identities before adding CRM approval', async () => {
+    const runner = await loadRunner();
+
+    expect(runner.getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations'))
+      .filter((migration) => Number(migration.version) >= 44)
+      .map((migration) => migration.filename)).toEqual([
+      '044_monday_crm_projection_tables.sql',
+      '045_orphaned_private_attachment_cleanup.sql',
+      '046_claim_next_handoff_qualification.sql',
+      '047_atomic_crm_approval.sql',
+      '048_monday_sync_state_machine.sql',
+      '049_monday_crm_lifecycle.sql',
+      '052_monday_scheduler_health.sql',
+      '053_monday_reconciliation.sql'
+    ]);
+  });
+
   it('prepares the local Supabase database before the HTTP release journey runs', async () => {
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
     const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');

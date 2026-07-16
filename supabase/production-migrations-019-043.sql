@@ -1329,7 +1329,7 @@ END $$;
 -- ============================================================================
 CREATE TABLE public.deletion_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id uuid UNIQUE REFERENCES public.sessions(id) ON DELETE SET NULL,
+  session_id uuid REFERENCES public.sessions(id) ON DELETE SET NULL,
   state text NOT NULL DEFAULT 'requested' CHECK (state IN ('requested', 'claimed', 'processing', 'completed', 'failed')),
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   lease_token uuid,

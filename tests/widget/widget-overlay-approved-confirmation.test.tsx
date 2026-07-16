@@ -10,7 +10,10 @@ const { finalizeLeadMock } = vi.hoisted(() => ({
     persisted: true,
     queued: true,
     delivered: false,
-    retryable: false
+    retryable: false,
+    crmQueued: true,
+    crmRevision: 1,
+    approvedDraftVersion: 1
   }))
 }));
 
@@ -56,10 +59,13 @@ afterEach(() => {
     ok: true,
     sessionId: 'mock-session-id',
     qualificationStatus: 'qualified',
-    persisted: true,
-    queued: true,
-    delivered: false,
-    retryable: false
+      persisted: true,
+      queued: true,
+      delivered: false,
+      retryable: false,
+      crmQueued: true,
+      crmRevision: 1,
+      approvedDraftVersion: 1
   });
 });
 
@@ -107,7 +113,10 @@ function mockWidgetFetch() {
         persisted: true,
         queued: true,
         delivered: false,
-        retryable: false
+        retryable: false,
+        crmQueued: true,
+        crmRevision: 1,
+        approvedDraftVersion: 1
       });
     }
     if (url.includes('/api/projects/mock-session-id/consent')) {
@@ -166,10 +175,13 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
           ok: true,
           sessionId: 'mock-session-id',
           qualificationStatus: 'qualified',
-          persisted: true,
-          queued: true,
-          delivered: false,
-          retryable: false
+        persisted: true,
+        queued: true,
+        delivered: false,
+        retryable: false,
+        crmQueued: true,
+        crmRevision: 1,
+        approvedDraftVersion: 1
         });
         await Promise.resolve();
       });
@@ -226,6 +238,11 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     const telegramStatus = document.querySelector('[data-testid="approve-confirmation-telegram"]') as HTMLElement | null;
     expect(telegramStatus).not.toBeNull();
     expect(telegramStatus?.textContent).toMatch(/Telegram notification queued/i);
+
+    const crmStatus = document.querySelector('[data-testid="approve-confirmation-crm"]') as HTMLElement | null;
+    expect(crmStatus).not.toBeNull();
+    expect(crmStatus?.textContent).toMatch(/CRM transfer queued.*revision 1/i);
+    expect(crmStatus?.textContent).not.toMatch(/delivered to Monday/i);
   });
 
   test('when finalize responds with queued=false and delivered=false, the rail shows "Telegram connection pending"', async () => {
@@ -237,7 +254,10 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       persisted: true,
       queued: false,
       delivered: false,
-      retryable: false
+      retryable: false,
+      crmQueued: false,
+      crmRevision: 1,
+      approvedDraftVersion: 1
     });
 
     render(<WidgetOverlay autoOpen={true} />);
@@ -275,7 +295,10 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       persisted: false,
       queued: false,
       delivered: false,
-      retryable: false
+      retryable: false,
+      crmQueued: false,
+      crmRevision: 1,
+      approvedDraftVersion: 1
     });
 
     render(<WidgetOverlay autoOpen={true} />);

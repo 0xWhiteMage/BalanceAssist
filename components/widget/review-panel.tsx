@@ -84,7 +84,10 @@ export function ReviewPanel({
   onBookCatchUp,
   onTalkToHuman,
   telegramBroadcastStatus = 'unconfigured',
-  telegramPending = false
+  telegramPending = false,
+  crmQueued = false,
+  crmRevision,
+  requiresReapproval = false
 }: {
   draft: LeadDraft;
   approved: boolean;
@@ -96,6 +99,9 @@ export function ReviewPanel({
   onTalkToHuman?: () => void;
   telegramBroadcastStatus?: 'pending' | 'sent' | 'queued' | 'unconfigured';
   telegramPending?: boolean;
+  crmQueued?: boolean;
+  crmRevision?: number;
+  requiresReapproval?: boolean;
 }) {
   const ready = isBriefReadyForApproval(draft);
   const [isApproveInFlight, setIsApproveInFlight] = useState(false);
@@ -149,7 +155,7 @@ export function ReviewPanel({
     : isApproveInFlight
       ? 'Sending…'
       : mode === 'summary'
-        ? 'Approve & send to team'
+        ? requiresReapproval ? 'Approve updated brief' : 'Approve & send to team'
         : 'Send to team';
 
   return (
@@ -306,6 +312,20 @@ export function ReviewPanel({
                   ? 'Telegram broadcast pending…'
                   : 'Telegram connection pending'}
           </div>
+          {crmRevision !== undefined && (
+            <div
+              data-testid="approve-confirmation-crm"
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: crmQueued ? brandTokens.colors.warmGold : brandTokens.colors.mutedText,
+                textTransform: 'uppercase',
+                letterSpacing: '0.10em'
+              }}
+            >
+              {crmQueued ? `CRM transfer queued (revision ${crmRevision})` : `CRM transfer pending (revision ${crmRevision})`}
+            </div>
+          )}
           {onBookCatchUp && (
             <button
               type="button"

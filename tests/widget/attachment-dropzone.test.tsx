@@ -171,7 +171,7 @@ test('persists producer-transfer consent before linking', async () => {
     url: '/api/projects/sess-1/consent',
     scope: 'producer_transfer',
     granted: true,
-    noticeVersion: '1.0'
+        noticeVersion: '1.1'
   });
   expect(requestBodies[1]).toMatchObject({
     sessionId: 'sess-1',

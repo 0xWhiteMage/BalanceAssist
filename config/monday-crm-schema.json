@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": "2026-07",
+  "accountId": "3603500",
+  "workspaceId": "7318184",
+  "boardId": "18421762586",
+  "boardKind": "private",
+  "externalKeyColumn": "crm_record_id",
+  "requiredSourceColumns": ["crm_record_id", "qualification_status"],
+  "requiredColumnIds": ["crm_record_id", "qual_status"],
+  "sourceOwnedColumns": [
+    "crm_record_id", "contact_name", "contact_email", "company",
+    "service", "project_type", "project_scope", "timeline", "budget",
+    "qualification_status", "lead_score", "recommended_next_step",
+    "source_channel", "approved_at", "approved_revision", "reference_links"
+  ],
+  "mondayOwnedColumns": [
+    "lead_owner", "pipeline_stage", "next_follow_up", "last_contacted",
+    "meeting_booked", "meeting_outcome", "sales_notes", "loss_reason"
+  ],
+  "columns": {
+    "crm_record_id": { "id": "crm_record_id", "title": "CRM Record ID", "type": "text" },
+    "contact_name": { "id": "contact_name", "title": "Contact Name", "type": "text" },
+    "contact_email": { "id": "contact_email", "title": "Contact Email", "type": "email" },
+    "company": { "id": "company", "title": "Company", "type": "text" },
+    "service": { "id": "service", "title": "Service", "type": "status" },
+    "project_type": { "id": "project_type", "title": "Project Type", "type": "text" },
+    "project_scope": { "id": "project_scope", "title": "Project Scope", "type": "long_text" },
+    "timeline": { "id": "timeline", "title": "Timeline", "type": "text" },
+    "budget": { "id": "budget", "title": "Budget", "type": "status" },
+    "qualification_status": { "id": "qual_status", "title": "Qualification Status", "type": "status" },
+    "lead_score": { "id": "lead_score", "title": "Lead Score", "type": "numbers" },
+    "recommended_next_step": { "id": "next_action", "title": "Recommended Next Step", "type": "status" },
+    "source_channel": { "id": "source_channel", "title": "Source Channel", "type": "status" },
+    "approved_at": { "id": "submitted_at", "title": "Approved At", "type": "date" },
+    "approved_revision": { "id": "approved_revision", "title": "Approved Revision", "type": "numbers" },
+    "reference_links": { "id": "reference_links", "title": "Reference Links", "type": "long_text" }
+  },
+  "statusLabelIds": {
+    "qualification_status": { "qualified": 1, "needs_review": 0, "misfit": 17, "unqualified": 2 },
+    "recommended_next_step": { "schedule": 7, "manual_review": 0, "redirect": 5, "human_followup": 4 },
+    "service": { "production": 7, "post-production": 109, "event-experience-content": 4, "media-asset-adaptation": 5, "design-direction": 152, "generative-ai": 14, "not-sure-yet": 17 },
+    "budget": { "under-20k": 6, "20k-50k": 15, "50k-150k": 9, "150k-plus": 1, "not-sure-yet": 17 },
+    "source_channel": { "balance-assist": 7 },
+    "initial_stage": {}
+  },
+  "statusLabelTexts": {
+    "qualification_status": { "0": "Needs Review", "1": "Qualified", "2": "Unqualified", "17": "Misfit" },
+    "recommended_next_step": { "0": "Manual review", "4": "Human follow-up", "5": "Redirect", "7": "Book a call" },
+    "service": { "4": "Event & experience content", "5": "Media asset adaptation", "7": "Production", "14": "Generative AI", "17": "Not sure yet", "109": "Post-production", "152": "Design direction" },
+    "budget": { "1": "150k+", "6": "Under 20k", "9": "50k–150k", "15": "20k–50k", "17": "Not sure yet" },
+    "source_channel": { "7": "Balance Assist" },
+    "initial_stage": {}
+  },
+  "validationsFingerprint": "da7fe94abc27afb156b3952f27ac80603d3dd6aa13614bf71c62de43a9c30101"
+}

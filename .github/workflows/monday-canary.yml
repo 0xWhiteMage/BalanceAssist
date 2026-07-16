@@ -1,0 +1,42 @@
+name: Monday CRM canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type RUN_MONDAY_CANARY to create, update, reconcile, scrub, and delete one canary item
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    if: inputs.confirm == 'RUN_MONDAY_CANARY'
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run dormant-lane Monday canary
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          MONDAY_BOARD_ID: ${{ vars.MONDAY_BOARD_ID }}
+          MONDAY_API_VERSION: 2026-07
+          MONDAY_UPSERT_ENABLED: 'false'
+          MONDAY_CLEANUP_ENABLED: 'false'
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          MONDAY_CANARY_EVIDENCE_PATH: .artifacts/monday-canary/evidence.jsonl
+        run: node --env-file=/dev/null scripts/run-monday-canary.mjs --execute
+      - name: Upload PII-free canary evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: monday-canary-evidence
+          path: .artifacts/monday-canary/
+          if-no-files-found: warn

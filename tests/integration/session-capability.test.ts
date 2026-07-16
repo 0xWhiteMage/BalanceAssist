@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { extractSessionIdFromCapability } from '@/lib/security/session-capability';
 
@@ -19,6 +19,7 @@ import { requireSession } from '@/lib/api/require-session';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 let client: import('pg').Client | undefined;
+const originalTrustedClientIpHeader = process.env.TRUSTED_CLIENT_IP_HEADER;
 
 describe.skipIf(!connectionString)('persisted session capabilities', () => {
   beforeAll(async () => {
@@ -27,6 +28,13 @@ describe.skipIf(!connectionString)('persisted session capabilities', () => {
     await client.connect();
     hasSupabaseServerConfigMock.mockReturnValue(true);
     createServerSupabaseClientMock.mockImplementation(() => ({
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        const result = await client!.query(
+          `select * from public.${name}($1, $2, $3)`,
+          [args.p_key_hash, args.p_limit, args.p_window_seconds]
+        );
+        return { data: result.rows, error: null };
+      },
       from: () => ({
         insert: (session: Record<string, unknown>) => ({
           select: () => ({
@@ -70,13 +78,19 @@ describe.skipIf(!connectionString)('persisted session capabilities', () => {
     await client?.end();
   });
 
+  afterEach(() => {
+    if (originalTrustedClientIpHeader === undefined) delete process.env.TRUSTED_CLIENT_IP_HEADER;
+    else process.env.TRUSTED_CLIENT_IP_HEADER = originalTrustedClientIpHeader;
+  });
+
   it('authenticates the returned capability only for its persisted session ID', async () => {
+    process.env.TRUSTED_CLIENT_IP_HEADER = 'x-vercel-forwarded-for';
     const createRequest = new NextRequest('https://www.balancestudio.tv/api/sessions', {
       method: 'POST',
-      headers: { origin: 'https://www.balancestudio.tv' },
+      headers: { origin: 'https://www.balancestudio.tv', 'x-vercel-forwarded-for': '198.18.0.1' },
       body: JSON.stringify({
         sourceUrl: 'https://www.balancestudio.tv',
-        consentVersion: '2026-07-13',
+        consentVersion: '1.1',
         consentedAt: '2026-07-13T10:00:00.000Z'
       })
     });

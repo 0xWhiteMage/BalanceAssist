@@ -108,6 +108,25 @@ describe('emitEvent', () => {
     spy.mockRestore();
   });
 
+  test('emits only the allowlisted Monday sync fields and stable reason codes', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    emitEvent('monday_sync_failed', {
+      crmRecordId: 'crm-1',
+      syncId: 'sync-1',
+      revision: 2,
+      durationMs: 10,
+      reason: 'monday_temporary_failure',
+      email: 'user@example.com',
+      rawError: 'private token',
+    });
+
+    const parsed = JSON.parse(spy.mock.calls[0][1] as string);
+    expect(parsed).toMatchObject({ event: 'monday_sync_failed', crmRecordId: 'crm-1', syncId: 'sync-1', revision: 2, durationMs: 10, reason: 'monday_temporary_failure' });
+    expect(parsed.email).toBeUndefined();
+    expect(parsed.rawError).toBeUndefined();
+    spy.mockRestore();
+  });
+
   test('does nothing for unknown event names', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     (emitEvent as Function)('unknown_event', { foo: 'bar' });

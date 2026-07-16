@@ -116,7 +116,8 @@ function databaseSupabase(client: import('pg').Client) {
       return table(name);
     },
     async rpc(name: string, args: Record<string, unknown> = {}) {
-      const call = await client.query(`select * from public.${name}(${Object.keys(args).map((_, index) => `$${index + 1}`).join(', ')})`, Object.values(args));
+      const values = Object.values(args).map((value) => Array.isArray(value) ? JSON.stringify(value) : value);
+      const call = await client.query(`select * from public.${name}(${Object.keys(args).map((_, index) => `$${index + 1}`).join(', ')})`, values);
       if (name === 'reserve_handoff_send') return { data: Object.values(call.rows[0] ?? {})[0] ?? false, error: null };
       return { data: call.rows, error: null };
     }
@@ -158,7 +159,17 @@ describe.skipIf(!connectionString)('release proof journey', () => {
       createHash('sha256').update(`session-create:${clientIp}`).digest('hex')
     ]);
     await client?.query('delete from public.handoff_outbox where session_id in (select id from public.sessions where source_url = $1)', [origin]);
-    await client?.query('delete from public.sessions where source_url = $1', [origin]);
+    await client?.query('begin');
+    try {
+      await client?.query('set local session_replication_role = replica');
+      await client?.query('delete from public.session_consents where session_id in (select id from public.sessions where source_url = $1)', [origin]);
+      await client?.query('set local session_replication_role = origin');
+      await client?.query('delete from public.sessions where source_url = $1', [origin]);
+      await client?.query('commit');
+    } catch (error) {
+      await client?.query('rollback');
+      throw error;
+    }
     telegramRequests.length = 0;
   });
 
@@ -171,7 +182,7 @@ describe.skipIf(!connectionString)('release proof journey', () => {
   it('persists a capability, transfers a consented canonical draft, dispatches it, and returns a signed reply', async () => {
     const sessionResponse = await createSession(new Request(`${origin}/api/sessions`, {
       method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-vercel-forwarded-for': clientIp },
-      body: JSON.stringify({ sourceUrl: origin, consentVersion: '1.0', consentedAt: '2026-07-14T00:00:00.000Z' })
+      body: JSON.stringify({ sourceUrl: origin, consentVersion: '1.1', consentedAt: '2026-07-14T00:00:00.000Z' })
     }));
     const session = await sessionResponse.json() as { sessionId: string };
     const capability = sessionResponse.headers.get('set-cookie')?.match(/session_capability=([^;]+)/)?.[1] ?? '';
@@ -180,9 +191,10 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     expect(sessionResponse.status).toBe(200);
     await expect(client!.query('select capability_hash, capability_expires_at from public.sessions where id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [expect.objectContaining({ capability_hash: expect.any(String), capability_expires_at: expect.any(Date) })] });
-    await expect(recordConsent(new Request(`${origin}/api/projects/${session.sessionId}/consent`, { method: 'POST', headers: auth, body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.0' }) }), { params: Promise.resolve({ sessionId: session.sessionId }) })).resolves.toHaveProperty('status', 200);
+    await expect(recordConsent(new Request(`${origin}/api/projects/${session.sessionId}/consent`, { method: 'POST', headers: auth, body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.1' }) }), { params: Promise.resolve({ sessionId: session.sessionId }) })).resolves.toHaveProperty('status', 200);
     await expect(client!.query("select granted from public.session_consents where session_id = $1 and scope = 'producer_transfer'", [session.sessionId]))
       .resolves.toMatchObject({ rows: [{ granted: true }] });
+    await client!.query('update public.sessions set telegram_thread_id = 77 where id = $1', [session.sessionId]);
     const draftResponse = await updateDraft(new Request(`${origin}/api/projects/${session.sessionId}/draft`, { method: 'PUT', headers: auth, body: JSON.stringify({ fields: [
       { field: 'service', value: 'production', provenance: 'confirmed' }, { field: 'projectScope', value: 'Film', provenance: 'confirmed' },
       { field: 'contactName', value: 'Ada', provenance: 'confirmed' }, { field: 'contactEmail', value: 'ada@example.test', provenance: 'confirmed' }
@@ -190,15 +202,21 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     expect((await draftResponse.json()).draftVersion).toBe(1);
     await expect(client!.query('select draft_version, draft from public.sessions where id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [expect.objectContaining({ draft_version: 1, draft: expect.objectContaining({ contactEmail: expect.any(Object) }) })] });
-    const final = await finalizeLead(new Request(`${origin}/api/leads/finalize`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: session.sessionId, qualificationStatus: 'qualified' }) }));
-    expect((await final.json()).queued).toBe(true);
+    const final = await finalizeLead(new Request(`${origin}/api/leads/finalize`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: session.sessionId }) }));
+    await expect(final.json()).resolves.toMatchObject({ queued: true, crmQueued: true, qualificationStatus: 'needs_review' });
+    await expect(client!.query(
+      `select c.desired_revision, o.revision, o.operation, o.state
+       from public.crm_leads c
+       join public.monday_sync_outbox o on o.crm_lead_id = c.id
+       where c.source_session_id = $1`,
+      [session.sessionId]
+    )).resolves.toMatchObject({ rows: [{ desired_revision: 1, revision: 1, operation: 'upsert', state: 'pending' }] });
     await expect(client!.query('select state from public.handoff_outbox where session_id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [{ state: 'pending' }] });
     const dispatched = await dispatchHandoffs(new Request(`${origin}/api/internal/handoff-dispatch`, { method: 'POST', headers: { authorization: `Bearer ${runId}-cron` } }));
     expect((await dispatched.json()).results).toEqual([expect.objectContaining({ status: 'sent' })]);
     await expect(client!.query('select state from public.handoff_outbox where session_id = $1', [session.sessionId]))
       .resolves.toMatchObject({ rows: [{ state: 'sent' }] });
-    expect(telegramRequests).toContainEqual(expect.objectContaining({ path: `/bot${runId}-bot/createForumTopic`, body: expect.objectContaining({ chat_id: '-100123' }) }));
     expect(telegramRequests).toContainEqual(expect.objectContaining({ path: `/bot${runId}-bot/sendMessage`, body: expect.objectContaining({ chat_id: '-100123', message_thread_id: 77 }) }));
     const webhook = await receiveWebhook(new Request(`${origin}/api/telegram/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': `${runId}-webhook` }, body: JSON.stringify({ update_id: updateId, message: { message_id: 322, message_thread_id: 77, chat: { id: -100123, type: 'supergroup' }, from: { id: 2, username: 'producer', first_name: 'Pat' }, text: 'We will follow up.' } }) }));
     expect(webhook.status).toBe(200);

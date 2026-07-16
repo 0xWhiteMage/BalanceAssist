@@ -14,6 +14,22 @@
 
 Use a dedicated worktree created from current `main`. Execute database and Monday-client work in parallel only after Task 1 freezes the external contract.
 
+### Approved migration sequence
+
+| Version | Purpose | Task |
+|---|---|---|
+| 044 | CRM aggregate | 4 |
+| 045 | Legacy cleanup | Legacy fix |
+| 046 | Legacy handoff fix | Legacy fix |
+| 047 | Atomic approval | 5 |
+| 048 | Sync state machine | 6 |
+| 049 | Lifecycle | 8 |
+| 050-051 | Legacy fixes | Legacy fixes |
+| 052 | Scheduler health | 9 |
+| 053 | Bounded reconciliation | 10 |
+
+The Task 11 CRM runner selects only `044`, `047`, `048`, `049`, `052`, and `053`; it excludes legacy `045`, `046`, `050`, and `051`.
+
 ```text
 Task 1: governance and board contract
   +-> Task 2: CRM domain snapshot and payload builder
@@ -549,7 +565,7 @@ git commit -m "feat: add durable Monday CRM projection schema"
 ## Task 5: Make Approval Revision and CRM Enqueue Atomic
 
 **Files:**
-- Create: `supabase/migrations/045_atomic_crm_approval.sql`
+- Create: `supabase/migrations/047_atomic_crm_approval.sql`
 - Modify: `app/api/leads/finalize/route.ts`
 - Modify: `lib/api/contracts.ts`
 - Modify: `tests/api/leads-finalize.test.ts`
@@ -576,7 +592,7 @@ Run: `npx vitest run --no-file-parallelism tests/integration/database-schema.tes
 
 Expected: FAIL because finalization does not create CRM revisions.
 
-**Step 3: Create forward migration 045**
+**Step 3: Create forward migration 047**
 
 Drop and recreate `finalize_session_lead(uuid)` in a forward migration; PostgreSQL
 cannot change its table return type with `CREATE OR REPLACE FUNCTION`. Do not edit
@@ -625,14 +641,14 @@ Run: `npm run test:db`
 Expected: PASS.
 
 ```bash
-git add supabase/migrations/045_atomic_crm_approval.sql app/api/leads/finalize/route.ts lib/api/contracts.ts tests/api/leads-finalize.test.ts tests/integration/database-schema.test.ts
+git add supabase/migrations/047_atomic_crm_approval.sql app/api/leads/finalize/route.ts lib/api/contracts.ts tests/api/leads-finalize.test.ts tests/integration/database-schema.test.ts
 git commit -m "feat: atomically approve CRM lead revisions"
 ```
 
 ## Task 6: Add Leased Monday Claims and Token-Guarded Completion
 
 **Files:**
-- Create: `supabase/migrations/046_monday_sync_state_machine.sql`
+- Create: `supabase/migrations/048_monday_sync_state_machine.sql`
 - Create: `lib/monday/outbox.ts`
 - Create: `tests/monday/outbox.test.ts`
 - Modify: `tests/integration/database-schema.test.ts`
@@ -651,7 +667,7 @@ Run: `npm test -- tests/monday/outbox.test.ts`
 
 Expected: FAIL because Monday claim RPCs do not exist.
 
-**Step 3: Create migration 046**
+**Step 3: Create migration 048**
 
 Add service-role-only RPCs:
 
@@ -718,7 +734,7 @@ Run: `npm run test:db`
 Expected: PASS.
 
 ```bash
-git add supabase/migrations/046_monday_sync_state_machine.sql lib/monday/outbox.ts tests/monday/outbox.test.ts tests/integration/database-schema.test.ts
+git add supabase/migrations/048_monday_sync_state_machine.sql lib/monday/outbox.ts tests/monday/outbox.test.ts tests/integration/database-schema.test.ts
 git commit -m "feat: add leased Monday sync state machine"
 ```
 
@@ -816,7 +832,7 @@ git commit -m "feat: dispatch approved leads to Monday"
 ## Task 8: Integrate Consent Revocation, Deletion, and Retention
 
 **Files:**
-- Create: `supabase/migrations/047_monday_crm_lifecycle.sql`
+- Create: `supabase/migrations/049_monday_crm_lifecycle.sql`
 - Modify: `app/api/internal/deletion-worker/route.ts`
 - Create: `app/api/internal/monday-lifecycle/route.ts`
 - Create: `scripts/request-monday-dsr.mjs`
@@ -851,7 +867,7 @@ Run: `npm test -- tests/api/deletion-worker.test.ts tests/api/monday-lifecycle.t
 
 Expected: FAIL because CRM lifecycle integration does not exist.
 
-**Step 3: Create migration 047**
+**Step 3: Create migration 049**
 
 Forward-migrate these functions rather than editing recorded migrations:
 
@@ -871,7 +887,7 @@ Forward-migrate these functions rather than editing recorded migrations:
   cannot monopolize the deletion queue.
 
 Backfill non-null `review_due_at` and any applicable terminal
-`retention_expires_at` for CRM rows created before migration 047.
+`retention_expires_at` for CRM rows created before migration 049.
 Remove superseded full revision payloads once they are no longer needed for
 retry. Do not retain PII, payload hashes, or linkable contact fingerprints in
 completed deletion jobs or lifecycle tombstones.
@@ -900,14 +916,14 @@ Run: `npm run test:db`
 Expected: PASS.
 
 ```bash
-git add supabase/migrations/047_monday_crm_lifecycle.sql app/api/internal/deletion-worker/route.ts app/api/internal/monday-lifecycle/route.ts scripts/request-monday-dsr.mjs tests/api/deletion-worker.test.ts tests/api/monday-lifecycle.test.ts tests/privacy/session-consent.test.ts docs/deletion-processing-runbook.md
+git add supabase/migrations/049_monday_crm_lifecycle.sql app/api/internal/deletion-worker/route.ts app/api/internal/monday-lifecycle/route.ts scripts/request-monday-dsr.mjs tests/api/deletion-worker.test.ts tests/api/monday-lifecycle.test.ts tests/privacy/session-consent.test.ts docs/deletion-processing-runbook.md
 git commit -m "feat: enforce Monday CRM lifecycle deletion"
 ```
 
 ## Task 9: Add Schedulers, Heartbeats, and Backlog Health
 
 **Files:**
-- Create: `supabase/migrations/048_monday_scheduler_health.sql`
+- Create: `supabase/migrations/052_monday_scheduler_health.sql`
 - Create: `.github/workflows/monday-dispatch.yml`
 - Create: `.github/workflows/monday-lifecycle.yml`
 - Modify: `app/api/internal/scheduler-heartbeat/route.ts`
@@ -929,7 +945,7 @@ Run: `npm test -- tests/api/scheduler-health.test.ts tests/integration/monday-wo
 
 Expected: FAIL because Monday workers are not registered.
 
-**Step 3: Create migration 048**
+**Step 3: Create migration 052**
 
 Add `monday-dispatch` and `monday-lifecycle` to the heartbeat constraint and RPC allowlist. Extend `scheduler_health()` with:
 
@@ -963,14 +979,14 @@ Run: `npm test -- tests/api/scheduler-health.test.ts tests/integration/monday-wo
 Expected: PASS.
 
 ```bash
-git add supabase/migrations/048_monday_scheduler_health.sql .github/workflows/monday-dispatch.yml .github/workflows/monday-lifecycle.yml app/api/internal/scheduler-heartbeat/route.ts app/api/internal/scheduler-health/route.ts tests/api/scheduler-health.test.ts tests/integration/monday-workflows.test.ts
+git add supabase/migrations/052_monday_scheduler_health.sql .github/workflows/monday-dispatch.yml .github/workflows/monday-lifecycle.yml app/api/internal/scheduler-heartbeat/route.ts app/api/internal/scheduler-health/route.ts tests/api/scheduler-health.test.ts tests/integration/monday-workflows.test.ts
 git commit -m "ci: schedule and monitor Monday CRM sync"
 ```
 
 ## Task 10: Add Bounded Reconciliation and Unknown-Delivery Recovery
 
 **Files:**
-- Create: `supabase/migrations/049_monday_reconciliation.sql`
+- Create: `supabase/migrations/053_monday_reconciliation.sql`
 - Create: `app/api/internal/monday-reconcile/route.ts`
 - Create: `.github/workflows/monday-reconcile.yml`
 - Create: `tests/api/monday-reconcile.test.ts`
@@ -994,7 +1010,7 @@ Expected: FAIL because reconciliation does not exist.
 
 **Step 3: Add durable reconciliation primitives**
 
-Migration 049 adds a protected checkpoint table and service-role-only RPCs for
+Migration `053` adds a protected checkpoint table and service-role-only RPCs for
 claiming a page, recording a cursor, adopting a verified item ID, enqueueing a
 repair revision, and terminally recording duplicate-key conflicts. Extend the
 heartbeat allowlists with `monday-reconcile` using a freshness threshold greater
@@ -1020,7 +1036,7 @@ Run: `npm test -- tests/api/monday-reconcile.test.ts tests/integration/monday-wo
 Expected: PASS.
 
 ```bash
-git add supabase/migrations/049_monday_reconciliation.sql app/api/internal/monday-reconcile/route.ts .github/workflows/monday-reconcile.yml tests/api/monday-reconcile.test.ts lib/monday/client.ts lib/monday/outbox.ts app/api/internal/scheduler-heartbeat/route.ts app/api/internal/scheduler-health/route.ts tests/integration/database-schema.test.ts tests/integration/monday-workflows.test.ts docs/monday-crm-runbook.md
+git add supabase/migrations/053_monday_reconciliation.sql app/api/internal/monday-reconcile/route.ts .github/workflows/monday-reconcile.yml tests/api/monday-reconcile.test.ts lib/monday/client.ts lib/monday/outbox.ts app/api/internal/scheduler-heartbeat/route.ts app/api/internal/scheduler-health/route.ts tests/integration/database-schema.test.ts tests/integration/monday-workflows.test.ts docs/monday-crm-runbook.md
 git commit -m "feat: reconcile Monday CRM projections"
 ```
 
@@ -1028,7 +1044,7 @@ git commit -m "feat: reconcile Monday CRM projections"
 
 **Files:**
 - Create: `scripts/apply-production-crm-migrations.mjs`
-- Create: `supabase/production-monday-crm-044-049.sql`
+- Create: `supabase/production-monday-crm-044-053.sql`
 - Create: `.github/workflows/production-crm-migrations.yml`
 - Create: `tests/integration/production-crm-migration-policy.test.ts`
 - Modify: `scripts/apply-production-migrations.mjs`
@@ -1041,7 +1057,7 @@ git commit -m "feat: reconcile Monday CRM projections"
 
 **Step 1: Write failing migration-policy tests**
 
-Require exactly versions 044-049, exact filenames, SHA-256 source pins normalized
+Require exactly the separately approved CRM migration set `044`, `047`, `048`, `049`, `052`, and `053`, exact filenames, SHA-256 source pins normalized
 to LF, no later migration, source-identical SQL Editor bundle sections, baseline
 043 and schema-signature guards inside the transaction, a shared PostgreSQL
 advisory lock, exact tracker inserts, and protected environment approval. Add
@@ -1057,11 +1073,11 @@ Expected: FAIL because the reviewed path does not exist.
 
 Mirror `apply-production-cleanup-migrations.mjs` but use a separate allowlist and
 environment named `production-crm-migrations`. The runner must reject changed
-hashes, renamed files, missing versions, or any version after 049. It must take
+hashes, renamed files, missing approved versions, and every non-CRM migration. It must take
 the same advisory lock as the SQL Editor artifact and verify baseline plus
 absence/presence under that lock.
 
-Modify the ordinary production runner so it requires exact hash-pinned 044-049
+Modify the ordinary production runner so it requires exact hash-pinned 044, 047, 048, 049, 052, and 053
 records before a release, never applies those files itself, and does not run them
 through the expand-only parser after they are recorded. Modify the cleanup runner
 to select exactly 038-043 and ignore later migrations rather than rejecting 044+.
@@ -1071,8 +1087,8 @@ to select exactly 038-043 and ignore later migrations rather than rejecting 044+
 The bundle must:
 
 - Execute `BEGIN`, acquire `pg_advisory_xact_lock`, then verify migration 043,
-  required schema signatures, and absence of 044-049 before applying source.
-- Contain exact source for 044-049.
+  required schema signatures, and absence of `044`, `047`, `048`, `049`, `052`, and `053` before applying source.
+- Contain exact source for `044`, `047`, `048`, `049`, `052`, and `053` only.
 - Insert exact tracker rows only after each source succeeds.
 - Verify all six rows before `COMMIT`.
 - Exclude migrations 038-043 source and any later version.
@@ -1086,7 +1102,7 @@ Run: `npm test -- tests/integration/production-crm-migration-policy.test.ts test
 Expected: PASS.
 
 ```bash
-git add scripts/apply-production-crm-migrations.mjs supabase/production-monday-crm-044-049.sql .github/workflows/production-crm-migrations.yml tests/integration/production-crm-migration-policy.test.ts scripts/apply-production-migrations.mjs scripts/apply-production-cleanup-migrations.mjs tests/integration/production-migration-policy.test.ts tests/integration/production-cleanup-migration-policy.test.ts .github/workflows/production-release.yml package.json README.md
+git add scripts/apply-production-crm-migrations.mjs supabase/production-monday-crm-044-053.sql .github/workflows/production-crm-migrations.yml tests/integration/production-crm-migration-policy.test.ts scripts/apply-production-migrations.mjs scripts/apply-production-cleanup-migrations.mjs tests/integration/production-migration-policy.test.ts tests/integration/production-cleanup-migration-policy.test.ts .github/workflows/production-release.yml package.json README.md
 git commit -m "ci: protect Monday CRM migrations"
 ```
 
@@ -1210,9 +1226,9 @@ Expected: all project gates pass; database tests may skip locally only when the 
 
 Roll out in this order:
 
-1. Prove the old application remains compatible with database migrations 044-049
+1. Prove the old application remains compatible with database migrations `044`, `047`, `048`, `049`, `052`, and `053`
    while both Monday lanes are dormant.
-2. Apply protected migrations 044-049 under the shared advisory lock while the
+2. Apply the protected CRM migration set under the shared advisory lock while the
    old application remains active.
 3. Deploy the new code with both Monday lanes disabled.
 4. Enable cleanup only and run the deletion canary.
@@ -1225,7 +1241,7 @@ workflow, and feature lane are live.
 Before setting `MONDAY_UPSERT_ENABLED=true`, first enable and canary
 `MONDAY_CLEANUP_ENABLED`, then require:
 
-- Production migrations 044-049 recorded.
+- Production CRM migrations `044`, `047`, `048`, `049`, `052`, and `053` recorded.
 - Dedicated token rotated or OAuth connected.
 - Live board schema fingerprint matches.
 - One canary create, reapproval update, reconciliation, and deletion succeeds.

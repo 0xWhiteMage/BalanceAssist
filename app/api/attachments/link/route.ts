@@ -40,15 +40,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const { error } = await supabase.from('reference_links').insert({
+  const { data, error } = await supabase.from('reference_links').insert({
     session_id: sessionId,
     url: parsed.data.url,
     kind: parsed.data.kind
-  });
+  }).select('id, url, kind').single();
 
   if (error) {
     return jsonWithCors({ ok: false, persisted: false, error: 'attachment_link_persist_failed' }, { status: 500 }, request);
   }
 
-  return jsonWithCors({ ok: true, persisted: true }, undefined, request);
+  if (!data?.id) {
+    return jsonWithCors({ ok: false, persisted: false, error: 'attachment_link_persist_failed' }, { status: 500 }, request);
+  }
+
+  return jsonWithCors({
+    ok: true,
+    persisted: true,
+    link: { id: data.id, sessionId, url: data.url, kind: data.kind }
+  }, undefined, request);
 }

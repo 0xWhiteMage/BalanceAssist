@@ -20,7 +20,13 @@ type EventName =
   | 'correction_requested'
   | 'deletion_requested'
   | 'project_reset'
-  | 'temporary_sessions_expired';
+  | 'temporary_sessions_expired'
+  | 'monday_sync_succeeded'
+  | 'monday_sync_failed'
+  | 'monday_sync_unknown'
+  | 'monday_sync_conflict'
+  | 'monday_sync_suppressed'
+  | 'monday_schema_drift';
 
 type EventSchemaVersion = 1;
 const SAFE_REASON_CODES = [
@@ -29,7 +35,16 @@ const SAFE_REASON_CODES = [
   'handoff_type_invalid',
   'producer_transfer_revoked',
   'session_unavailable',
-  'telegram_send_failed'
+  'telegram_send_failed',
+  'monday_auth_failed',
+  'monday_permission_denied',
+  'monday_rate_limited',
+  'monday_schema_drift',
+  'monday_payload_invalid',
+  'monday_temporary_failure',
+  'monday_provider_idempotency_conflict',
+  'monday_delivery_unknown',
+  'monday_duplicate_key_conflict'
 ] as const;
 
 const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: readonly string[] }> = {
@@ -53,6 +68,12 @@ const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: re
   deletion_requested: { version: 1, fields: ['sessionId'] },
   project_reset: { version: 1, fields: ['sessionId', 'draftVersion'] },
   temporary_sessions_expired: { version: 1, fields: ['deletedSessions', 'deferredSessions', 'releasedClaims'] },
+  monday_sync_succeeded: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs'] },
+  monday_sync_failed: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs', 'reason'] },
+  monday_sync_unknown: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs', 'reason'] },
+  monday_sync_conflict: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs', 'reason'] },
+  monday_sync_suppressed: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs', 'reason'] },
+  monday_schema_drift: { version: 1, fields: ['reason'] },
 };
 
 export function emitEvent(

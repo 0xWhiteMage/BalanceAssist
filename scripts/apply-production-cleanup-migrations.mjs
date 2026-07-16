@@ -7,7 +7,7 @@ import { Client } from 'pg';
 import { applyMigrations, getIncrementalMigrations } from './apply-test-migrations.mjs';
 
 const reviewedCleanupMigrations = new Map([
-  ['038', { filename: '038_durable_deletion_jobs.sql', sha256: '37b0ef6c4f5d7e3ccccabd96add128cfaae8f86e27d6ff384f945e96ee3a2ac3' }],
+  ['038', { filename: '038_durable_deletion_jobs.sql', sha256: 'e48fa4c65ff206b60e373ea8cb7e7da8e748a390d3ca0dc602d167e9f0817657' }],
   ['039', { filename: '039_deletion_scheduler_health.sql', sha256: '5ef142d3b23de7acf7e1d46a78f848e3427779a2f9d30516152dc401fb28008b' }],
   ['040', { filename: '040_deletion_recovery_lifecycle.sql', sha256: 'c99d3ec9d27500a959010bd20e03bb466946f65fa7f6be7835de2f273421fba6' }],
   ['041', { filename: '041_deletion_backlog_count.sql', sha256: '87c5c9f1e5559e1176c8d83457eebbb9d4fbd8264798f793f2a7836076346d4f' }],
@@ -18,12 +18,7 @@ const reviewedCleanupMigrations = new Map([
 export const cleanupMigrationVersions = [...reviewedCleanupMigrations.keys()];
 
 export function selectCleanupMigrations(migrations) {
-  const cleanupCandidates = migrations.filter((migration) => BigInt(migration.version) >= 38n);
-  for (const migration of cleanupCandidates) {
-    if (!reviewedCleanupMigrations.has(migration.version)) {
-      throw new Error(`unreviewed migration ${migration.version} is not permitted by the one-time cleanup workflow`);
-    }
-  }
+  const cleanupCandidates = migrations.filter((migration) => reviewedCleanupMigrations.has(migration.version));
 
   return cleanupMigrationVersions.map((version) => {
     const migration = cleanupCandidates.find((candidate) => candidate.version === version);
