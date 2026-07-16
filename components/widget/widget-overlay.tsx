@@ -540,7 +540,6 @@ export function WidgetOverlay({
     if (humanRequested || !noticeConsent) return;
     const activeSessionId = await loadOrCreateSession();
     if (!activeSessionId) {
-      setEntryPath(null);
       return;
     }
     if (!await recordHumanContactConsent(activeSessionId)) {

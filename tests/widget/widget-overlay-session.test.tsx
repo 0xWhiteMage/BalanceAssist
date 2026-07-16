@@ -372,21 +372,46 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(JSON.stringify(consentRequest?.body)).not.toContain('producer_transfer');
   });
 
-  test('keeps email and scheduling fallbacks visible when human session creation fails', async () => {
+  test('keeps human recovery persistent when human session creation fails', async () => {
+    const requestLog: RecordedRequest[] = [];
     global.fetch = makeFetchRecorder([
       ({ url, method }) => {
+        requestLog.push({ url, method });
         if (url.includes('/api/sessions/inspect')) return new Response(JSON.stringify({ ok: true, exists: false }), { status: 200 });
         if (url.includes('/api/sessions') && method === 'POST') return new Response(JSON.stringify({ ok: false }), { status: 503 });
         return null;
       }
     ]);
-    render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
+    const { rerender } = render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
 
     await chooseHumanPath();
-    await waitFor(() => {
-      expect(screen.getByRole('link', { name: /email the team/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-      expect(screen.getByRole('link', { name: /book a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/test');
-    });
+    const unavailable = await screen.findByText('The private relay could not start. You can still contact the team directly.');
+    const email = screen.getByRole('link', { name: /email the team/i });
+    const booking = screen.getByRole('link', { name: /book a call/i });
+    expect(unavailable).toBeVisible();
+    expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
+    expect(screen.queryByPlaceholderText(/message the team request|type a message/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Build a brief with AI' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Talk to the team without AI' })).toBeNull();
+
+    email.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.click(email);
+    expect(booking).toBeVisible();
+    expect(unavailable).toBeVisible();
+
+    booking.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.click(booking);
+    expect(email).toBeVisible();
+    expect(unavailable).toBeVisible();
+
+    rerender(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.getByRole('link', { name: /email the team/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
+    expect(screen.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
+    expect(requestLog.filter((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toHaveLength(1);
+    expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   });
 
   test('keeps the intake choices available when session persistence fails', async () => {
