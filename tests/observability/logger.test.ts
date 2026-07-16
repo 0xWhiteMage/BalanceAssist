@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { createLogger, extractRequestId } from '@/lib/logger';
+import { createLogger, extractClientRequestId, extractRequestId } from '@/lib/logger';
 
 describe('createLogger', () => {
   test('includes a stable request id in log entries', () => {
@@ -90,11 +90,8 @@ describe('createLogger', () => {
 });
 
 describe('extractRequestId', () => {
-  test.each([
-    '550e8400-e29b-41d4-a716-446655440000',
-    'request_token-123.abc',
-    'a'.repeat(64)
-  ])('accepts a bounded UUID/token request id: %s', (requestId) => {
+  test('accepts a canonical UUID request id', () => {
+    const requestId = '550e8400-e29b-41d4-a716-446655440000';
     const request = new Request('https://example.com', {
       headers: { 'x-request-id': requestId }
     });
@@ -103,6 +100,7 @@ describe('extractRequestId', () => {
   });
 
   test.each([
+    ['valid-looking arbitrary token', 'request_token-123.abc'],
     ['secret-bearing', 'Bearer secret-route-token'],
     ['CRLF-bearing', 'safe-id\r\nX-Secret: leaked'],
     ['oversized', 'a'.repeat(65)],
@@ -131,4 +129,26 @@ describe('extractRequestId', () => {
     expect(entry.rid).toMatch(/^[a-z0-9-]{8}$/i);
     spy.mockRestore();
   });
+});
+
+describe('extractClientRequestId', () => {
+  test('returns a canonical UUID for relay idempotency', () => {
+    const requestId = '8d1f684d-090c-4f67-80d4-317a88ad9cbe';
+    const request = new Request('https://example.com', {
+      headers: { 'x-request-id': requestId }
+    });
+
+    expect(extractClientRequestId(request)).toBe(requestId);
+  });
+
+  test.each([null, 'retry-key', 'a'.repeat(65)])(
+    'returns null for a missing or invalid relay idempotency key: %s',
+    (requestId) => {
+      const request = {
+        headers: { get: () => requestId }
+      } as unknown as Request;
+
+      expect(extractClientRequestId(request)).toBeNull();
+    }
+  );
 });

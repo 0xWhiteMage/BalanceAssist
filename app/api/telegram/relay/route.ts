@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
-import { extractRequestId } from '@/lib/logger';
+import { extractClientRequestId } from '@/lib/logger';
 
 const relayPayloadSchema = z.object({
   sessionId: z.string().min(1),
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   const { sessionId, text } = parsed.data;
   const authResult = await requireSession(request, sessionId);
   if (!authResult.ok) return authResult.response;
-  const requestId = extractRequestId(request)?.trim();
+  const requestId = extractClientRequestId(request);
   if (!requestId) return jsonWithCors({ ok: false, error: 'request_id_required' }, { status: 400 }, request);
 
   const { data, error } = await authResult.supabase.rpc('relay_human_message', {

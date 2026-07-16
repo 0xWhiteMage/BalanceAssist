@@ -2,6 +2,8 @@ import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 
 const DRAFT_MARKER = ':::draft:::';
 const DRAFT_LINE_PATTERN = /:::draft:::\s*(?:<json>)?\s*(\{[\s\S]*?\})\s*(?:<\/json>)?\s*:::/i;
+const TEMPORAL_EXPRESSION = String.raw`(?:today|tomorrow|tonight|(?:next|this)\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?)`;
+const MONEY_WORD = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)`;
 
 const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
   {
@@ -9,27 +11,31 @@ const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> =
     response: "I can't provide legal or contract advice. A Balance producer must review legal and contract terms directly."
   },
   {
-    pattern: /\b(?:final |fixed |guaranteed )?(?:price|pricing|quote|fee|cost)\b[^.\n]*(?:\$|sgd|usd|eur|gbp|\d[\d,]*(?:\.\d{2})?)/i,
+    pattern: /\b(?:final |fixed |guaranteed )?(?:price|pricing|quote|fee|cost)\b[^.\n]{0,40}(?:(?:s?\$|£|€)\s*\d[\d,]*(?:\.\d{2})?|(?:sgd|usd|eur|gbp)\s*\d[\d,]*(?:\.\d{2})?|\d[\d,]*(?:\.\d{2})?\s*(?:dollars?|pounds?|euros?))\b/i,
     response: 'Final pricing is set by Balance producers after they review the scope.'
   },
   {
-    pattern: /\b(?:price|pricing|quote|fee|cost)\b[^.\n]{0,40}\b(?:comes? to|is|will be|totals?|equals?)\b[^.\n]{0,40}\b(?:dollars?|pounds?|euros?|sgd|usd|eur|gbp)\b/i,
+    pattern: new RegExp(String.raw`\b(?:price|pricing|quote|fee|cost)\b[^.\n]{0,40}\b(?:comes? to|is|will be|totals?|equals?)\s+(?:(?:about|approximately|roughly)\s+)?(?:${MONEY_WORD}[\s-]+){1,6}(?:dollars?|pounds?|euros?)\b`, 'i'),
     response: 'Final pricing is set by Balance producers after they review the scope.'
   },
   {
-    pattern: /\b(?:guarantee|guaranteed|promise|promised|definitely)\b[^.\n]*(?:deliver|delivery|complete|completed|ready|timeline|date|by\b)/i,
+    pattern: new RegExp(String.raw`\b(?:guarantee|guaranteed|promise|promised|definitely)\b[^.\n]{0,30}\b(?:deliver|delivery|complete|completed|ready)\b[^.\n]{0,20}\b(?:by|on)\s+${TEMPORAL_EXPRESSION}\b`, 'i'),
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
-    pattern: /\b(?:we|balance|our (?:team|crew|studio)) (?:can|will) (?:deliver|complete|finish|have [^.\n]{0,20} ready)\b[^.\n]{0,20}\bby\b[^.\n]{1,30}/i,
+    pattern: new RegExp(String.raw`\b(?:we(?:['’]ll| can| will)|balance (?:can|will)|(?:our|the) (?:team|crew|producer) (?:can|will))\s+(?:deliver|complete|finish)\b[^.\n]{0,20}\b(?:by|on)\s+${TEMPORAL_EXPRESSION}\b`, 'i'),
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
-    pattern: /\b(?:reserved|booked|confirmed) (?:the )?(?:crew|team|studio)\b[^.\n]{0,30}\b(?:for|on)\b/i,
+    pattern: new RegExp(String.raw`\b(?:the|your|this) (?:project|deliverable|film|video) will be (?:ready|complete|finished)\s+(?:(?:by|on)\s+)?${TEMPORAL_EXPRESSION}\b`, 'i'),
+    response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
+  },
+  {
+    pattern: new RegExp(String.raw`\b(?:we|balance|(?:our|the) (?:team|crew|producer)) (?:have )?(?:reserved|booked|confirmed) (?:the |our )?(?:crew|team|studio)\b[^.\n]{0,20}\b(?:for|on)\s+${TEMPORAL_EXPRESSION}\b`, 'i'),
     response: 'Availability is confirmed by Balance producers after they review the project and schedule.'
   },
   {
-    pattern: /\b(?:crew|team|studio|we) (?:is|are|will be) (?:definitely )?(?:available|free|booked|confirmed)\b[^.\n]{0,30}\b(?:next|this|on|for|from|until|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)/i,
+    pattern: new RegExp(String.raw`\b(?:crew|team|studio|we) (?:is|are|will be) (?:definitely )?(?:available|free|booked|confirmed)\b[^.\n]{0,20}(?:(?:on|for|from|until)\s+)?${TEMPORAL_EXPRESSION}\b`, 'i'),
     response: 'Availability is confirmed by Balance producers after they review the project and schedule.'
   }
 ];

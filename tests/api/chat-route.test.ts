@@ -1275,7 +1275,7 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_API_KEY = 'test-key';
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
-    const attackerRequestId = 'Bearer secret-route-token';
+    const attackerRequestId = 'request_token-123.abc';
     const { res, data } = await postChat({
       messages: [{ role: 'user', content: 'Tell me everything about Balance Studio' }],
       context: { step: 'intro', draft: '{}' }

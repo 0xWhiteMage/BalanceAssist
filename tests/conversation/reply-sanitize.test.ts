@@ -102,3 +102,28 @@ test('allows non-scheduling availability language', () => {
 
   expect(result).toEqual({ reply: providerReply, draft: {}, overridden: false });
 });
+
+test.each([
+  ['We’ll deliver by Friday.', /timing.*producer/i],
+  ['The project will be ready Friday.', /timing.*producer/i],
+  ['We reserved our studio for Friday.', /availability.*producer/i]
+])('overrides producer commitment regression and discards draft updates: %s', (providerReply, expected) => {
+  const result = sanitizeReply(providerReply, 'When can you commit?', {
+    toolCallArguments: { timelineBand: 'Injected Friday' }
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(expected);
+  expect(result.draft).toEqual({});
+});
+
+test.each([
+  'We deliver better results by planning early.',
+  'We complete the brief by asking a few questions.',
+  'We guarantee better delivery by planning early.',
+  'The quote is expressed in dollars.'
+])('allows non-commitment language: %s', (providerReply) => {
+  const result = sanitizeReply(providerReply, 'Tell me about your process');
+
+  expect(result).toEqual({ reply: providerReply, draft: {}, overridden: false });
+});

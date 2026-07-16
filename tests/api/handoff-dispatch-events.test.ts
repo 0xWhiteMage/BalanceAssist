@@ -122,7 +122,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     expect(emitEventMock).toHaveBeenCalledWith(
       'handoff_delivered',
       expect.objectContaining({ handoffId: 'ho-1', durationMs: expect.any(Number) }),
-      'rid-dispatch'
+      expect.stringMatching(/^[a-z0-9-]{8}$/i)
     );
   });
 
@@ -149,7 +149,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     expect(emitEventMock).toHaveBeenCalledWith(
       'handoff_escalated',
       { handoffId: 'ho-2', reason: 'telegram_send_failed' },
-      'rid-dispatch'
+      expect.stringMatching(/^[a-z0-9-]{8}$/i)
     );
   });
 
@@ -285,7 +285,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     expect(emitEventMock).toHaveBeenCalledWith(
       'handoff_suppressed',
       { handoffId: 'ho-expired', reason: 'session_unavailable' },
-      'rid-dispatch'
+      expect.stringMatching(/^[a-z0-9-]{8}$/i)
     );
   });
 
@@ -357,6 +357,10 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
     }));
 
     expect(markFailedMock).toHaveBeenCalledWith(expect.anything(), 'ho-error', '55555555-5555-4555-8555-555555555555', 'handoff_processing_failed', expect.anything());
-    expect(emitEventMock).toHaveBeenCalledWith('handoff_failed', { handoffId: 'ho-error', reason: 'handoff_processing_failed' }, 'rid-error');
+    expect(emitEventMock).toHaveBeenCalledWith(
+      'handoff_failed',
+      { handoffId: 'ho-error', reason: 'handoff_processing_failed' },
+      expect.stringMatching(/^[a-z0-9-]{8}$/i)
+    );
   });
 });
