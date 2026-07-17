@@ -144,7 +144,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(requests.filter((url) => url.includes('/api/chat'))).toHaveLength(1));
 
-    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    fireEvent.click(screen.getByRole('button', { name: /talk to the team without ai/i }));
     await screen.findByPlaceholderText(/message the team request/i);
 
     await act(async () => {
@@ -186,7 +186,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await screen.findByRole('status', { name: /balance assist is typing/i });
 
-    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    fireEvent.click(screen.getByRole('button', { name: /talk to the team without ai/i }));
     await screen.findByPlaceholderText(/message the team request/i);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -227,7 +227,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await screen.findByText('Updating the brief.');
 
-    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    fireEvent.click(screen.getByRole('button', { name: /talk to the team without ai/i }));
     await screen.findByPlaceholderText(/message the team request/i);
     expect(requests.some((url) => url.includes('/api/projects/mock-session/draft'))).toBe(false);
   }, 15_000);

@@ -654,7 +654,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
     }, { timeout: 7000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
     await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(true));
     fireEvent.click(screen.getByLabelText('Close Balance Assist'));
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
@@ -725,18 +725,18 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
     }, { timeout: 7000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
     await waitFor(() => expect(consentCalls).toBe(1));
     fireEvent.click(screen.getByLabelText('Close Balance Assist'));
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
     await waitFor(() => expect(consentCalls).toBe(2));
 
     await act(async () => {
       staleConsent.resolve(new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 }));
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to a human' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
     expect(consentCalls).toBe(2);
 
     await act(async () => {

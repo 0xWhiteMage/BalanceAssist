@@ -321,7 +321,7 @@ describe('WidgetOverlay accessibility', () => {
     fireEvent.keyDown(brief, { key: 'Home' });
     expect(chat).toHaveFocus();
 
-    const human = screen.getByRole('button', { name: 'Talk to a human' });
+    const human = screen.getByRole('button', { name: 'Talk to the team without AI' });
     expect(human).toHaveClass('balance-widget-action');
     expect(human).toBeVisible();
   }, 15_000);

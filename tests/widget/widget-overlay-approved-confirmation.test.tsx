@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const { finalizeLeadMock } = vi.hoisted(() => ({
   finalizeLeadMock: vi.fn(async () => ({
@@ -399,9 +399,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     expect(alert.closest('[role="tabpanel"]')).toBeNull();
     const retry = screen.getByRole('button', { name: 'Retry sending brief' });
     expect(retry).toHaveClass('balance-widget-action');
-    expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Email the team' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-    expect(screen.getByRole('button', { name: 'Book a call' })).toBeInTheDocument();
+    expect(within(alert).getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
+    expect(within(alert).getByRole('link', { name: 'Email the team' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(within(alert).getByRole('button', { name: 'Book a call' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
     expect(alert).toBeVisible();
