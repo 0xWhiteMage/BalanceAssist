@@ -1542,8 +1542,10 @@ export function WidgetOverlay({
                       aria-label="Upload requested files"
                       onClick={() => requestedFileInputRef.current?.click()}
                       style={{
-                        width: '36px',
-                        height: '36px',
+                        width: '44px',
+                        height: '44px',
+                        minWidth: '44px',
+                        minHeight: '44px',
                         borderRadius: '50%',
                         border: `1px solid ${brandTokens.colors.border}`,
                         display: 'flex',

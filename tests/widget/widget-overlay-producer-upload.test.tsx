@@ -98,6 +98,11 @@ describe('producer-requested human uploads', () => {
 
     const uploadButton = await screen.findByRole('button', { name: 'Upload requested files' });
     expect(uploadButton).toBeVisible();
+    const uploadStyle = getComputedStyle(uploadButton);
+    expect(Number.parseFloat(uploadStyle.width)).toBeGreaterThanOrEqual(44);
+    expect(Number.parseFloat(uploadStyle.height)).toBeGreaterThanOrEqual(44);
+    expect(Number.parseFloat(uploadStyle.minWidth)).toBeGreaterThanOrEqual(44);
+    expect(Number.parseFloat(uploadStyle.minHeight)).toBeGreaterThanOrEqual(44);
     uploadButton.focus();
     expect(uploadButton).toHaveFocus();
 
