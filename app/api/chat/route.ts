@@ -458,13 +458,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const classificationInputs = [
-      ...messages.map((message) => message.content),
-      messages.map((message) => message.content).join(' '),
-      messages.map((message) => message.content).join('')
-    ];
-    const classifications = classificationInputs.map((input) => classifyConfidentialIntent(input));
-    if (classifications.some((classification) => classification !== 'allow')) {
+    if (classifyConfidentialIntent(lastUserMessage) !== 'allow') {
       return confidentialDiversionResponse(request);
     }
   } catch {
@@ -521,7 +515,10 @@ export async function POST(request: Request) {
   let category: 'reply' | 'refusal' | 'local_fallback' = 'reply';
 
   try {
-    const llmMessages = [{ role: 'system' as const, content: llmContext.systemPrompt }, ...messages];
+    const llmMessages = [
+      { role: 'system' as const, content: llmContext.systemPrompt },
+      { role: 'user' as const, content: lastUserMessage }
+    ];
 
     if (!env.DEEPSEEK_API_KEY) {
       const localResponse = getLocalResponse(lastUserMessage, {

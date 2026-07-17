@@ -247,3 +247,35 @@ test.each([
 
   expect(result).toEqual({ reply: providerReply, draft: {}, overridden: false });
 });
+
+test.each([
+  { label: 'it will cost', providerReply: 'It will cost $5,000.' },
+  { label: 'expect to pay', providerReply: 'You can expect to pay $5,000.' },
+  { label: 'project would cost', providerReply: 'This project would cost SGD 5,000.' },
+  { label: 'you will pay', providerReply: 'You will pay 5,000 dollars.' },
+  { label: 'total will be', providerReply: 'The total will be USD 5,000.' }
+])('overrides a general Balance pricing commitment with an actual amount: $label', ({ providerReply }) => {
+  const result = sanitizeReply(providerReply, 'What should I budget?', {
+    toolCallArguments: { budgetBand: 'Injected amount' }
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(/pricing.*producer/i);
+  expect(result.draft).toEqual({});
+});
+
+test.each([
+  { label: 'stated budget', providerReply: 'You said your budget is $5,000.' },
+  { label: 'stated estimate', providerReply: 'You said it would cost $5,000.' },
+  { label: 'provided budget', providerReply: 'The budget you provided is SGD 5,000.' }
+])('preserves a user-attributed budget restatement with an actual amount: $label', ({ providerReply }) => {
+  const result = sanitizeReply(providerReply, 'What did I tell you?', {
+    toolCallArguments: { budgetBand: 'User-provided amount' }
+  });
+
+  expect(result).toEqual({
+    reply: providerReply,
+    draft: { budgetBand: 'User-provided amount' },
+    overridden: false
+  });
+});

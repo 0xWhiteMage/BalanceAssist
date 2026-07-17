@@ -195,7 +195,55 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     expect(screen.queryByText('STALE DELAYED AI REPLY')).toBeNull();
   }, 15_000);
 
-  test('moves a confidential diversion to human-only contact without retrying or relaying blocked history', async () => {
+  test('does not apply deferred canonical hydration after AI generation invalidation', async () => {
+    const pendingHydration = deferred<Response>();
+    const requests: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'Updating the brief.',
+          draftUpdates: { service: 'production' },
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/projects/mock-session/draft') && !init?.method) return pendingHydration.promise;
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'An ordinary production project' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(requests.some((url) => url.includes('/api/projects/mock-session/draft'))).toBe(true));
+
+    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    await screen.findByPlaceholderText(/message the team request/i);
+    await act(async () => {
+      pendingHydration.resolve(new Response(JSON.stringify({
+        sessionId: 'mock-session',
+        draftVersion: 9,
+        fieldCount: 2,
+        draft: {
+          service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' },
+          projectScope: { value: 'STALE HYDRATED SCOPE', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      await pendingHydration.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('STALE HYDRATED SCOPE')).toBeNull();
+  }, 15_000);
+
+  test('requires explicit human-only consent after diversion and never retries or relays blocked history', async () => {
     const secret = 'Project NIGHTJAR is under NDA';
     const requests: Array<{ url: string; body: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -238,17 +286,28 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
       }
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
     }) as unknown as typeof fetch;
-    render(<WidgetOverlay autoOpen={true} />);
+    render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/recovery" />);
 
     const input = await startAiConversation();
     fireEvent.change(input, { target: { value: secret } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
     expect(await screen.findByText(/this channel cannot process confidential or sensitive material/i, {}, { timeout: 5000 })).toBeVisible();
-    const humanInput = await screen.findByPlaceholderText(/message the team request/i, {}, { timeout: 5000 });
     const chatRequests = () => requests.filter((request) => request.url.includes('/api/chat'));
+    const consentRequests = () => requests.filter((request) => request.url.includes('/consent'));
     const relayRequests = () => requests.filter((request) => request.url.includes('/api/telegram/relay'));
     expect(chatRequests()).toHaveLength(1);
+    expect(consentRequests()).toHaveLength(0);
+    expect(relayRequests()).toHaveLength(0);
+    expect(screen.queryByPlaceholderText(/message the team request/i)).toBeNull();
+    expect(screen.getByRole('link', { name: /email the team/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(screen.getByRole('link', { name: /book a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/recovery');
+    expect(screen.getByRole('button', { name: /leave/i })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+
+    const humanInput = await screen.findByPlaceholderText(/message the team request/i, {}, { timeout: 5000 });
+    expect(consentRequests()).toHaveLength(1);
     expect(relayRequests()).toHaveLength(0);
 
     fireEvent.change(humanInput, { target: { value: 'Please ask a producer to contact me.' } });

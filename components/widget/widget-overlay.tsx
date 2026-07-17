@@ -6,6 +6,7 @@ import { MessageBubble } from '@/components/chat/message-bubble';
 import { CalendlyEmbed } from '@/components/chat/calendly-embed';
 import {
   BotAvatarSmall,
+  ConfidentialDiversionRecovery,
   FileRequestBanner,
   FileRequestInputHint,
   HumanFallbacks,
@@ -164,6 +165,7 @@ export function WidgetOverlay({
   const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [entryPath, setEntryPath] = useState<'ai' | 'human' | null>(null);
+  const [confidentialRecoveryOpen, setConfidentialRecoveryOpen] = useState(false);
   const teamRelay = useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage });
   const {
     isTeamConnected, requested: humanRequested, status: humanStatus, waitingForReply: teamWaitingForReply,
@@ -498,6 +500,7 @@ export function WidgetOverlay({
     setView('chat');
     setCalendlyUrl(null);
     setAllowAttachment(false);
+    setConfidentialRecoveryOpen(false);
     confidentialDiversionRef.current = false;
     cancelRef.current = false;
   }
@@ -560,8 +563,7 @@ export function WidgetOverlay({
           ) return;
         }
         if (diversionGeneration !== aiProcessingGenerationRef.current || cancelRef.current) return;
-        setEntryPath('human');
-        await handleTeamConnect();
+        setConfidentialRecoveryOpen(true);
         return;
       }
 
@@ -604,7 +606,7 @@ export function WidgetOverlay({
         }
         // The chat route persists authenticated updates. Replace optimistic values with its canonical version.
         if (sessionId) {
-          await hydrateCanonicalDraft(sessionId);
+          await hydrateCanonicalDraft(sessionId, isCurrent);
           if (!isCurrent()) return;
         }
       }
@@ -1132,7 +1134,7 @@ export function WidgetOverlay({
     setNoticeConsent({ consentVersion: 'human-relay-1.1', consentedAt: new Date().toISOString() });
   }
 
-  const canInteract = !isSessionExpired && (hasStarted || humanRequested);
+  const canInteract = !confidentialRecoveryOpen && !isSessionExpired && (hasStarted || humanRequested);
   const showNoticeGate = entryPath === null;
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
@@ -1396,6 +1398,15 @@ export function WidgetOverlay({
                       Talk to a human
                     </button>
                   </div>
+                ) : confidentialRecoveryOpen ? (
+                  <ConfidentialDiversionRecovery
+                    calendlyUrl={configuredCalendlyUrl}
+                    onHuman={() => {
+                      setConfidentialRecoveryOpen(false);
+                      setEntryPath('human');
+                    }}
+                    onLeave={handleClose}
+                  />
                 ) : showHumanFallback ? (
                   <HumanFallbacks calendlyUrl={configuredCalendlyUrl} unavailable={sessionUnavailable} />
                 ) : (

@@ -19,6 +19,14 @@ confidential, unreleased, personal-data, and sensitive intent is diverted to the
 human-only route before prompt construction or provider processing. The diversion
 does not quote user text or reveal classifier rules.
 
+Provider-dependent chat sends DeepSeek only the server-built system prompt and
+the current last user message. Earlier browser-owned message history is not sent
+to DeepSeek and is not part of confidential-intent classification. Separate
+requests are never concatenated into provider input. A confidential-diversion
+response stops AI processing and shows human-only contact options, but it does
+not record human-contact consent or start the private relay until the user
+explicitly chooses `Talk to the team without AI`.
+
 Human mode bypasses DeepSeek. Its private relay, consent, retention, and producer
 transfer controls remain separate from AI mode.
 

@@ -7,6 +7,7 @@ import {
 import type { BudgetBandId, ServiceOptionId, TimelineBandId } from '@/lib/onboarding/types';
 import { HUMAN_UPLOAD_GUIDANCE } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
+import { CONFIDENTIAL_INTAKE_RESPONSE } from '@/lib/privacy/confidential-intent';
 
 export const balanceLogoUrl =
   'https://images.squarespace-cdn.com/content/v1/5c81167bab1a62362b828e3f/d5e257d2-800b-4f0b-82e4-edfabe552823/gold.png?format=2500w';
@@ -392,6 +393,27 @@ export function HumanFallbacks({
       <p style={{ margin: 0 }}>{copy}</p>
       <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
       {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
+    </div>
+  );
+}
+
+export function ConfidentialDiversionRecovery({
+  calendlyUrl,
+  onHuman,
+  onLeave
+}: {
+  calendlyUrl: string | null;
+  onHuman: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <div data-testid="confidential-diversion-recovery" style={{ display: 'grid', gap: 10, padding: 12, fontSize: 12, lineHeight: 1.5 }}>
+      <p role="status" style={{ margin: 0 }}>{CONFIDENTIAL_INTAKE_RESPONSE}</p>
+      <p style={{ margin: 0 }}>Nothing is sent to the Balance team until you choose to continue.</p>
+      <button type="button" onClick={onHuman} style={{ padding: '10px 12px', borderRadius: 999, border: 'none', background: brandTokens.colors.warmGold, color: brandTokens.colors.baseBlack, fontWeight: 700, cursor: 'pointer' }}>Talk to the team without AI</button>
+      <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
+      {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
+      <button type="button" onClick={onLeave} style={{ padding: '8px 12px', borderRadius: 999, border: `1px solid ${brandTokens.colors.border}`, background: 'transparent', color: brandTokens.colors.lightText, cursor: 'pointer' }}>Leave</button>
     </div>
   );
 }

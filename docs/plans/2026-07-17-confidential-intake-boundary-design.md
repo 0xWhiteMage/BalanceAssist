@@ -49,6 +49,15 @@ The UI and server import this same function; there are no separate regex sets.
    content-bearing log or event.
 6. Otherwise continue through the existing deterministic routes and AI flow.
 
+DeepSeek receives exactly two chat messages: the server-built system prompt and
+the current last user message. Earlier browser-owned user history remains local;
+it is neither classified nor forwarded to DeepSeek. Because message boundaries
+from separate requests are never combined in the provider payload, the
+classifier applies to the same current-message boundary that can reach the
+provider. A diversion outcome locks AI processing and presents explicit
+human-only recovery actions. It does not record human-contact consent or start
+the relay until the user chooses `Talk to the team without AI`.
+
 The server is authoritative. Client checks improve immediacy but never replace
 the route guard.
 
@@ -116,7 +125,8 @@ existing truthful retry/unavailable states and never weaken the guard.
 - Classifier unit tests cover every positive category, normalization, word
   boundaries, negation, benign near-matches, and combined phrases.
 - Chat route tests prove auth/schema validation happens first, only the current
-  user message is classified, diversion calls neither provider nor draft/event
+  user message is classified and forwarded, earlier browser history is absent
+  from the provider payload, diversion calls neither provider nor draft/event
   dependencies, and the response never echoes input.
 - Provider tests prove DeepSeek is the sole AI endpoint, alternate credentials
   do not select another provider, and missing/failing DeepSeek does not trigger

@@ -90,10 +90,15 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }, []);
 
   const hydrateDraft = useCallback(async (id: string, isValid: BootstrapValidity = alwaysValid) => {
+    const generation = bootstrapGenerationRef.current;
+    const operationIsValid = () => isValid() && generation === bootstrapGenerationRef.current;
+    if (!operationIsValid()) return;
     const canonical = await dependencies.fetchProjectDraft(id);
-    if (!isValid()) return;
+    if (!operationIsValid()) return;
     if (canonical && (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0)) {
+      if (!operationIsValid()) return;
       setReferenceLinks(canonical.referenceLinks ?? []);
+      if (!operationIsValid()) return;
       applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
     }
   }, [applyCanonicalDraft, dependencies]);

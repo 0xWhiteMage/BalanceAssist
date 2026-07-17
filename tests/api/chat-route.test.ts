@@ -465,72 +465,60 @@ describe('POST /api/chat', () => {
     }
   });
 
-  test('diverts when an earlier provider-bound user message is confidential and the current message is benign', async () => {
-    global.fetch = vi.fn();
-    const { res, data } = await postChat({
+  test('classifies and sends only the current user message, excluding prior confidential browser history', async () => {
+    const priorSecret = 'An earlier message was under NDA.';
+    const currentMessage = 'Tell me about an unusual production approach';
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Provider reply', 'stop')) as unknown as typeof fetch;
+
+    const { res } = await postChat({
       messages: [
-        { role: 'user', content: 'An earlier message was under NDA.' },
-        { role: 'user', content: 'Can you do filming?' }
+        { role: 'user', content: priorSecret },
+        { role: 'user', content: currentMessage }
       ],
-      context: { isTeamConnected: false }
+      context: { isTeamConnected: true }
     });
 
     expect(res.status).toBe(200);
-    expect(data.outcome).toBe('confidential_diversion');
-    expect(data.message).toMatch(/cannot process confidential or sensitive material/i);
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledTimes(4);
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA.');
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('Can you do filming?');
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA. Can you do filming?');
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('An earlier message was under NDA.Can you do filming?');
-    expect(consumeRateLimitMock).not.toHaveBeenCalled();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledOnce();
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith(currentMessage);
+    const providerBody = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0]?.[1]?.body));
+    expect(providerBody.messages).toEqual([
+      expect.objectContaining({ role: 'system' }),
+      { role: 'user', content: currentMessage }
+    ]);
+    expect(JSON.stringify(providerBody)).not.toContain(priorSecret);
   });
 
-  test('classifies the bounded joined user history to catch a split confidential phrase', async () => {
-    global.fetch = vi.fn();
-
-    const { res, data } = await postChat({
-      messages: [
-        { role: 'user', content: 'This project is under' },
-        { role: 'user', content: 'NDA.' }
-      ]
-    });
-
-    expect(res.status).toBe(200);
-    expect(data.outcome).toBe('confidential_diversion');
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith('This project is under NDA.');
-    expect(consumeRateLimitMock).not.toHaveBeenCalled();
-    expect(global.fetch).not.toHaveBeenCalled();
-  });
-
-  test.each([
-    ['confidential', 'The attached brief contains confiden', 'tial information.'],
-    ['unreleased', 'This campaign is unre', 'leased.'],
-    ['personal data', 'This file contains person', 'al data.']
-  ])('uses the real classifier to catch %s split exactly across a message boundary', async (_category, first, second) => {
+  test('does not combine split phrases across separate requests or send prior request history', async () => {
     const actual = await vi.importActual<typeof import('@/lib/privacy/confidential-intent')>(
       '@/lib/privacy/confidential-intent'
     );
-    expect(actual.classifyConfidentialIntent(first)).toBe('allow');
-    expect(actual.classifyConfidentialIntent(second)).toBe('allow');
-    expect(actual.classifyConfidentialIntent(`${first} ${second}`)).toBe('allow');
     classifyConfidentialIntentMock.mockImplementation(actual.classifyConfidentialIntent);
-    consumeRateLimitMock.mockResolvedValue({ permitted: false, retryAfterSeconds: 42 });
-    global.fetch = vi.fn();
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Provider reply', 'stop')) as unknown as typeof fetch;
 
-    const { res, data } = await postChat({
+    const first = await postChat({
+      messages: [{ role: 'user', content: 'This project is under' }],
+      context: { isTeamConnected: true }
+    });
+    const second = await postChat({
       messages: [
-        { role: 'user', content: first },
-        { role: 'user', content: second }
-      ]
+        { role: 'user', content: 'This project is under' },
+        { role: 'user', content: 'NDA. Continue with an unusual production approach.' }
+      ],
+      context: { isTeamConnected: true }
     });
 
-    expect(res.status).toBe(200);
-    expect(data.outcome).toBe('confidential_diversion');
-    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith(`${first}${second}`);
-    expect(consumeRateLimitMock).not.toHaveBeenCalled();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(first.res.status).toBe(200);
+    expect(second.res.status).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const secondProviderBody = JSON.parse(String(vi.mocked(global.fetch).mock.calls[1]?.[1]?.body));
+    expect(secondProviderBody.messages).toEqual([
+      expect.objectContaining({ role: 'system' }),
+      { role: 'user', content: 'NDA. Continue with an unusual production approach.' }
+    ]);
+    expect(JSON.stringify(secondProviderBody)).not.toContain('This project is under');
   });
 
   test('rejects blank current user content before classification or provider activity', async () => {
