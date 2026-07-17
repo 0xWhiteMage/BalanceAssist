@@ -70,8 +70,7 @@ describe('POST /api/chat', () => {
       ok: true,
       auth: { sessionId: 'test-session', capability: 'test-session.secret' },
       supabase: {
-        rpc: async (_name: string, args: { p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) => ({
-          data: [{
+        rpc: async (name: string, args: { p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) => name === 'assert_session_processing_allowed' ? ({ data: true, error: null }) : ({ data: [{
             draft: Object.fromEntries(args.p_fields.map((field) => [field.field, {
               value: field.value,
               provenance: field.provenance,
@@ -80,8 +79,7 @@ describe('POST /api/chat', () => {
             draft_version: args.p_expected_draft_version + 1,
             conflict: false
           }],
-          error: null
-        }),
+          error: null }),
         from: () => ({
           select: () => ({
             eq: () => ({
@@ -169,6 +167,7 @@ describe('POST /api/chat', () => {
 
     const supabase = {
       rpc(name: string, args: { p_session_id: string; p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) {
+        if (name === 'assert_session_processing_allowed') return Promise.resolve({ data: true, error: null });
         expect(name).toBe('update_session_draft');
         expect(args.p_session_id).toBe(state.id);
         if (args.p_expected_draft_version !== state.draft_version) {
@@ -406,9 +405,9 @@ describe('POST /api/chat', () => {
       projectScope: { value: 'Winning launch film', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' }
     };
     const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 2 });
-    harness.supabase.rpc = vi.fn(async () => ({
-      data: [{ draft: winningDraft, draft_version: 7, conflict: true }], error: null
-    })) as typeof harness.supabase.rpc;
+    harness.supabase.rpc = vi.fn(async (name: string) => name === 'assert_session_processing_allowed'
+      ? { data: true, error: null }
+      : { data: [{ draft: winningDraft, draft_version: 7, conflict: true }], error: null }) as typeof harness.supabase.rpc;
     requireSessionMock.mockResolvedValue({
       ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
     });
@@ -434,7 +433,9 @@ describe('POST /api/chat', () => {
 
   test('returns a stable save failure without claiming canonical progress', async () => {
     const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 2 });
-    harness.supabase.rpc = vi.fn(async () => ({ data: null, error: { message: 'database unavailable' } })) as unknown as typeof harness.supabase.rpc;
+    harness.supabase.rpc = vi.fn(async (name: string) => name === 'assert_session_processing_allowed'
+      ? { data: true, error: null }
+      : { data: null, error: { message: 'database unavailable' } }) as unknown as typeof harness.supabase.rpc;
     requireSessionMock.mockResolvedValue({
       ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
     });
@@ -457,7 +458,10 @@ describe('POST /api/chat', () => {
 
   test('keeps the save failure stable when the persistence call throws', async () => {
     const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 2 });
-    harness.supabase.rpc = vi.fn(async () => { throw new Error('connection lost'); }) as unknown as typeof harness.supabase.rpc;
+    harness.supabase.rpc = vi.fn(async (name: string) => {
+      if (name === 'assert_session_processing_allowed') return { data: true, error: null };
+      throw new Error('connection lost');
+    }) as unknown as typeof harness.supabase.rpc;
     requireSessionMock.mockResolvedValue({
       ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
     });
@@ -507,6 +511,25 @@ describe('POST /api/chat', () => {
     expect(res.status).toBe(401);
     expect(global.fetch).not.toHaveBeenCalled();
     expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects a deletion-requested session before calling the provider', async () => {
+    const rpc = vi.fn(async (name: string) => name === 'assert_session_processing_allowed'
+      ? { data: null, error: { message: 'SESSION_DELETION_REQUESTED' } }
+      : { data: null, error: null });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'test-session', capability: 'test-session.secret' },
+      supabase: { rpc }
+    });
+    global.fetch = vi.fn();
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'Continue my brief' }] });
+
+    expect(res.status).toBe(409);
+    expect(data.code).toBe('SESSION_DELETION_REQUESTED');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test('rejects an untrusted origin before calling the provider', async () => {

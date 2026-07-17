@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { createLogger, extractRequestId } from '@/lib/logger';
@@ -28,26 +29,44 @@ export async function POST(
     return jsonWithCors({ error: 'Session mismatch' }, { status: 403 });
   }
 
-  const { data, error } = await session.supabase.rpc('request_deletion_job', { p_session_id: sessionId });
-  const job = data as { id: string; state: string; requested_at: string } | null;
+  const receiptSecret = createHash('sha256')
+    .update(`balance-assist-deletion-receipt:${session.auth.capability}`)
+    .digest('base64url');
+  const receiptHash = createHash('sha256').update(receiptSecret).digest('hex');
+  const { data, error } = await session.supabase.rpc('request_session_deletion', {
+    p_session_id: sessionId,
+    p_receipt_hash: receiptHash
+  });
+  const row = Array.isArray(data) ? data[0] : data;
+  const job = row as {
+    receipt_id: string;
+    status: string;
+    requested_at: string;
+    updated_at: string;
+    completed_at?: string | null;
+    failed_at?: string | null;
+  } | null;
 
   if (error || !job) {
     return jsonWithCors({ error: 'project_delete_failed' }, { status: 500 });
   }
 
   const requestedAt = job.requested_at;
-  emitEvent('deletion_requested', {}, requestId);
+  emitEvent('deletion_requested', { sessionId }, requestId);
 
-  logger.info('Deletion requested', { jobId: job.id, state: job.state });
+  logger.info('Deletion requested', { state: job.status });
 
   return jsonWithCors({
     ok: true,
     sessionId,
-    jobId: job.id,
+    receipt: `${job.receipt_id}.${receiptSecret}`,
+    receiptId: job.receipt_id,
     deleted: false,
-    status: job.state,
-    message:
-      'We recorded your deletion request. This endpoint does not automatically erase Telegram messages, backups, or other downstream copies.',
-    requestedAt
-  });
+    status: job.status,
+    message: 'We recorded your deletion request. Work already reserved with a provider may still complete. Telegram messages, backups, and other downstream copies have separate retention controls.',
+    requestedAt,
+    updatedAt: job.updated_at,
+    completedAt: job.completed_at ?? null,
+    failedAt: job.failed_at ?? null
+  }, { headers: { 'Cache-Control': 'no-store, private' } }, request);
 }

@@ -7,7 +7,10 @@ const ALLOWED_EVENT_NAMES = new Set([
   'human_handoff',
   'step_advanced',
   'llm_request',
-  'deletion_requested'
+  'deletion_requested',
+  'memory_inspected',
+  'memory_reset_requested',
+  'memory_correction_requested'
 ]);
 
 export async function OPTIONS() {

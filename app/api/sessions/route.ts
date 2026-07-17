@@ -8,6 +8,7 @@ import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supab
 import { generateCapability, hashCapability } from '@/lib/security/session-capability';
 import { consumeRateLimit, getClientIpMaterial } from '@/lib/security/rate-limit';
 import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
+import { CONSENT_VERSION } from '@/lib/privacy/notice';
 
 const SESSION_CREATION_LIMIT = 10;
 const SESSION_CREATION_WINDOW_SECONDS = 60 * 60;
@@ -104,6 +105,20 @@ export async function POST(request: Request) {
     if (error || !data || data.id !== sessionId) {
       logger.error('Failed to persist session', { errorCode: error?.code });
       return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
+    }
+
+    if (consentVersion === CONSENT_VERSION) {
+      const { error: consentError } = await supabase.rpc('record_session_consent', {
+        p_session_id: sessionId,
+        p_scope: 'analysis',
+        p_granted: true,
+        p_notice_version: consentVersion
+      });
+      if (consentError) {
+        await supabase.from('sessions').delete().eq('id', sessionId);
+        logger.error('Failed to persist analysis consent');
+        return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
+      }
     }
 
     emitEvent('consent_granted', { sessionId, consentVersion }, requestId);

@@ -23,7 +23,7 @@ import { getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
-import { addReferenceLink, chatRequest, createSession, deleteReferenceLink, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { addReferenceLink, chatRequest, createSession, deleteReferenceLink, fetchProjectDeletionStatus, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, withdrawProducerTransferConsent, type DeletionReceiptStatus, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { getReviewPrompt, isBriefReadyForApproval } from '@/lib/conversation/review-state';
@@ -37,6 +37,7 @@ import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
 const OPTIONAL_ANSWER_ACTIONS = ['Not sure yet', 'Skip', 'Prefer not to share'] as const;
+const DELETION_RECEIPT_STORAGE_KEY = 'balance-assist-deletion-receipt';
 
 let messageCounter = 0;
 function nextId() {
@@ -123,6 +124,21 @@ function computeCapturedFieldsFromDraft(draft: LeadDraft): string[] {
   return captured;
 }
 
+export function formatMemoryInventory(draft: LeadDraft, referenceCount: number): string {
+  const labels: Partial<Record<keyof LeadDraft, string>> = {
+    projectScope: 'Project', projectObjective: 'Objective', audience: 'Audience', intendedOutputs: 'Outputs',
+    service: 'Service', timelineBand: 'Timeline', budgetBand: 'Budget', contactName: 'Contact name',
+    contactCompany: 'Company', contactEmail: 'Contact email', referencesStatus: 'References'
+  };
+  const facts = Object.entries(labels).flatMap(([key, label]) => {
+    const value = draft[key as keyof LeadDraft];
+    return typeof value === 'string' && value.trim() ? [`${label}: ${value.trim()}`] : [];
+  });
+  if (referenceCount > 0) facts.push(`Private reference links: ${referenceCount}`);
+  if (facts.length === 0) return 'The editable brief is empty. This view does not inventory uploads, messages, consent history, approved transfers, provider copies, or backups.';
+  return `Editable brief saved for this temporary session:\n${facts.map((fact) => `- ${fact}`).join('\n')}\nThis view does not inventory uploads, messages, consent history, approved transfers, provider copies, or backups.`;
+}
+
 export function WidgetOverlay({
   autoOpen = false,
   calendlyUrlOverride
@@ -164,6 +180,8 @@ export function WidgetOverlay({
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [deletionStatus, setDeletionStatus] = useState<DeletionReceiptStatus | null>(null);
+  const [deletionConfirmationPending, setDeletionConfirmationPending] = useState(false);
   const submitInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -200,6 +218,7 @@ export function WidgetOverlay({
 
   const applyCanonicalDraftState = sessionDraft.applyCanonicalDraft;
   const { messages: teamMessages, reset: resetTeamRelay } = teamRelay;
+  const deletionFrozen = Boolean(deletionStatus?.receipt);
 
 
   useEffect(() => {
@@ -213,6 +232,33 @@ export function WidgetOverlay({
     messagesRef.current = next;
     setMessages(next);
   }, [teamMessages]);
+
+  useEffect(() => {
+    if (typeof window.localStorage?.getItem !== 'function') return;
+    const receipt = window.localStorage.getItem(DELETION_RECEIPT_STORAGE_KEY);
+    if (!receipt) return;
+    setDeletionStatus({ ok: true, receipt, status: 'requested' });
+  }, []);
+
+  useEffect(() => {
+    const receipt = deletionStatus?.receipt;
+    if (!receipt || deletionStatus.status === 'completed') return;
+    let active = true;
+    const poll = async () => {
+      const status = await fetchProjectDeletionStatus(receipt);
+      if (active && status.ok) setDeletionStatus(status);
+      if (active && status.invalidReceipt) {
+        window.localStorage?.removeItem?.(DELETION_RECEIPT_STORAGE_KEY);
+        setDeletionStatus(null);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [deletionStatus?.receipt, deletionStatus?.status]);
 
   useEffect(() => {
     if (previousSessionIdRef.current && previousSessionIdRef.current !== sessionId) {
@@ -913,8 +959,57 @@ export function WidgetOverlay({
     return userMsg;
   }
 
+  async function showMemoryInventory() {
+    await botSay(formatMemoryInventory(draftRef.current, referenceLinks.length));
+    if (sessionId) void logEvent({ sessionId, eventName: 'memory_inspected' });
+  }
+
+  async function clearEditableDraft() {
+    const activeSessionId = sessionId ?? await loadOrCreateSession();
+    if (activeSessionId) void logEvent({ sessionId: activeSessionId, eventName: 'memory_reset_requested' });
+    const result = activeSessionId ? await resetProject(activeSessionId) : { ok: false };
+    if (!result.ok || typeof result.draftVersion !== 'number') {
+      await botSay("Sorry - I couldn't clear the editable brief yet. No deletion was claimed.");
+      return;
+    }
+    sessionDraft.invalidateBootstrap();
+    sessionDraft.setDraft(createDefaultLeadDraft());
+    sessionDraft.setDraftVersion(result.draftVersion);
+    sessionDraft.setHasProjectIntent(false);
+    await botSay('Editable brief cleared. Uploads, links, consent history, approved transfers, provider copies, and backups were not deleted.');
+  }
+
+  async function withdrawTransferConsent() {
+    if (!sessionId || !await withdrawProducerTransferConsent(sessionId)) {
+      await botSay("Sorry - I couldn't confirm transfer-consent withdrawal. Please retry before sending the brief.");
+      return;
+    }
+    await botSay('Transfer consent is withdrawn. No new producer transfer is authorized. Previously delivered provider copies may require separate deletion processing.');
+  }
+
+  async function submitDeletionRequest() {
+    const activeSessionId = sessionId ?? await loadOrCreateSession();
+    const result = activeSessionId ? await requestProjectDeletion(activeSessionId) : { ok: false };
+    if (!result.ok || !result.receipt) {
+      await botSay("Sorry - I couldn't submit the deletion request right now. Please try again or ask the team directly.");
+      return;
+    }
+
+    aiProcessingGenerationRef.current += 1;
+    sessionDraft.reset();
+    teamRelay.reset();
+    setAttachmentOpen(false);
+    setDeletionConfirmationPending(false);
+    setDeletionStatus(result);
+    if (typeof window.localStorage?.setItem === 'function') {
+      window.localStorage.setItem(DELETION_RECEIPT_STORAGE_KEY, result.receipt);
+    }
+    await botSay(result.message ?? 'Deletion requested. Processing is now frozen for this session.');
+  }
+
   async function handleSubmitText() {
     if (submitInFlightRef.current) return;
+    if (deletionFrozen) return;
     const trimmed = inputValue.trim();
     if (!trimmed || isTyping) return;
     submitInFlightRef.current = true;
@@ -935,40 +1030,46 @@ export function WidgetOverlay({
         currentStep === 'contact-name' ||
         currentStep === 'contact-email';
 
+      if (deletionConfirmationPending) {
+        appendUserMessage(trimmed);
+        if (trimmed === 'DELETE') {
+          await submitDeletionRequest();
+        } else {
+          setDeletionConfirmationPending(false);
+          await botSay('Deletion was not requested. Your temporary project remains active.');
+        }
+        return;
+      }
+
+      const memoryInspectPattern = /what do you remember|show.*(project )?memory|view.*(project )?memory/i;
+      if (!isTeamConnected && memoryInspectPattern.test(trimmed)) {
+        appendUserMessage(trimmed);
+        await showMemoryInventory();
+        return;
+      }
+
+      const memoryCorrectionPattern = /update that|correct.*(project|memory|brief)|change.*saved/i;
+      if (!isTeamConnected && memoryCorrectionPattern.test(trimmed)) {
+        appendUserMessage(trimmed);
+        setRailMode('essentials');
+        if (isMobile) setTabMode('brief');
+        if (sessionId) void logEvent({ sessionId, eventName: 'memory_correction_requested' });
+        await botSay('Use the editable brief fields to correct a saved fact. Each change is saved to this temporary project only.');
+        return;
+      }
+
       const memoryResetPattern = /forget.*this.*project|reset.*my.*project|clear.*my.*project|start.*over/i;
       if (!isTeamConnected && memoryResetPattern.test(trimmed)) {
         appendUserMessage(trimmed);
-        const activeSessionId = sessionId ?? await loadOrCreateSession();
-        const cleared = activeSessionId ? await resetProject(activeSessionId) : false;
-
-        if (!cleared) {
-          await botSay("Sorry — I couldn't clear the saved project yet. You can keep editing it here or request deletion from the team.");
-          return;
-        }
-
-        await botSay("I've cleared the saved project for this session. We can start fresh.");
-        if (resetTimerRef.current) {
-          clearTimeout(resetTimerRef.current);
-        }
-        resetTimerRef.current = setTimeout(() => {
-          resetTimerRef.current = null;
-          handleReset();
-        }, 200);
+        await clearEditableDraft();
         return;
       }
 
       const deletionPattern = /delete.*(this )?(project|data)|erase.*(this )?(project|data)|remove.*my.*data/i;
       if (!isTeamConnected && deletionPattern.test(trimmed)) {
         appendUserMessage(trimmed);
-        const activeSessionId = sessionId ?? await loadOrCreateSession();
-        const deletionResult = activeSessionId ? await requestProjectDeletion(activeSessionId) : { ok: false };
-
-        if (!deletionResult.ok) {
-          await botSay("Sorry — I couldn't submit the deletion request right now. Please try again or ask the team directly.");
-          return;
-        }
-
-        await botSay(deletionResult.message ?? 'We recorded your deletion request.');
+        setDeletionConfirmationPending(true);
+        await botSay('Deletion freezes new work for this session and queues removal of its stored project data. Reply DELETE exactly to confirm. Work already reserved with a provider may still complete, and provider copies or backups have separate retention controls.');
         return;
       }
 
@@ -1252,6 +1353,37 @@ export function WidgetOverlay({
               style={{ padding: '8px 14px', color: brandTokens.colors.warmGold, borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`, fontSize: 11, lineHeight: 1.5 }}
             >
               {getReviewPrompt(isMobile)}
+            </div>
+          )}
+
+          {deletionFrozen && (
+            <div
+              role="status"
+              data-testid="deletion-status"
+              className="balance-widget-wrap"
+              style={{ padding: '10px 14px', color: brandTokens.colors.warmGold, borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`, fontSize: 12, lineHeight: 1.5 }}
+            >
+              {deletionStatus?.status === 'completed'
+                ? 'Local deletion completed. Provider retention and backups remain subject to their separate retention policies.'
+                : deletionStatus?.status === 'failed'
+                  ? 'Deletion processing is delayed and will be retried. This session remains frozen.'
+                  : deletionStatus?.status === 'processing' || deletionStatus?.status === 'claimed'
+                    ? 'Deletion is processing. New AI or team work is frozen; work already reserved with a provider may still complete.'
+                    : 'Deletion requested. This session is frozen while removal is queued.'}
+              {deletionStatus?.status === 'completed' && (
+                <button
+                  type="button"
+                  className="balance-widget-action"
+                  style={{ marginLeft: 10 }}
+                  onClick={() => {
+                    window.localStorage?.removeItem?.(DELETION_RECEIPT_STORAGE_KEY);
+                    setDeletionStatus(null);
+                    handleReset();
+                  }}
+                >
+                  Start a new project
+                </button>
+              )}
             </div>
           )}
 
@@ -1568,7 +1700,7 @@ export function WidgetOverlay({
           {canInteract && (
             <>
               {isTeamConnected && humanFileRequestOpen && <FileRequestInputHint />}
-              {showAttachmentButton && (
+              {showAttachmentButton && !deletionFrozen && (
                 <div
                   style={{
                     padding: '6px 12px 0',
@@ -1594,6 +1726,34 @@ export function WidgetOverlay({
                   </button>
                 </div>
               )}
+              {!deletionFrozen && sessionId && (
+                <details
+                  data-testid="project-data-controls"
+                  style={{ padding: '8px 12px', borderTop: `1px solid ${brandTokens.colors.subtleBorder}`, color: brandTokens.colors.mutedText, fontSize: 11 }}
+                >
+                  <summary style={{ cursor: 'pointer', color: brandTokens.colors.lightText, minHeight: 32, display: 'flex', alignItems: 'center' }}>
+                    Editable brief and data controls
+                  </summary>
+                  <p style={{ margin: '6px 0 8px', lineHeight: 1.5 }}>
+                    View or clear the editable brief, withdraw transfer consent, or request durable deletion. The brief view is not a complete inventory of stored or provider data.
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <button type="button" className="balance-widget-action" onClick={() => void showMemoryInventory()}>View editable brief</button>
+                    <button type="button" className="balance-widget-action" onClick={() => void clearEditableDraft()}>Clear editable brief</button>
+                    <button type="button" className="balance-widget-action" onClick={() => void withdrawTransferConsent()}>Withdraw transfer consent</button>
+                    <button
+                      type="button"
+                      className="balance-widget-action"
+                      onClick={() => {
+                        setDeletionConfirmationPending(true);
+                        void botSay('Deletion freezes new work for this session and queues removal of its stored project data. Reply DELETE exactly to confirm. Work already reserved with a provider may still complete, and provider copies or backups have separate retention controls.');
+                      }}
+                    >
+                      Request deletion
+                    </button>
+                  </div>
+                </details>
+              )}
               <div
                 style={{
                   padding: '10px 12px',
@@ -1607,7 +1767,7 @@ export function WidgetOverlay({
                   paddingBottom: 'max(10px, env(safe-area-inset-bottom))'
                 }}
               >
-                {!isTeamConnected && (
+                {!isTeamConnected && !deletionFrozen && (
                   <>
                     <button
                       type="button"
@@ -1680,7 +1840,7 @@ export function WidgetOverlay({
                     )}
                   </>
                 )}
-                {showAttachmentButton && (
+                {showAttachmentButton && !deletionFrozen && (
                   <>
                     <button
                       type="button"
@@ -1721,8 +1881,8 @@ export function WidgetOverlay({
                   maxLength={MAX_PROJECT_SCOPE_CHARACTERS}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  disabled={humanStatus === 'sending'}
-                  placeholder={humanRequested ? 'Message the team request...' : 'Type your message...'}
+                  disabled={humanStatus === 'sending' || deletionFrozen}
+                  placeholder={deletionFrozen ? 'This session is frozen' : humanRequested ? 'Message the team request...' : 'Type your message...'}
                   style={{
                     flex: 1,
                     minWidth: 0,
@@ -1740,7 +1900,7 @@ export function WidgetOverlay({
                 />
                 <button
                   onClick={handleSubmitText}
-                  disabled={!inputValue.trim() || isTyping || humanStatus === 'sending'}
+                  disabled={deletionFrozen || !inputValue.trim() || isTyping || humanStatus === 'sending'}
                   style={{
                     width: '44px',
                     height: '44px',
@@ -1764,8 +1924,8 @@ export function WidgetOverlay({
                 </button>
               </div>
 
-              <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} calendlyUrl={configuredCalendlyUrl} onConnect={handleTeamConnect} />
-              {humanRequested && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} deliveryUnavailable={humanStatus === 'unavailable'} />}
+              {!deletionFrozen && <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} calendlyUrl={configuredCalendlyUrl} onConnect={handleTeamConnect} />}
+              {humanRequested && !deletionFrozen && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} deliveryUnavailable={humanStatus === 'unavailable'} />}
             </>
           )}
         </div>

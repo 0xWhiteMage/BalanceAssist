@@ -5,7 +5,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import type { ConsentRecord } from '@/lib/privacy/notice';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
-import type { ProjectDraftResponse, SessionResponse } from '@/lib/api/client';
+import type { DeletionReceiptStatus, ProjectDraftResponse, ResetProjectResult, SessionResponse } from '@/lib/api/client';
 
 type DraftUpdate = { field: string; value: string; provenance: 'user-stated' | 'inferred' | 'confirmed' | 'cleared' };
 type DraftUpdateResult = ({ ok: true } & ProjectDraftResponse) | ({ ok: false; conflict: true } & ProjectDraftResponse) | { ok: false; conflict: false };
@@ -38,8 +38,8 @@ type Dependencies = {
   getCurrentSession: () => Promise<SessionResponse | null>;
   fetchProjectDraft: (sessionId: string) => Promise<ProjectDraftResponse | null>;
   updateProjectDraft: (sessionId: string, fields: DraftUpdate[], expectedDraftVersion?: number) => Promise<DraftUpdateResult>;
-  resetProject: (sessionId: string) => Promise<boolean>;
-  requestProjectDeletion: (sessionId: string) => Promise<{ ok: boolean; message?: string }>;
+  resetProject: (sessionId: string) => Promise<boolean | ResetProjectResult>;
+  requestProjectDeletion: (sessionId: string) => Promise<DeletionReceiptStatus>;
 };
 
 export function useWidgetSessionDraft(dependencies: Dependencies) {
