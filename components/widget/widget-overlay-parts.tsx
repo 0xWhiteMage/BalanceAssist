@@ -265,11 +265,13 @@ export function HumanFooter({
   isTeamConnected,
   hasTeamReply = false,
   humanStatus,
+  calendlyUrl = null,
   onConnect
 }: {
   isTeamConnected: boolean;
   hasTeamReply?: boolean;
   humanStatus: 'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable';
+  calendlyUrl?: string | null;
   onConnect: () => void;
 }) {
   return (
@@ -282,43 +284,49 @@ export function HumanFooter({
       }}
     >
       {!isTeamConnected ? (
-        <button
-          type="button"
-          className="balance-widget-action"
-          onClick={onConnect}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            border: `1px solid ${brandTokens.colors.border}`,
-            background: 'transparent',
-            color: brandTokens.colors.warmGold,
-            fontSize: '11px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: brandTokens.typography.condensed,
-            textTransform: 'uppercase',
-            letterSpacing: '0.12em',
-            transition: 'all 0.15s ease'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = brandTokens.colors.warmGold;
-            e.currentTarget.style.background = 'rgba(219, 181, 128, 0.06)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = brandTokens.colors.border;
-            e.currentTarget.style.background = 'transparent';
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill={brandTokens.colors.warmGold} />
-          </svg>
-          Talk to a human
-        </button>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <button
+            type="button"
+            className="balance-widget-action"
+            onClick={onConnect}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              width: '100%',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: `1px solid ${brandTokens.colors.border}`,
+              background: 'transparent',
+              color: brandTokens.colors.warmGold,
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: brandTokens.typography.condensed,
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = brandTokens.colors.warmGold;
+              e.currentTarget.style.background = 'rgba(219, 181, 128, 0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = brandTokens.colors.border;
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill={brandTokens.colors.warmGold} />
+            </svg>
+            Talk to the team without AI
+          </button>
+          <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '6px 16px', fontSize: 11 }}>
+            <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
+            {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
+          </div>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
           <div
