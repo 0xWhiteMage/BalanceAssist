@@ -97,6 +97,23 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.draftVersion).toBe(4);
   });
 
+  test('does not destructively replace canonical state at the same draft version', () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null),
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+
+    act(() => result.current.applyCanonicalDraft({ projectScope: 'First version four value' }, 4));
+    let applied = true;
+    act(() => {
+      applied = result.current.applyCanonicalDraft({ projectScope: 'Conflicting version four value' }, 4);
+    });
+
+    expect(applied).toBe(false);
+    expect(result.current.draft.projectScope).toBe('First version four value');
+    expect(result.current.draftVersion).toBe(4);
+  });
+
   test('ignores a deferred chat draft result after reset', async () => {
     const pendingUpdate = deferred<{
       ok: true; draftVersion: number; fieldCount: number; draft: Record<string, string>;
@@ -189,6 +206,45 @@ describe('useWidgetSessionDraft', () => {
     expect(mutation).toBeNull();
     expect(result.current.draft.projectScope).toBe('Current scope');
     expect(result.current.draftVersion).toBe(5);
+  });
+
+  test('applies concurrent canonical results by draft version instead of request order', async () => {
+    const higherVersion = deferred<{
+      ok: true; draftVersion: number; fieldCount: number; draft: Record<string, string>;
+    }>();
+    const lowerVersion = deferred<{
+      ok: true; draftVersion: number; fieldCount: number; draft: Record<string, string>;
+    }>();
+    const updateProjectDraft = vi.fn()
+      .mockImplementationOnce(() => higherVersion.promise)
+      .mockImplementationOnce(() => lowerVersion.promise);
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),
+      getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null), updateProjectDraft,
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+
+    let firstMutation!: Promise<unknown>;
+    let secondMutation!: Promise<unknown>;
+    act(() => {
+      firstMutation = result.current.updateDraft('projectScope', 'Higher canonical version');
+      secondMutation = result.current.updateDraft('projectScope', 'Lower canonical version');
+    });
+    await waitFor(() => expect(updateProjectDraft).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      higherVersion.resolve({ ok: true, draftVersion: 2, fieldCount: 1, draft: { projectScope: 'Higher canonical version' } });
+      await firstMutation;
+    });
+    await act(async () => {
+      lowerVersion.resolve({ ok: true, draftVersion: 1, fieldCount: 1, draft: { projectScope: 'Lower canonical version' } });
+      await secondMutation;
+    });
+
+    expect(result.current.draft.projectScope).toBe('Higher canonical version');
+    expect(result.current.draftVersion).toBe(2);
   });
 
   test('hydrates restored reference links into the shared visible state', async () => {

@@ -794,6 +794,82 @@ describe('canonical chat response ownership', () => {
     expect(screen.queryByText('Late stale edit')).toBeNull();
     expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
   }, 20_000);
+
+  test('applies a deferred manual edit after a newer provider-unavailable request finishes', async () => {
+    const pendingEdit = deferred<Response>();
+    let chatCalls = 0;
+    let editCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatCalls += 1;
+        if (chatCalls === 1) {
+          return new Response(JSON.stringify({
+            outcome: 'draft_persisted',
+            message: 'I saved the project scope.',
+            draftUpdates: { projectScope: 'Original launch film' },
+            canonicalDraft: { projectScope: 'Original launch film' },
+            draftVersion: 1,
+            currentStage: 'project',
+            stageRecaps: [],
+            briefReady: false
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          error: 'Chat service unavailable',
+          detail: 'chat_provider_unavailable'
+        }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/projects/mock-session/draft') && init?.method === 'PUT') {
+        editCalls += 1;
+        return pendingEdit.promise;
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'We need an original launch film' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByText('Original launch film', {}, { timeout: 7000 });
+
+    fireEvent.click(screen.getByText('Project scope'));
+    const scopeInput = screen.getByRole('textbox', { name: 'Project scope' });
+    fireEvent.change(scopeInput, { target: { value: 'Saved after provider outage' } });
+    fireEvent.keyDown(scopeInput, { key: 'Enter' });
+    await waitFor(() => expect(editCalls).toBe(1));
+    const chatInput = screen.getByPlaceholderText(/Type your message/i);
+    await waitFor(() => expect(chatInput).not.toBeDisabled(), { timeout: 7000 });
+
+    fireEvent.change(chatInput, { target: { value: 'Can you still help?' } });
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
+    await waitFor(() => expect(sendButton).not.toBeDisabled(), { timeout: 7000 });
+    fireEvent.click(sendButton);
+    await waitFor(() => expect(chatCalls).toBe(2));
+    await screen.findByText(/AI chat is temporarily unavailable.*Talk to a human/i, {}, { timeout: 7000 });
+
+    await act(async () => {
+      pendingEdit.resolve(new Response(JSON.stringify({
+        sessionId: 'mock-session',
+        draft: {
+          projectScope: {
+            value: 'Saved after provider outage',
+            provenance: 'confirmed',
+            updatedAt: '2026-07-17T00:00:00.000Z'
+          }
+        },
+        draftVersion: 2,
+        fieldCount: 1
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      await pendingEdit.promise;
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('review-rail')).toHaveTextContent('Saved after provider outage'));
+  }, 20_000);
 });
 
 describe('thesis-aligned optional intake actions', () => {

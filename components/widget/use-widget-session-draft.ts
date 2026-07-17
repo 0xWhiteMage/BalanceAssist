@@ -11,7 +11,7 @@ type DraftUpdate = { field: string; value: string; provenance: 'user-stated' | '
 type DraftUpdateResult = ({ ok: true } & ProjectDraftResponse) | ({ ok: false; conflict: true } & ProjectDraftResponse) | { ok: false; conflict: false };
 type BootstrapValidity = () => boolean;
 type VisibleReferenceLink = Pick<NonNullable<ProjectDraftResponse['referenceLinks']>[number], 'kind' | 'url'>;
-export type DraftOperation = { generation: number; sessionId: string | null };
+export type DraftOperation = { invalidationEpoch: number; sessionId: string | null };
 
 const alwaysValid: BootstrapValidity = () => true;
 
@@ -47,7 +47,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const draftVersionRef = useRef(0);
   const bootstrapRef = useRef<Promise<string | null> | null>(null);
   const bootstrapGenerationRef = useRef(0);
-  const operationGenerationRef = useRef(0);
+  const operationInvalidationEpochRef = useRef(0);
   const approveInFlightRef = useRef(false);
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
@@ -57,19 +57,19 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
 
   const invalidateBootstrap = useCallback(() => {
     bootstrapGenerationRef.current += 1;
-    operationGenerationRef.current += 1;
+    operationInvalidationEpochRef.current += 1;
     bootstrapRef.current = null;
   }, []);
 
   useEffect(() => invalidateBootstrap, [invalidateBootstrap]);
 
   const beginDraftOperation = useCallback((): DraftOperation => ({
-    generation: ++operationGenerationRef.current,
+    invalidationEpoch: operationInvalidationEpochRef.current,
     sessionId: sessionIdRef.current
   }), []);
 
   const isDraftOperationCurrent = useCallback((operation: DraftOperation) =>
-    operation.generation === operationGenerationRef.current && operation.sessionId === sessionIdRef.current, []);
+    operation.invalidationEpoch === operationInvalidationEpochRef.current && operation.sessionId === sessionIdRef.current, []);
 
   const applyCanonicalDraft = useCallback((
     values: Record<string, string>,
@@ -84,6 +84,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     const sameDraft = Object.keys(nextDraft).every(
       (key) => nextDraft[key as keyof LeadDraft] === draftRef.current[key as keyof LeadDraft]
     );
+    if (sameVersion && !sameDraft) return false;
     if (sameVersion && sameDraft && !canonical) return true;
 
     setDraft(nextDraft);
@@ -116,7 +117,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
 
   const setActiveSession = useCallback((session: SessionResponse, isValid: BootstrapValidity = alwaysValid) => {
     if (!isValid()) return false;
-    if (sessionIdRef.current !== session.sessionId) operationGenerationRef.current += 1;
+    if (sessionIdRef.current !== session.sessionId) operationInvalidationEpochRef.current += 1;
     sessionIdRef.current = session.sessionId;
     expiresAtRef.current = session.expiresAt ?? null;
     setSessionId(session.sessionId);
@@ -147,7 +148,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (!operationIsValid()) return null;
     if (sessionIdRef.current && !isExpired(expiresAtRef.current)) return sessionIdRef.current;
     if (sessionIdRef.current) {
-      operationGenerationRef.current += 1;
+      operationInvalidationEpochRef.current += 1;
       sessionIdRef.current = null;
       expiresAtRef.current = null;
       setSessionId(null);
