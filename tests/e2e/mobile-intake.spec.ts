@@ -20,6 +20,17 @@ async function assertMinimumTarget(locator: Locator) {
   expect(bounds!.height).toBeGreaterThanOrEqual(44);
 }
 
+async function assertNoHorizontalOverflow(locator: Locator, label: string) {
+  const measurements = await locator.evaluateAll((elements) => elements.map((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth
+  })));
+  expect(measurements.length, label).toBeGreaterThan(0);
+  for (const [index, measurement] of measurements.entries()) {
+    expect(measurement.scrollWidth, `${label}[${index}]`).toBeLessThanOrEqual(measurement.clientWidth);
+  }
+}
+
 async function assertDirectContactRoutes(page: Page) {
   await assertMinimumTarget(page.getByRole('button', { name: 'Talk to the team without AI', exact: true }));
   await expect(page.getByRole('link', { name: 'Email the team', exact: true })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
@@ -325,19 +336,30 @@ test.describe('mobile intake', () => {
     const retry = page.getByRole('button', { name: 'Retry sending brief' });
     await expect(failure).toContainText('The brief was not sent. Please retry or talk to the team without AI.');
     await expect(failure).not.toContainText(/\b(left|right|panel|rail)\b/i);
-    await assertMinimumTarget(retry);
     await assertMinimumTarget(failure.getByRole('button', { name: 'Talk to the team without AI', exact: true }));
+    await assertNoHorizontalOverflow(page.locator('html'), 'failure document');
+    await assertNoHorizontalOverflow(page.locator('#widget-chat-panel'), 'failure Chat panel');
+    await assertNoHorizontalOverflow(page.locator('#widget-brief-panel'), 'failure Brief panel');
+    await assertNoHorizontalOverflow(failure, 'failure banner');
+    await assertNoHorizontalOverflow(failure.locator('button, a'), 'failure actions');
     await chatTab.click();
     await expect(chatPanel).toBeVisible();
     await expect(failure).toBeVisible();
-    await expect(retry).toBeVisible();
+    await assertMinimumTarget(retry);
     await briefTab.click();
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
     await expect(failure).toBeVisible();
-    await expect(retry).toBeVisible();
+    await assertMinimumTarget(retry);
     await retry.click();
 
-    await expect(page.getByTestId('approve-confirmation')).toContainText('Queued for the Balance team');
+    const approvalConfirmation = page.getByTestId('approve-confirmation');
+    await expect(approvalConfirmation).toContainText('Queued for the Balance team');
+    await assertMinimumTarget(approvalConfirmation.getByRole('button', { name: 'Talk to a human team member' }));
+    await assertNoHorizontalOverflow(page.locator('html'), 'queued document');
+    await assertNoHorizontalOverflow(page.locator('#widget-chat-panel'), 'queued Chat panel');
+    await assertNoHorizontalOverflow(page.locator('#widget-brief-panel'), 'queued Brief panel');
+    await assertNoHorizontalOverflow(approvalConfirmation, 'queued approval');
+    await assertNoHorizontalOverflow(approvalConfirmation.locator('button, a'), 'queued approval actions');
     await expect(progress).toContainText('Stage 4 of 4');
     const motion = await page.locator('.balance-widget-motion').evaluateAll((elements) => elements.map((element) => {
       const style = getComputedStyle(element);
