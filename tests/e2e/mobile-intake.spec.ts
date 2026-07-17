@@ -212,7 +212,9 @@ test.describe('mobile intake', () => {
           retryable: true,
           crmQueued: true,
           crmRevision: 1,
-          approvedDraftVersion: draftVersion
+          approvedDraftVersion: draftVersion,
+          approvalInputHash: 'mobile-approval-v1',
+          approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
         })
       });
     });
@@ -480,6 +482,7 @@ test.describe('mobile intake', () => {
     const producerTransferRequests: unknown[] = [];
     let canonicalRefreshes = 0;
     let referenceAdded = false;
+    let canonicalDraftVersion = 1;
     await page.route('**/api/sessions/inspect', async (route) => {
       await route.fulfill({
         status: 200,
@@ -512,7 +515,7 @@ test.describe('mobile intake', () => {
               field,
               { value, provenance: field === 'projectScope' ? 'confirmed' : 'user-stated', updatedAt }
             ])),
-            draftVersion: 2,
+            draftVersion: canonicalDraftVersion,
             fieldCount: Object.keys(canonicalDraft).length,
             referenceLinks: referenceAdded
               ? [{ id: 'mobile-reference-1', sessionId: 'mobile-session-id', kind: 'vimeo', url: 'https://vimeo.com/123' }]
@@ -526,6 +529,7 @@ test.describe('mobile intake', () => {
       for (const field of body.fields ?? []) {
         canonicalDraft[field.field as keyof typeof canonicalDraft] = field.value;
       }
+      canonicalDraftVersion += 1;
       const updatedAt = '2026-07-17T10:00:00.000Z';
       await route.fulfill({
         status: 200,
@@ -536,7 +540,7 @@ test.describe('mobile intake', () => {
             field,
             { value, provenance: field === 'projectScope' ? 'confirmed' : 'user-stated', updatedAt }
           ])),
-          draftVersion: 2,
+          draftVersion: canonicalDraftVersion,
           fieldCount: Object.keys(canonicalDraft).length
         })
       });

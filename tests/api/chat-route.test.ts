@@ -276,6 +276,34 @@ describe('POST /api/chat', () => {
     expect(harness.sessionUpdates).toHaveLength(1);
   });
 
+  test('roundtrips the complete 4,000-character first scope while bounding generated summary text', async () => {
+    const projectScope = 's'.repeat(4_000);
+    const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 0 });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'test-session', capability: 'test-session.secret' },
+      supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('What is the objective?', 'record_brief_updates', JSON.stringify({
+      service: '', projectType: '', projectScope, projectObjective: '', audience: '', intendedOutputs: '',
+      referencesStatus: '', scopePolished: 'summary'.repeat(100), timelineBand: '', budgetBand: '',
+      contactName: '', contactCompany: '', contactEmail: ''
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: projectScope }],
+      context: { step: 'scope', capturedFields: [] }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.outcome).toBe('draft_persisted');
+    expect(data.canonicalDraft.projectScope).toBe(projectScope);
+    expect(data.canonicalDraft.projectScope).toHaveLength(4_000);
+    expect(data.canonicalDraft.scopePolished).toHaveLength(200);
+    expect((harness.state.draft.projectScope as { value: string }).value).toBe(projectScope);
+  });
+
   test('emits the references-contact recap exactly when the final stage completes', async () => {
     const savedAt = '2026-07-17T00:00:00.000Z';
     const values = {

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { listAllWorks } from '@/lib/conversation/works-search';
 import type { LeadDraft } from '@/lib/onboarding/types';
+import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
 
 const TEXT_FIELD_DESCRIPTION =
   "Use '' (empty string) when the field is unknown; do NOT omit the key. User-selected 'Not sure yet', 'Skip', and 'Prefer not to share' are canonical non-empty answers.";
@@ -10,7 +11,7 @@ export const recordBriefUpdatesSchema = z
   .object({
     service: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     projectType: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    projectScope: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    projectScope: z.string().max(MAX_PROJECT_SCOPE_CHARACTERS).default('').describe(TEXT_FIELD_DESCRIPTION),
     projectObjective: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     audience: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     intendedOutputs: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
@@ -27,7 +28,7 @@ export const recordBriefUpdatesSchema = z
   })
   .strict();
 
-// Length caps are enforced by sanitizeDraftUpdates (200 chars); this schema trusts that layer.
+// Field-specific normalization and shorter generated-field caps remain in sanitizeDraftUpdates.
 
 const generated = zodToJsonSchema(recordBriefUpdatesSchema, {
   target: 'jsonSchema7',

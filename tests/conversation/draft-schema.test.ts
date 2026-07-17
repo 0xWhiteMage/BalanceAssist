@@ -19,17 +19,28 @@ test('rejects malformed email', () => {
   expect(result.contactEmail).toBe('');
 });
 
-test('caps long strings to 200 chars', () => {
+test('preserves a complete 4,000-character original project scope without truncation', () => {
+  const projectScope = `${'original-scope-'.repeat(307)}tail`.slice(0, 4_000);
+  expect(projectScope).toHaveLength(4_000);
+
+  expect(sanitizeDraftUpdates({ projectScope })).toEqual({ projectScope });
+});
+
+test('rejects an original project scope beyond 4,000 characters instead of truncating it', () => {
+  expect(sanitizeDraftUpdates({ projectScope: 'a'.repeat(4_001) })).toEqual({});
+});
+
+test('retains explicit 200-character caps for shorter and generated fields', () => {
   const result = sanitizeDraftUpdates({
-    projectScope: 'a'.repeat(500),
     projectObjective: 'b'.repeat(500),
     audience: 'c'.repeat(500),
-    intendedOutputs: 'd'.repeat(500)
+    intendedOutputs: 'd'.repeat(500),
+    scopePolished: 'e'.repeat(500)
   });
-  expect(result.projectScope?.length).toBe(200);
   expect(result.projectObjective?.length).toBe(200);
   expect(result.audience?.length).toBe(200);
   expect(result.intendedOutputs?.length).toBe(200);
+  expect(result.scopePolished?.length).toBe(200);
 });
 
 test('allowlists the thesis-aligned prose fields', () => {

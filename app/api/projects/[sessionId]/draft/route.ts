@@ -5,11 +5,17 @@ import { normalizeVersionedDraft, type VersionedDraft } from '@/lib/conversation
 import { requireSession } from '@/lib/api/require-session';
 import { extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
+import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
+import { normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
 
 const updateFieldSchema = z.object({
   field: z.string().min(1).max(100),
-  value: z.string().max(500),
+  value: z.string().max(MAX_PROJECT_SCOPE_CHARACTERS),
   provenance: z.enum(['user-stated', 'inferred', 'confirmed', 'cleared'] as const)
+}).superRefine((field, context) => {
+  if (field.field !== 'projectScope' && field.value.length > 500) {
+    context.addIssue({ code: z.ZodIssueCode.too_big, type: 'string', maximum: 500, inclusive: true });
+  }
 });
 
 const updateDraftSchema = z.object({
@@ -26,23 +32,10 @@ type ReferenceLinkRow = { id: string; kind: string; url: string };
 
 function canonicalReferenceSetHash(links: Array<Pick<ReferenceLinkRow, 'kind' | 'url'>>): string {
   const canonicalLinks = links
-    .map((link) => ({ kind: link.kind, url: normalizeReferenceUrl(link.url) }))
+    .map((link) => ({ kind: link.kind, url: normalizePublicReferenceUrl(link.url) }))
     .filter((link): link is { kind: string; url: string } => link.url !== null)
     .sort((left, right) => left.url.localeCompare(right.url) || left.kind.localeCompare(right.kind));
   return createHash('sha256').update(JSON.stringify(canonicalLinks)).digest('hex');
-}
-
-function normalizeReferenceUrl(value: string): string | null {
-  try {
-    const url = new URL(value.trim());
-    if (url.protocol !== 'https:' || url.port) return null;
-    const host = url.hostname.toLowerCase().replace(/\.$/, '');
-    if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.test')) return null;
-    const query = url.search.length > 1 ? url.search.slice(1).split('&').sort().join('&') : '';
-    return `https://${host}${url.pathname}${query ? `?${query}` : ''}`;
-  } catch {
-    return null;
-  }
 }
 
 async function loadApprovalMetadata(supabase: any, sessionId: string) {

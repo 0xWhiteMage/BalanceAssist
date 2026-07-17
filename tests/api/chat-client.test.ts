@@ -339,3 +339,41 @@ describe('chatRequest client', () => {
     );
   });
 });
+
+describe('finalizeLead client', () => {
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  test('returns exact server approval facts for persisted success', async () => {
+    const body = {
+      ok: true, sessionId: 'session-123', qualificationStatus: 'qualified', persisted: true,
+      queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 2,
+      approvedDraftVersion: 7, approvalInputHash: 'approval-hash', approvedReferenceSetHash: 'reference-hash'
+    };
+    global.fetch = vi.fn(async () => new Response(JSON.stringify(body), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+    const { finalizeLead } = await import('@/lib/api/client');
+
+    await expect(finalizeLead({ sessionId: 'session-123' })).resolves.toEqual(body);
+  });
+
+  test.each(['approvedDraftVersion', 'approvalInputHash', 'approvedReferenceSetHash'] as const)(
+    'rejects persisted success without server %s',
+    async (missingField) => {
+      const body: Record<string, unknown> = {
+        ok: true, sessionId: 'session-123', qualificationStatus: 'qualified', persisted: true,
+        approvedDraftVersion: 7, approvalInputHash: 'approval-hash', approvedReferenceSetHash: 'reference-hash'
+      };
+      delete body[missingField];
+      global.fetch = vi.fn(async () => new Response(JSON.stringify(body), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      })) as unknown as typeof fetch;
+      const { finalizeLead } = await import('@/lib/api/client');
+
+      await expect(finalizeLead({ sessionId: 'session-123' })).resolves.toBeNull();
+    }
+  );
+});

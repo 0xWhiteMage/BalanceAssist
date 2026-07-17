@@ -169,6 +169,41 @@ describe('POST /api/attachments/link', () => {
       expect(res.status).toBe(400);
   });
 
+  test.each(['http://example.com/reference', 'ftp://example.com/reference'])(
+    'rejects non-HTTPS reference %s with a stable 400',
+    async (url) => {
+      const { POST } = await import('@/app/api/attachments/link/route');
+      const response = await POST(new Request('http://localhost/api/attachments/link', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'sess-1', url, kind: 'other' })
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        ok: false, persisted: false, error: 'https_reference_required'
+      });
+      expect(requireSessionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  test('normalizes an HTTPS reference before persistence', async () => {
+    const { client, inserts } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'sess-auth', capability: 'sess-auth.secret' }, supabase: client
+    });
+    const { POST } = await import('@/app/api/attachments/link/route');
+    const response = await POST(new Request('http://localhost/api/attachments/link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://EXAMPLE.com./board?z=2&a=1', kind: 'other' })
+    }));
+
+    expect(response.status).toBe(200);
+    expect(inserts[0].url).toBe('https://example.com/board?a=1&z=2');
+    await expect(response.json()).resolves.toMatchObject({
+      link: { url: 'https://example.com/board?a=1&z=2' }
+    });
+  });
+
   test('privately stores a session-owned link without producer-transfer consent', async () => {
     const { client, inserts } = buildSupabase();
     requireSessionMock.mockResolvedValue({

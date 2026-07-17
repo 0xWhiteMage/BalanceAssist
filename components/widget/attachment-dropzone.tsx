@@ -21,6 +21,7 @@ import {
 
 export type ReferenceLink = { id?: string; sessionId?: string; kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
+type ReferenceMutationOutcome = { status: 'saved' } | { status: 'failed'; message: string };
 
 type FileStatus = 'queued' | 'validating' | 'stored' | 'failed' | 'retryable';
 
@@ -47,7 +48,7 @@ export function AttachmentDropzone({
   consent,
   messageContext = ''
 }: {
-  onAddLink: (link: ReferenceLink) => void;
+  onAddLink: (url: string) => Promise<ReferenceMutationOutcome>;
   onAddFile: (file: ReferenceFile) => void;
   onFileAnalyzed?: (fileName: string, extractedText: string) => void;
   sessionId?: string | null;
@@ -147,33 +148,20 @@ export function AttachmentDropzone({
     e.preventDefault();
     const kind = classifyUrl(url);
     if (!kind) {
-      setError('Not a valid URL.');
+      setError('Enter a valid public HTTPS reference URL.');
       return;
     }
-
-    const res = await fetch('/api/attachments/link', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url,
-        kind,
-        sessionId: sessionId ?? undefined
-      })
-    });
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(body?.error ?? 'Failed to add link.');
-      return;
+    try {
+      const outcome = await onAddLink(url.trim());
+      if (outcome.status !== 'saved') {
+        setError(outcome.message);
+        return;
+      }
+      setUrl('');
+      setError(null);
+    } catch {
+      setError('The HTTPS reference link could not be saved. Please retry.');
     }
-    const saved = body?.link;
-    if (!saved || typeof saved.id !== 'string' || typeof saved.url !== 'string') {
-      setError('Failed to add link.');
-      return;
-    }
-    onAddLink({ id: saved.id, sessionId: saved.sessionId, kind, url: saved.url });
-    setUrl('');
-    setError(null);
   }
 
   async function handleFiles(input: HTMLInputElement) {

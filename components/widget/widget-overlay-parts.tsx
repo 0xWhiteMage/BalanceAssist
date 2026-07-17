@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import React, { useRef, useState } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
+import { normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
 import {
   serviceOptions
 } from '@/lib/onboarding/service-options';
@@ -1059,9 +1060,18 @@ function ReferenceLinkManager({
           Add reference link
         </button>
       </div>
-      {links.length > 0 ? links.map((link) => (
+      {links.length > 0 ? links.map((link) => {
+        const supported = normalizePublicReferenceUrl(link.url) !== null;
+        return (
         <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <a href={link.url} target="_blank" rel="noreferrer" style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere', minWidth: 0, flex: 1 }}>{link.url}</a>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            {supported ? (
+              <a href={link.url} target="_blank" rel="noreferrer" style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere' }}>{link.url}</a>
+            ) : (
+              <span style={{ color: brandTokens.colors.mutedText, overflowWrap: 'anywhere' }}>{link.url}</span>
+            )}
+            {!supported && <div style={{ color: '#fca5a5', fontSize: 11 }}>Unsupported legacy link - not transferable</div>}
+          </div>
           <button
             type="button"
             aria-label={`Remove ${link.url}`}
@@ -1072,7 +1082,8 @@ function ReferenceLinkManager({
             Remove
           </button>
         </div>
-      )) : <span style={{ color: brandTokens.colors.mutedText, fontSize: bodyFontSize, fontStyle: 'italic' }}>No reference links added</span>}
+        );
+      }) : <span style={{ color: brandTokens.colors.mutedText, fontSize: bodyFontSize, fontStyle: 'italic' }}>No reference links added</span>}
       {error && <div role="alert" style={{ color: '#fca5a5', fontSize: 11 }}>{error}</div>}
     </div>
   );

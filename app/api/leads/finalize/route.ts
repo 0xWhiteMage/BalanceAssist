@@ -32,6 +32,8 @@ export async function POST(request: Request) {
     crm_revision?: number | null;
     approved_draft_version?: number | null;
     crm_queued?: boolean | null;
+    approval_input_hash?: string | null;
+    approved_reference_set_hash?: string | null;
   } : null;
 
   if (error || !result) {
@@ -42,6 +44,17 @@ export async function POST(request: Request) {
   }
   if (!result.persisted) {
     return jsonWithCors({ ok: true, sessionId, persisted: false, reason: 'No contact + project detail in canonical draft; skipped to keep the database clean.' }, undefined, request);
+  }
+  if (
+    typeof result.approved_draft_version !== 'number' ||
+    typeof result.approval_input_hash !== 'string' ||
+    typeof result.approved_reference_set_hash !== 'string'
+  ) {
+    return jsonWithCors(
+      { ok: false, sessionId, persisted: false, retryable: true, error: 'lead_finalize_failed' },
+      { status: 500 },
+      request
+    );
   }
 
   return jsonWithCors({
@@ -57,7 +70,9 @@ export async function POST(request: Request) {
     handoffId: result.handoff_id ?? undefined,
     crmRecordId: result.crm_record_id ?? undefined,
     crmRevision: result.crm_revision ?? undefined,
-    approvedDraftVersion: result.approved_draft_version ?? undefined,
-    crmQueued: Boolean(result.crm_queued)
+    approvedDraftVersion: result.approved_draft_version,
+    crmQueued: Boolean(result.crm_queued),
+    approvalInputHash: result.approval_input_hash,
+    approvedReferenceSetHash: result.approved_reference_set_hash
   }, undefined, request);
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
+import { useWidgetSessionDraft, type ApprovalToken } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { fetchTeamMessages, relayUserMessage } from '@/lib/api/client';
 import type { ConsentRecord } from '@/lib/privacy/notice';
@@ -267,7 +267,13 @@ describe('useWidgetSessionDraft', () => {
     }];
     const { result } = renderHook(() => useWidgetSessionDraft({
       createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
-      fetchProjectDraft: vi.fn(async () => ({ draftVersion: 0, fieldCount: 0, draft: {}, referenceLinks: persistedLinks })),
+      fetchProjectDraft: vi.fn(async () => ({
+        draftVersion: 0,
+        fieldCount: 0,
+        draft: {},
+        referenceLinks: persistedLinks,
+        canonicalReferenceSetHash: 'restored-reference-hash'
+      })),
       updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
     }));
     act(() => {
@@ -280,6 +286,8 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.referenceLinks).toEqual(persistedLinks);
     expect(result.current.draft.projectScope).toBe('Keep this local recovery value');
     expect(result.current.draftVersion).toBe(5);
+    expect(result.current.approval.canonicalReferenceSetHash).toBe('restored-reference-hash');
+    expect(result.current.approvalStatus).toBe('idle');
   });
 
   test('moves idle to pending to error to pending to approved and rejects duplicate begins', () => {
@@ -293,7 +301,7 @@ describe('useWidgetSessionDraft', () => {
     }));
 
     expect(result.current.approvalStatus).toBe('idle');
-    let failedToken!: number;
+    let failedToken!: ApprovalToken;
     act(() => {
       failedToken = result.current.beginApproval()!;
     });
@@ -302,7 +310,7 @@ describe('useWidgetSessionDraft', () => {
     act(() => expect(result.current.finishApproval(failedToken, 'error')).toBe(true));
     expect(result.current.approvalStatus).toBe('error');
 
-    let retryToken!: number;
+    let retryToken!: ApprovalToken;
     act(() => {
       retryToken = result.current.beginApproval()!;
     });
@@ -357,11 +365,11 @@ describe('useWidgetSessionDraft', () => {
       resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
     }));
 
-    let staleToken!: number;
+    let staleToken!: ApprovalToken;
     act(() => {
       staleToken = result.current.beginApproval()!;
     });
-    expect(staleToken).toEqual(expect.any(Number));
+    expect(staleToken).toMatchObject({ generation: expect.any(Number), draftVersion: 0 });
     expect(result.current.approvalInFlight).toBe(true);
 
     act(() => result.current.appendReferenceLink({
@@ -371,7 +379,7 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.finishApproval(staleToken, 'approved')).toBe(false);
     expect(result.current.briefApproved).toBe(false);
 
-    let currentToken!: number;
+    let currentToken!: ApprovalToken;
     act(() => {
       currentToken = result.current.beginApproval()!;
       expect(result.current.finishApproval(currentToken, 'approved')).toBe(true);
@@ -401,13 +409,96 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.briefApproved).toBe(false);
   });
 
+  test('records exact server approval facts only when token, draft, and references still match', () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    const draft = { projectScope: 'Approved scope' };
+    act(() => result.current.applyCanonicalDraft(draft, 4, {
+      draft, draftVersion: 4, fieldCount: 1, canonicalReferenceSetHash: 'references-v4'
+    }));
+
+    let token!: NonNullable<ReturnType<typeof result.current.beginApproval>>;
+    act(() => { token = result.current.beginApproval()!; });
+    let outcome;
+    act(() => {
+      outcome = result.current.finishApprovalSuccess(token, {
+        approvedDraftVersion: 4,
+        approvalInputHash: 'server-approval-hash',
+        approvedReferenceSetHash: 'references-v4',
+        crmRevision: 3
+      });
+    });
+
+    expect(outcome).toBe('approved');
+    expect(result.current.approvalStatus).toBe('approved');
+    expect(result.current.approval).toEqual({
+      approvedDraftVersion: 4,
+      approvalInputHash: 'server-approval-hash',
+      canonicalReferenceSetHash: 'references-v4',
+      approvedReferenceSetHash: 'references-v4',
+      crmRevision: 3
+    });
+  });
+
+  test.each([
+    ['draft version', { approvedDraftVersion: 5, approvalInputHash: 'hash', approvedReferenceSetHash: 'references-v4' }],
+    ['reference hash', { approvedDraftVersion: 4, approvalInputHash: 'hash', approvedReferenceSetHash: 'different-references' }]
+  ])('rejects concurrent approval %s mismatch without synthesizing metadata', (_label, serverFacts) => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    const draft = { projectScope: 'Approval candidate' };
+    act(() => result.current.applyCanonicalDraft(draft, 4, {
+      draft, draftVersion: 4, fieldCount: 1, canonicalReferenceSetHash: 'references-v4'
+    }));
+    let token!: ApprovalToken;
+    act(() => { token = result.current.beginApproval()!; });
+
+    let outcome;
+    act(() => { outcome = result.current.finishApprovalSuccess(token, serverFacts); });
+
+    expect(outcome).toBe('mismatch');
+    expect(result.current.approvalStatus).toBe('error');
+    expect(result.current.briefApproved).toBe(false);
+    expect(result.current.approval.approvalInputHash).toBeUndefined();
+    expect(result.current.approval.approvedReferenceSetHash).toBeUndefined();
+  });
+
+  test('rejects approval completion after concurrent canonical draft advancement', () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    const draft = { projectScope: 'Version four' };
+    act(() => result.current.applyCanonicalDraft(draft, 4, {
+      draft, draftVersion: 4, fieldCount: 1, canonicalReferenceSetHash: 'references-v4'
+    }));
+    let token!: ApprovalToken;
+    act(() => { token = result.current.beginApproval()!; });
+    act(() => result.current.applyCanonicalDraft({ projectScope: 'Version five' }, 5, {
+      draft: { projectScope: 'Version five' }, draftVersion: 5, fieldCount: 1,
+      canonicalReferenceSetHash: 'references-v5'
+    }));
+
+    expect(result.current.finishApprovalSuccess(token, {
+      approvedDraftVersion: 4, approvalInputHash: 'old-hash', approvedReferenceSetHash: 'references-v4'
+    })).toBe('stale');
+    expect(result.current.briefApproved).toBe(false);
+  });
+
   test('reset invalidates a pending approval completion', () => {
     const { result } = renderHook(() => useWidgetSessionDraft({
       createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
       fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
       resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
     }));
-    let token!: number;
+    let token!: ApprovalToken;
     act(() => { token = result.current.beginApproval()!; });
     act(() => result.current.reset());
 
@@ -422,7 +513,7 @@ describe('useWidgetSessionDraft', () => {
       fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
       resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
     }));
-    let token!: number;
+    let token!: ApprovalToken;
     act(() => { token = result.current.beginApproval()!; });
     act(() => unmount());
 

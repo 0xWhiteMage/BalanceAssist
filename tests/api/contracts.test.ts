@@ -6,7 +6,8 @@ import {
   MAX_CHAT_CAPTURED_FIELD_CHARACTERS,
   MAX_CHAT_CONTEXT_DRAFT_CHARACTERS,
   MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS,
-  MAX_CHAT_CONTEXT_STEP_CHARACTERS
+  MAX_CHAT_CONTEXT_STEP_CHARACTERS,
+  MAX_PROJECT_SCOPE_CHARACTERS
 } from '@/lib/api/contracts';
 import { expect, test } from 'vitest';
 
@@ -136,6 +137,16 @@ test('chat request payload accepts an array of conversation messages', () => {
     context: { step: 'intro' }
   });
   expect(result.success).toBe(true);
+});
+
+test('chat request accepts exactly the project scope boundary and rejects one extra character', () => {
+  expect(MAX_PROJECT_SCOPE_CHARACTERS).toBe(4_000);
+  expect(chatRequestPayloadSchema.safeParse({
+    messages: [{ role: 'user', content: 's'.repeat(MAX_PROJECT_SCOPE_CHARACTERS) }]
+  }).success).toBe(true);
+  expect(chatRequestPayloadSchema.safeParse({
+    messages: [{ role: 'user', content: 's'.repeat(MAX_PROJECT_SCOPE_CHARACTERS + 1) }]
+  }).success).toBe(false);
 });
 
 test('chat request payload rejects assistant messages from the browser', () => {

@@ -141,38 +141,17 @@ test('shows the stable non-echoing diversion when the server rejects a filename'
 });
 
 test('classifies a pasted YouTube URL and adds a chip', async () => {
-  const onAdd = vi.fn();
-  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/attachments/link')) {
-      return new Response(JSON.stringify({
-        ok: true,
-        persisted: true,
-        link: { id: 'link-1', kind: 'youtube', url: 'https://youtu.be/abc' }
-      }), { status: 200 });
-    }
-    return new Response('{}', { status: 404 });
-  }) as unknown as typeof fetch;
+  const onAdd = vi.fn().mockResolvedValue({ status: 'saved' });
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
-  await waitFor(() => expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ kind: 'youtube' })));
+  await waitFor(() => expect(onAdd).toHaveBeenCalledWith('https://youtu.be/abc'));
 });
 
-test('surfaces the server error message when /api/attachments/link returns a structured error', async () => {
-  const onAdd = vi.fn();
-  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/attachments/link')) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid request payload', issues: [] }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-    return new Response('{}', { status: 404 });
-  }) as unknown as typeof fetch;
+test('surfaces the canonical mutation error and keeps the URL for retry', async () => {
+  const onAdd = vi.fn().mockResolvedValue({ status: 'failed', message: 'Reference status was not saved. Retry.' });
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
   const input = screen.getByPlaceholderText(/paste a reference link/i);
@@ -180,29 +159,23 @@ test('surfaces the server error message when /api/attachments/link returns a str
   fireEvent.submit(input.closest('form')!);
 
   await waitFor(() => {
-    expect(screen.getByRole('alert')).toHaveTextContent(/Invalid request payload/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/Reference status was not saved/i);
+  });
+  expect(input).toHaveValue('https://youtu.be/abc');
+});
+
+test('requires an HTTPS URL before invoking the canonical mutation', async () => {
+  const onAdd = vi.fn();
+
+  render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
+  const input = screen.getByPlaceholderText(/paste a reference link/i);
+  fireEvent.change(input, { target: { value: 'http://youtu.be/abc' } });
+  fireEvent.submit(input.closest('form')!);
+
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(/HTTPS/i);
   });
   expect(onAdd).not.toHaveBeenCalled();
-});
-
-test('falls back to a generic message when the error response is not JSON', async () => {
-  const onAdd = vi.fn();
-  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/attachments/link')) {
-      return new Response('not-json', { status: 500 });
-    }
-    return new Response('{}', { status: 404 });
-  }) as unknown as typeof fetch;
-
-  render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
-  const input = screen.getByPlaceholderText(/paste a reference link/i);
-  fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
-  fireEvent.submit(input.closest('form')!);
-
-  await waitFor(() => {
-    expect(screen.getByRole('alert')).toHaveTextContent(/Failed to add link/i);
-  });
 });
 
 test('renders the uppercase section header and short subhead describing the upload affordance', () => {
@@ -253,20 +226,7 @@ test('URL submit button uses the uppercase ADD LINK pill copy', () => {
 });
 
 test('captures a private reference link without producer-transfer consent', async () => {
-  const onAddLink = vi.fn();
-  const requestBodies: Array<Record<string, unknown>> = [];
-
-  global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    requestBodies.push({ url: String(_input), ...JSON.parse(String(init?.body)) });
-    return new Response(JSON.stringify({
-      ok: true,
-      persisted: true,
-      link: { id: 'link-1', sessionId: 'sess-1', kind: 'youtube', url: 'https://youtu.be/abc' }
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }) as unknown as typeof fetch;
+  const onAddLink = vi.fn().mockResolvedValue({ status: 'saved' });
 
   render(<AttachmentDropzone onAddLink={onAddLink} onAddFile={vi.fn()} sessionId="sess-1" />);
 
@@ -275,16 +235,8 @@ test('captures a private reference link without producer-transfer consent', asyn
   fireEvent.submit(input.closest('form')!);
 
   await waitFor(() => {
-    expect(onAddLink).toHaveBeenCalledWith(expect.objectContaining({ kind: 'youtube', url: 'https://youtu.be/abc' }));
+    expect(onAddLink).toHaveBeenCalledWith('https://youtu.be/abc');
   });
-
-  expect(requestBodies).toHaveLength(1);
-  expect(requestBodies[0]).toMatchObject({
-    sessionId: 'sess-1',
-    url: 'https://youtu.be/abc',
-    kind: 'youtube'
-  });
-  expect(JSON.stringify(requestBodies)).not.toContain('producer_transfer');
   expect(screen.queryByLabelText(/balance team may review links/i)).not.toBeInTheDocument();
 });
 

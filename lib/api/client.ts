@@ -13,23 +13,26 @@ export type EventResponse = {
   eventName: string;
 };
 
-export type FinalizeLeadResponse = {
-  ok: boolean;
-  code?: string;
-  sessionId: string;
-  qualificationStatus: string;
-  persisted?: boolean;
-  queued?: boolean;
-  delivered?: boolean;
-  retryable?: boolean;
-  handoffId?: string;
-  score?: number | null;
-  recommendedNextStep?: string | null;
-  crmRecordId?: string;
-  crmQueued?: boolean;
-  crmRevision?: number;
-  approvedDraftVersion?: number;
-};
+export type FinalizeLeadResponse =
+  | {
+      ok: true;
+      sessionId: string;
+      qualificationStatus: string | null;
+      persisted: true;
+      queued: boolean;
+      delivered: boolean;
+      retryable: boolean;
+      handoffId?: string;
+      score?: number | null;
+      recommendedNextStep?: string | null;
+      crmRecordId?: string;
+      crmQueued: boolean;
+      crmRevision?: number;
+      approvedDraftVersion: number;
+      approvalInputHash: string;
+      approvedReferenceSetHash: string;
+    }
+  | { ok: true; sessionId: string; persisted: false; reason: string };
 
 const REQUEST_TIMEOUT_MS = 10000;
 
@@ -144,7 +147,19 @@ export async function logEvent(payload: {
 }
 
 export async function finalizeLead(payload: { sessionId: string }): Promise<FinalizeLeadResponse | null> {
-  return postJson<FinalizeLeadResponse>('/api/leads/finalize', payload);
+  try {
+    const response = await fetchWithTimeout('/api/leads/finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+    if (!response.ok) return null;
+    const parsed = finalizeLeadResponseSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function recordProducerTransferConsent(sessionId: string): Promise<boolean> {
@@ -672,4 +687,31 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
   return { ...base, outcome: data.outcome };
 }
 import { z } from 'zod';
+
+const finalizeLeadResponseSchema = z.discriminatedUnion('persisted', [
+  z.object({
+    ok: z.literal(true),
+    sessionId: z.string(),
+    qualificationStatus: z.string().nullable(),
+    persisted: z.literal(true),
+    queued: z.boolean(),
+    delivered: z.boolean(),
+    retryable: z.boolean(),
+    handoffId: z.string().optional(),
+    score: z.number().nullable().optional(),
+    recommendedNextStep: z.string().nullable().optional(),
+    crmRecordId: z.string().optional(),
+    crmQueued: z.boolean(),
+    crmRevision: z.number().int().nonnegative().optional(),
+    approvedDraftVersion: z.number().int().nonnegative(),
+    approvalInputHash: z.string().min(1),
+    approvedReferenceSetHash: z.string().min(1)
+  }).strict(),
+  z.object({
+    ok: z.literal(true),
+    sessionId: z.string(),
+    persisted: z.literal(false),
+    reason: z.string()
+  }).strict()
+]);
 import { CONSENT_VERSION } from '@/lib/privacy/notice';

@@ -16,7 +16,7 @@ import {
 } from '@/components/widget/widget-overlay-parts';
 import { ReviewPanel } from '@/components/widget/review-panel';
 import { IntakeStageProgress } from '@/components/widget/intake-stage-progress';
-import { AttachmentDropzone, type ReferenceFile, type ReferenceLink } from '@/components/widget/attachment-dropzone';
+import { AttachmentDropzone, type ReferenceFile } from '@/components/widget/attachment-dropzone';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
 import { getNextConversationStep } from '@/lib/conversation/extract';
@@ -32,7 +32,8 @@ import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversa
 import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
-import { classifyUrl } from '@/lib/uploads/url-detect';
+import { classifyUrl, getReferencePresenceStatus, normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
+import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
 const OPTIONAL_ANSWER_ACTIONS = ['Not sure yet', 'Skip', 'Prefer not to share'] as const;
@@ -678,18 +679,20 @@ export function WidgetOverlay({
     return result;
   }
 
-  async function appendReferenceLink(link: ReferenceLink) {
-    if (link.id && link.sessionId) sessionDraft.appendReferenceLink({ ...link, id: link.id, sessionId: link.sessionId });
-  }
-
   async function addPrivateReference(url: string) {
-    const kind = classifyUrl(url);
-    if (!kind) return { status: 'failed', message: 'Enter a valid HTTPS reference URL.' } as const;
+    const normalizedUrl = normalizePublicReferenceUrl(url);
+    const kind = normalizedUrl ? classifyUrl(normalizedUrl) : null;
+    if (!normalizedUrl || !kind) return { status: 'failed', message: 'Enter a valid public HTTPS reference URL.' } as const;
     const activeSessionId = sessionId ?? await ensureSession();
     if (!activeSessionId) return { status: 'failed', message: 'The reference link could not be saved without an active session.' } as const;
-    const link = await addReferenceLink({ sessionId: activeSessionId, url, kind });
-    if (!link) return { status: 'failed', message: 'The reference link could not be saved. Please retry.' } as const;
-    sessionDraft.appendReferenceLink(link);
+    const existing = referenceLinks.find((link) => link.url === normalizedUrl);
+    const link = existing ?? await addReferenceLink({ sessionId: activeSessionId, url: normalizedUrl, kind });
+    if (!link) return { status: 'failed', message: 'The HTTPS reference link could not be saved. Please retry.' } as const;
+    if (!existing) sessionDraft.appendReferenceLink(link);
+    const statusResult = await sessionDraft.updateDraft('referencesStatus', 'added');
+    if (statusResult?.status !== 'saved') {
+      return { status: 'failed', message: 'The reference link was saved, but its brief status was not. Retry to finish saving it.' } as const;
+    }
     await sessionDraft.hydrateDraft(activeSessionId);
     return { status: 'saved' } as const;
   }
@@ -697,6 +700,11 @@ export function WidgetOverlay({
   async function removePrivateReference(id: string) {
     if (!await deleteReferenceLink(id)) return { status: 'failed', message: 'The reference link could not be removed. Please retry.' } as const;
     sessionDraft.removeReferenceLink(id);
+    const remaining = referenceLinks.filter((link) => link.id !== id);
+    const statusResult = await sessionDraft.updateDraft('referencesStatus', getReferencePresenceStatus(remaining));
+    if (statusResult?.status !== 'saved') {
+      return { status: 'failed', message: 'The link was removed, but the brief status was not updated. Please retry.' } as const;
+    }
     if (sessionId) await sessionDraft.hydrateDraft(sessionId);
     return { status: 'saved' } as const;
   }
@@ -763,9 +771,15 @@ export function WidgetOverlay({
         return;
       }
 
-      if (!sessionDraft.finishApproval(approvalToken, 'approved')) return;
+      const approvalOutcome = sessionDraft.finishApprovalSuccess(approvalToken, finalizeResponse);
+      if (approvalOutcome !== 'approved') {
+        setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief changed while it was being approved. I reloaded the latest saved version; review it and retry.');
+        await sessionDraft.hydrateDraft(activeSessionId);
+        await botSay('The saved brief changed during approval, so I reloaded the latest version. Please review it and retry.');
+        return;
+      }
       setApprovalError(null);
-      sessionDraft.recordApproval(finalizeResponse);
       if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
       } else if (finalizeResponse.queued === true) {
@@ -806,32 +820,17 @@ export function WidgetOverlay({
     if (currentStep === 'references') {
       const referencesStatus = value === 'Skip' ? 'skipped' : 'added';
       if (value !== 'Skip') {
-        const kind = classifyUrl(value);
-        if (!kind) {
-          await botSay('Please paste a full reference URL, or choose Skip.');
+        const outcome = await addPrivateReference(value);
+        if (outcome.status !== 'saved') {
+          await botSay(`${outcome.message} Please try again, or choose Skip.`);
           return;
         }
-        const activeSessionId = sessionId ?? await ensureSession();
-        if (!activeSessionId) {
-          await botSay('I could not save that reference link. Please try again, or choose Skip.');
+      } else {
+        const statusResult = await sessionDraft.updateDraft('referencesStatus', referencesStatus);
+        if (statusResult?.status !== 'saved') {
+          await botSay('I could not save Skip. Please try again.');
           return;
         }
-        const savedLink = await addReferenceLink({ sessionId: activeSessionId, url: value, kind });
-        if (!savedLink) {
-          await botSay('I could not save that reference link. Please try again, or choose Skip.');
-          return;
-        }
-        await appendReferenceLink(savedLink);
-      }
-      const statusResult = await sessionDraft.updateDraft('referencesStatus', referencesStatus);
-      const statusSaved = statusResult?.status === 'saved';
-      if (!statusSaved) {
-        await botSay(
-          referencesStatus === 'added'
-            ? 'Your reference link was saved, but I could not update the brief. Please try again.'
-            : 'I could not save Skip. Please try again.'
-        );
-        return;
       }
       if (referencesStatus === 'added') await botSay('Your reference link was saved.');
       setCurrentStep('contact-name');
@@ -1671,7 +1670,7 @@ export function WidgetOverlay({
                           </div>
                         )}
                         <AttachmentDropzone
-                          onAddLink={appendReferenceLink}
+                          onAddLink={addPrivateReference}
                           onAddFile={appendReferenceFile}
                           onFileAnalyzed={handleFileAnalyzed}
                           sessionId={sessionId}
@@ -1719,6 +1718,7 @@ export function WidgetOverlay({
                 <input
                   type="text"
                   value={inputValue}
+                  maxLength={MAX_PROJECT_SCOPE_CHARACTERS}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={humanStatus === 'sending'}

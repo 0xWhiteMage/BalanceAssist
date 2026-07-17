@@ -17,8 +17,21 @@ export type DraftEditOutcome =
   | { status: 'failed'; ok: false; conflict: false; message: string };
 export type DraftOperation = { invalidationEpoch: number; sessionId: string | null };
 export type ApprovalStatus = 'idle' | 'pending' | 'error' | 'approved';
+export type ApprovalToken = {
+  generation: number;
+  sessionId: string | null;
+  draftVersion: number;
+  canonicalReferenceSetHash?: string;
+};
+type ApprovalServerFacts = {
+  approvedDraftVersion: number;
+  approvalInputHash: string;
+  approvedReferenceSetHash: string;
+  crmRevision?: number;
+};
 
 const alwaysValid: BootstrapValidity = () => true;
+const EMPTY_REFERENCE_SET_HASH = '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945';
 
 type Dependencies = {
   createSession: (payload: { sourceUrl: string; referrer?: string; consentVersion?: string; consentedAt?: string }) => Promise<SessionResponse | null>;
@@ -47,7 +60,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     canonicalReferenceSetHash?: string;
     approvedReferenceSetHash?: string;
     crmRevision?: number;
-  }>({});
+  }>({ canonicalReferenceSetHash: EMPTY_REFERENCE_SET_HASH });
   const sessionIdRef = useRef<string | null>(null);
   const expiresAtRef = useRef<string | null>(null);
   const draftRef = useRef(draft);
@@ -57,11 +70,13 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const operationInvalidationEpochRef = useRef(0);
   const approvalStatusRef = useRef<ApprovalStatus>('idle');
   const approvalGenerationRef = useRef(0);
+  const approvalRef = useRef(approval);
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
 
   draftRef.current = draft;
   draftVersionRef.current = draftVersion;
+  approvalRef.current = approval;
 
   const invalidateBootstrap = useCallback(() => {
     bootstrapGenerationRef.current += 1;
@@ -89,6 +104,24 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const isDraftOperationCurrent = useCallback((operation: DraftOperation) =>
     operation.invalidationEpoch === operationInvalidationEpochRef.current && operation.sessionId === sessionIdRef.current, []);
 
+  const applyCanonicalApproval = useCallback((canonical: ProjectDraftResponse, version: number) => {
+    approvalGenerationRef.current += 1;
+    const nextApproval = {
+      approvedDraftVersion: canonical.approvedDraftVersion,
+      approvalInputHash: canonical.approvalInputHash,
+      canonicalReferenceSetHash: canonical.canonicalReferenceSetHash,
+      approvedReferenceSetHash: canonical.approvedReferenceSetHash,
+      crmRevision: canonical.crmRevision
+    };
+    approvalRef.current = nextApproval;
+    setApproval(nextApproval);
+    const canonicalApproved =
+      version === draftVersionRef.current &&
+      nextApproval.approvedDraftVersion === version &&
+      nextApproval.canonicalReferenceSetHash === nextApproval.approvedReferenceSetHash;
+    transitionApproval(canonicalApproved ? 'approved' : 'idle');
+  }, [transitionApproval]);
+
   const applyCanonicalDraft = useCallback((
     values: Record<string, string>,
     version: number,
@@ -106,8 +139,6 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (sameVersion && !sameDraft) return false;
     if (sameVersion && sameDraft && !canonical) return true;
 
-    approvalGenerationRef.current += 1;
-    approvalStatusRef.current = 'idle';
     setDraft(nextDraft);
     draftRef.current = nextDraft;
     setDraftVersion(version);
@@ -115,23 +146,13 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     setFieldProvenance(provenance ?? canonical?.provenance ?? {});
     setHasProjectIntent(detectProjectIntent(nextDraft));
     if (canonical) {
-      const nextApproval = {
-        approvedDraftVersion: canonical.approvedDraftVersion,
-        approvalInputHash: canonical.approvalInputHash,
-        canonicalReferenceSetHash: canonical.canonicalReferenceSetHash,
-        approvedReferenceSetHash: canonical.approvedReferenceSetHash,
-        crmRevision: canonical.crmRevision
-      };
-      setApproval(nextApproval);
-      const canonicalApproved =
-        nextApproval.approvedDraftVersion === version &&
-        nextApproval.canonicalReferenceSetHash === nextApproval.approvedReferenceSetHash;
-      transitionApproval(canonicalApproved ? 'approved' : 'idle');
+      applyCanonicalApproval(canonical, version);
     } else {
+      approvalGenerationRef.current += 1;
       transitionApproval('idle');
     }
     return true;
-  }, [isDraftOperationCurrent, transitionApproval]);
+  }, [applyCanonicalApproval, isDraftOperationCurrent, transitionApproval]);
 
   const appendReferenceLink = useCallback((link: VisibleReferenceLink) => {
     setReferenceLinks((current) => current.some((item) => item.url === link.url) ? current : [...current, link]);
@@ -168,9 +189,11 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
       if (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0) {
         if (!operationIsValid()) return;
         applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
+      } else {
+        applyCanonicalApproval(canonical, canonical.draftVersion);
       }
     }
-  }, [applyCanonicalDraft, dependencies]);
+  }, [applyCanonicalApproval, applyCanonicalDraft, dependencies]);
 
   const ensureSession = useCallback(async (isValid: BootstrapValidity = alwaysValid) => {
     const generation = bootstrapGenerationRef.current;
@@ -260,27 +283,50 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     } as const;
   }, [persistDraft]);
 
-  const beginApproval = useCallback(() => {
+  const beginApproval = useCallback((): ApprovalToken | null => {
     if (approvalStatusRef.current === 'pending' || approvalStatusRef.current === 'approved') return null;
-    const token = ++approvalGenerationRef.current;
+    const token = {
+      generation: ++approvalGenerationRef.current,
+      sessionId: sessionIdRef.current,
+      draftVersion: draftVersionRef.current,
+      canonicalReferenceSetHash: approvalRef.current.canonicalReferenceSetHash
+    };
     transitionApproval('pending');
     return token;
   }, [transitionApproval]);
 
-  const finishApproval = useCallback((token: number, status: Extract<ApprovalStatus, 'error' | 'approved'>) => {
-    if (token !== approvalGenerationRef.current) return false;
+  const finishApproval = useCallback((token: ApprovalToken, status: Extract<ApprovalStatus, 'error' | 'approved'>) => {
+    if (token.generation !== approvalGenerationRef.current) return false;
     transitionApproval(status);
     return true;
   }, [transitionApproval]);
 
-  const recordApproval = useCallback((result: { approvedDraftVersion?: number; crmRevision?: number }) => {
-    setApproval((current) => ({
-      ...current,
-      approvedDraftVersion: result.approvedDraftVersion,
-      crmRevision: result.crmRevision,
-      approvedReferenceSetHash: current.canonicalReferenceSetHash
-    }));
+  const finishApprovalSuccess = useCallback((token: ApprovalToken, facts: ApprovalServerFacts) => {
+    if (token.generation !== approvalGenerationRef.current) return 'stale' as const;
+    const currentReferenceHash = approvalRef.current.canonicalReferenceSetHash;
+    if (
+      token.sessionId !== sessionIdRef.current ||
+      token.draftVersion !== draftVersionRef.current ||
+      token.canonicalReferenceSetHash !== currentReferenceHash
+    ) return 'stale' as const;
+    if (
+      facts.approvedDraftVersion !== token.draftVersion ||
+      facts.approvedReferenceSetHash !== token.canonicalReferenceSetHash
+    ) {
+      transitionApproval('error');
+      return 'mismatch' as const;
+    }
+    const nextApproval = {
+      approvedDraftVersion: facts.approvedDraftVersion,
+      approvalInputHash: facts.approvalInputHash,
+      canonicalReferenceSetHash: currentReferenceHash,
+      approvedReferenceSetHash: facts.approvedReferenceSetHash,
+      crmRevision: facts.crmRevision
+    };
+    approvalRef.current = nextApproval;
+    setApproval(nextApproval);
     transitionApproval('approved');
+    return 'approved' as const;
   }, [transitionApproval]);
 
   const reset = useCallback(() => {
@@ -297,13 +343,15 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     setHasProjectIntent(false);
     transitionApproval('idle');
     setReferenceLinks([]);
-    setApproval({});
+    const resetApproval = { canonicalReferenceSetHash: EMPTY_REFERENCE_SET_HASH };
+    approvalRef.current = resetApproval;
+    setApproval(resetApproval);
   }, [invalidateBootstrap, transitionApproval]);
 
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, fieldProvenance, draftVersion,
     hasProjectIntent, briefApproved, approvalStatus, approvalInFlight: approvalStatus === 'pending', ensureSession, loadOrCreateSession, invalidateBootstrap,
-    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, removeReferenceLink, reset,
+    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, beginApproval, finishApproval, finishApprovalSuccess, approval, referenceLinks, appendReferenceLink, removeReferenceLink, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),
     requestProjectDeletion: () => sessionIdRef.current ? dependencies.requestProjectDeletion(sessionIdRef.current) : Promise.resolve({ ok: false })

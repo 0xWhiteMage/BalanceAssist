@@ -115,6 +115,20 @@ describe('ProjectBriefCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove https://vimeo.com/123' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Link could not be removed.');
   });
+
+  test('marks a legacy HTTP reference unsupported while keeping removal available', () => {
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact
+        referenceLinks={[{ id: 'legacy-reference', kind: 'other', url: 'http://legacy.example.com/board' }]}
+        onRemoveReference={vi.fn().mockResolvedValue({ status: 'saved' })}
+      />
+    );
+
+    expect(screen.getByText(/unsupported.*not transferable/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove http://legacy.example.com/board' })).toBeEnabled();
+  });
   test('shows the "Project Brief" title and no "key fields captured" subhead', () => {
     render(
       <ProjectBriefCard

@@ -135,6 +135,17 @@ test('happy path: parsed data matches default-everywhere object', () => {
   }
 });
 
+test('tool schema preserves a 4,000-character original scope and rejects 4,001 characters', () => {
+  const exactScope = 's'.repeat(4_000);
+  const parsed = recordBriefUpdatesSchema.safeParse({ ...positiveFixture, projectScope: exactScope });
+  expect(parsed.success).toBe(true);
+  if (parsed.success) expect(parsed.data.projectScope).toBe(exactScope);
+  expect(recordBriefUpdatesSchema.safeParse({ ...positiveFixture, projectScope: `${exactScope}x` }).success).toBe(false);
+
+  expect(validateJsonSchema({ ...positiveFixture, projectScope: exactScope })).toBe(true);
+  expect(validateJsonSchema({ ...positiveFixture, projectScope: `${exactScope}x` })).toBe(false);
+});
+
 test('contactEmail: empty string is accepted', () => {
   const result = recordBriefUpdatesSchema.safeParse({ contactEmail: '' });
   expect(result.success).toBe(true);

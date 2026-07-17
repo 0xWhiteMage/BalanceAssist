@@ -13,7 +13,9 @@ const { finalizeLeadMock } = vi.hoisted(() => ({
     retryable: false,
     crmQueued: true,
     crmRevision: 1,
-    approvedDraftVersion: 1
+    approvedDraftVersion: 1,
+    approvalInputHash: 'approval-hash-v1',
+    approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
   }))
 }));
 
@@ -66,7 +68,9 @@ afterEach(() => {
       retryable: false,
       crmQueued: true,
       crmRevision: 1,
-      approvedDraftVersion: 1
+      approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1',
+      approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
   });
 });
 
@@ -163,7 +167,9 @@ function mockWidgetFetch() {
         retryable: false,
         crmQueued: true,
         crmRevision: 1,
-        approvedDraftVersion: 1
+        approvedDraftVersion: 1,
+        approvalInputHash: 'approval-hash-v1',
+        approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
       });
     }
     if (url.includes('/api/projects/mock-session-id/consent')) {
@@ -249,7 +255,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
         retryable: false,
         crmQueued: true,
         crmRevision: 1,
-        approvedDraftVersion: 1
+        approvedDraftVersion: 1,
+        approvalInputHash: 'approval-hash-v1',
+        approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
         });
         await Promise.resolve();
       });
@@ -310,7 +318,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       retryable: false,
       crmQueued: false,
       crmRevision: 1,
-      approvedDraftVersion: 1
+      approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1',
+      approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
     });
 
     render(<WidgetOverlay autoOpen={true} />);
@@ -349,7 +359,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       retryable: false,
       crmQueued: false,
       crmRevision: 1,
-      approvedDraftVersion: 1
+      approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1',
+      approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
     });
 
     render(<WidgetOverlay autoOpen={true} />);
@@ -377,6 +389,38 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     });
   }, 10000);
 
+  test('reloads and shows retryable error when server approval facts mismatch the submitted draft', async () => {
+    let draftReloads = 0;
+    mockWidgetFetch();
+    const baseFetch = global.fetch;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/mock-session-id/draft') && init?.method !== 'PUT') {
+        draftReloads += 1;
+        return makeJsonResponse({
+          sessionId: 'mock-session-id', draft: {}, draftVersion: 1, fieldCount: 0,
+          referenceLinks: [], canonicalReferenceSetHash: 'current-reference-hash'
+        });
+      }
+      return baseFetch(input, init);
+    }) as unknown as typeof fetch;
+    finalizeLeadMock.mockResolvedValueOnce({
+      ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
+      queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 2,
+      approvedDraftVersion: 2, approvalInputHash: 'server-approval-hash',
+      approvedReferenceSetHash: 'different-reference-hash'
+    });
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
+
+    expect(await screen.findByRole('alert', {}, { timeout: 7000 })).toHaveTextContent(/changed.*reload|reload.*retry/i);
+    expect(document.querySelector('[data-testid="approve-confirmation"]')).toBeNull();
+    expect(draftReloads).toBeGreaterThan(0);
+  }, 15_000);
+
   test('shows one retryable approval error above both mobile tab panels', async () => {
     setMobileViewport(true);
     mockWidgetFetch();
@@ -384,7 +428,8 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       .mockRejectedValueOnce(new Error('temporary finalization failure'))
       .mockResolvedValueOnce({
         ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
-        queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1
+        queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1,
+        approvalInputHash: 'approval-hash-v1', approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
       });
     render(<WidgetOverlay autoOpen={true} />);
     const input = await startAiConversation();
@@ -415,7 +460,8 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     mockWidgetFetch();
     finalizeLeadMock.mockResolvedValueOnce({
       ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
-      queued: true, delivered: true, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1
+      queued: true, delivered: true, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1', approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
     });
     render(<WidgetOverlay autoOpen={true} />);
     const input = await startAiConversation();

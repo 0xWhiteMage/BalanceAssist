@@ -1,3 +1,5 @@
+import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
+
 const ALLOWED_KEYS = [
   'service',
   'projectType',
@@ -84,6 +86,10 @@ export function sanitizeDraftUpdates(input: Record<string, unknown> | null | und
     }
     if (key === 'contactCompany') {
       result[key] = normalizeCompany(trimmed).slice(0, MAX_TEXT_LENGTH);
+      continue;
+    }
+    if (key === 'projectScope') {
+      if (trimmed.length <= MAX_PROJECT_SCOPE_CHARACTERS) result[key] = trimmed;
       continue;
     }
     result[key] = trimmed.slice(0, MAX_TEXT_LENGTH);
