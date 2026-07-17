@@ -162,12 +162,21 @@ a {
 .balance-widget-composer {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   flex-shrink: 0;
   align-items: center;
   gap: 8px;
   padding: 10px 12px max(10px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--balance-border-subtle);
   background: rgba(16, 16, 16, 0.88);
+}
+
+.balance-widget-input-label {
+  width: 100%;
+  color: var(--balance-muted);
+  font: 700 10px/1 var(--balance-condensed);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .balance-widget-input {
@@ -184,6 +193,8 @@ a {
 
 .balance-widget-input:focus {
   border-color: var(--balance-gold);
+  outline: 2px solid var(--balance-gold);
+  outline-offset: 2px;
 }
 
 .balance-widget-icon-action {
@@ -224,14 +235,6 @@ a {
 
 .balance-widget-launcher:hover {
   background: var(--balance-gold-light);
-}
-
-.balance-widget-launcher--close {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 56px;
-  padding: 0;
 }
 
 .balance-widget-header {
@@ -283,6 +286,11 @@ a {
   color: var(--balance-muted);
   cursor: pointer;
   font-size: 16px;
+}
+
+.balance-widget-interactive:focus-visible {
+  outline: 2px solid var(--balance-gold);
+  outline-offset: 2px;
 }
 
 .balance-message-bubble {
@@ -357,22 +365,12 @@ a {
   .balance-widget-chat { padding: 16px 14px; }
   .balance-widget-input { font-size: 16px; }
 
-  .balance-widget-launcher:not(.balance-widget-launcher--close) {
+  .balance-widget-launcher {
     position: fixed;
     right: max(12px, env(safe-area-inset-right));
     bottom: max(12px, env(safe-area-inset-bottom));
   }
 
-  .balance-widget-launcher--close {
-    position: fixed;
-    top: max(8px, env(safe-area-inset-top));
-    right: 60px;
-    bottom: auto;
-    width: 44px;
-    min-width: 44px;
-    min-height: 44px;
-    opacity: 0.01;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -387,6 +385,12 @@ a {
   }
 
   .balance-widget-chat { scroll-behavior: auto; }
+  .balance-widget-dialog * {
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
   .balance-typing-dot { display: none; }
   .balance-typing-status-text {
     position: static;

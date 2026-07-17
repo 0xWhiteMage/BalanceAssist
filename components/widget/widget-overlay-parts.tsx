@@ -45,7 +45,7 @@ export function WidgetOverlayHeader({
       <button
         onClick={onClose}
         className="balance-widget-action balance-widget-header-close"
-        aria-label="Close chat"
+        aria-label="Close Balance Assist"
       >
         &#10005;
       </button>
@@ -322,7 +322,7 @@ export function HumanFooter({
                   : 'Connected to team'}
           </div>
           {hasTeamReply && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4ade80', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4ade80', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />
               Team response received
             </div>
@@ -413,6 +413,12 @@ export function ProjectBriefCard({
   compact?: boolean;
 }) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const editTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeEditor = () => {
+    setEditingKey(null);
+    requestAnimationFrame(() => editTriggerRef.current?.focus());
+  };
 
   const rows: ReadonlyArray<{
     label: string;
@@ -587,7 +593,7 @@ export function ProjectBriefCard({
           if (compact) {
             return (
               <div
-                key={row.label}
+                key={row.key}
                 data-testid="brief-row"
                 data-row-key={row.key}
                 data-filled={filled ? 'true' : 'false'}
@@ -617,6 +623,7 @@ export function ProjectBriefCard({
                     {filled ? '✓' : '·'}
                   </span>
                   <span
+                    id={`brief-row-label-${row.key}`}
                     style={{
                       ...labelStyle,
                       flex: 1,
@@ -635,6 +642,7 @@ export function ProjectBriefCard({
                       className="balance-widget-action"
                       onClick={(event) => {
                         event.stopPropagation();
+                        editTriggerRef.current = event.currentTarget;
                         openEditor();
                       }}
                       data-testid={`brief-row-edit-${row.key}`}
@@ -673,10 +681,11 @@ export function ProjectBriefCard({
                 {editing && (
                   <BriefRowEditor
                     row={row}
+                    labelId={`brief-row-label-${row.key}`}
                     compact={true}
                     onCommit={(value) => onChange?.(row.key, value) ?? Promise.resolve({ status: 'failed', message: 'This edit cannot be saved.' })}
-                    onSaved={() => setEditingKey(null)}
-                    onCancel={() => setEditingKey(null)}
+                    onSaved={closeEditor}
+                    onCancel={closeEditor}
                   />
                 )}
               </div>
@@ -684,7 +693,7 @@ export function ProjectBriefCard({
           }
           return (
             <div
-              key={row.label}
+              key={row.key}
               data-testid="brief-row"
               data-row-key={row.key}
               data-filled={filled ? 'true' : 'false'}
@@ -694,7 +703,7 @@ export function ProjectBriefCard({
               <div
                 style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}
               >
-                <span style={labelStyle}>{row.label}</span>
+                <span id={`brief-row-label-${row.key}`} style={labelStyle}>{row.label}</span>
                 <span
                   data-testid={filled ? 'brief-row-value' : undefined}
                   style={{
@@ -743,6 +752,7 @@ export function ProjectBriefCard({
                       className="balance-widget-action"
                       onClick={(event) => {
                         event.stopPropagation();
+                        editTriggerRef.current = event.currentTarget;
                         openEditor();
                       }}
                       data-testid={`brief-row-edit-${row.key}`}
@@ -768,10 +778,11 @@ export function ProjectBriefCard({
               {editing && (
                 <BriefRowEditor
                   row={row}
+                  labelId={`brief-row-label-${row.key}`}
                   compact={false}
                   onCommit={(value) => onChange?.(row.key, value) ?? Promise.resolve({ status: 'failed', message: 'This edit cannot be saved.' })}
-                  onSaved={() => setEditingKey(null)}
-                  onCancel={() => setEditingKey(null)}
+                  onSaved={closeEditor}
+                  onCancel={closeEditor}
                 />
               )}
             </div>
@@ -821,12 +832,14 @@ function formatProjectType(value: string | undefined): string {
 
 function BriefRowEditor({
   row,
+  labelId,
   compact = true,
   onCommit,
   onSaved,
   onCancel
 }: {
   row: BriefRow;
+  labelId: string;
   compact?: boolean;
   onCommit: (value: string) => Promise<BriefMutationOutcome>;
   onSaved: () => void;
@@ -873,7 +886,7 @@ function BriefRowEditor({
           className="balance-widget-wrap"
           rows={3}
           value={value}
-          aria-label={row.label}
+          aria-labelledby={labelId}
           autoFocus
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
@@ -889,7 +902,7 @@ function BriefRowEditor({
           className="balance-widget-wrap"
           type="text"
           value={value}
-          aria-label={row.label}
+          aria-labelledby={labelId}
           autoFocus
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {

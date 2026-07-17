@@ -281,8 +281,12 @@ export function AttachmentDropzone({
         </label>
       </div>
 
-      <form onSubmit={handleUrlSubmit} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <form onSubmit={handleUrlSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        <label htmlFor="attachment-reference-url" style={{ width: '100%', fontSize: 11, color: brandTokens.colors.lightText }}>
+          Reference link
+        </label>
         <input
+          id="attachment-reference-url"
           type="url"
           placeholder="Paste a reference link..."
           value={url}
@@ -300,6 +304,7 @@ export function AttachmentDropzone({
         />
         <button
           type="submit"
+          className="balance-widget-action"
           style={{
             padding: '8px 14px',
             borderRadius: 999,

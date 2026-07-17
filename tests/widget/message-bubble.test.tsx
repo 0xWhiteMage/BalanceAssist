@@ -14,6 +14,20 @@ function botMessage(inlineCards: ChatMessage['inlineCards']): ChatMessage {
 }
 
 describe('MessageBubble inline cards', () => {
+  test('programmatically identifies AI, user, team, and system speakers', () => {
+    const { rerender } = render(<MessageBubble message={botMessage(undefined)} />);
+    expect(screen.getByRole('group', { name: 'Message from Balance Assist' })).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ id: 'user', sender: 'user', text: 'Hello', timestamp: 0 }} />);
+    expect(screen.getByRole('group', { name: 'Message from you' })).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ id: 'team', sender: 'bot', text: 'Hello', timestamp: 0, isTeamMessage: true }} />);
+    expect(screen.getByRole('group', { name: 'Message from Balance Studio Team' })).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ id: 'system', sender: 'bot', text: 'Connected', timestamp: 0, isSystem: true }} />);
+    expect(screen.getByRole('group', { name: 'System message' })).toBeInTheDocument();
+  });
+
   test('email card renders an <a> with the exact mailto href', () => {
     render(
       <MessageBubble

@@ -144,7 +144,9 @@ test('classifies a pasted YouTube URL and adds a chip', async () => {
   const onAdd = vi.fn().mockResolvedValue({ status: 'saved' });
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
-  const input = screen.getByPlaceholderText(/paste a reference link/i);
+  const input = screen.getByRole('textbox', { name: 'Reference link' });
+  expect(input).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Add link' })).toHaveClass('balance-widget-action');
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
   await waitFor(() => expect(onAdd).toHaveBeenCalledWith('https://youtu.be/abc'));

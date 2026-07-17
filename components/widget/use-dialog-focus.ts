@@ -8,6 +8,7 @@ const focusableSelector = [
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
+  'iframe',
   '[tabindex]:not([tabindex="-1"])'
 ].join(', ');
 
@@ -22,8 +23,13 @@ function isFocusable(element: HTMLElement): boolean {
   if (element.tabIndex < 0 || element.matches(':disabled')) return false;
   if (element.closest('[inert], [hidden], [aria-hidden="true"]')) return false;
 
-  const style = window.getComputedStyle(element);
-  return style.display !== 'none' && style.visibility !== 'hidden';
+  let current: HTMLElement | null = element;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.contentVisibility === 'hidden') return false;
+    current = current.parentElement;
+  }
+  return true;
 }
 
 function claimInert(element: HTMLElement) {

@@ -43,7 +43,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
 
   if (message.isSystem) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
+      <div role="group" aria-label="System message" style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
         <div
           style={{
             padding: '6px 14px',
@@ -65,7 +65,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
 
   if (message.isTeamMessage) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+      <div role="group" aria-label="Message from Balance Studio Team" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
         <span
           style={{
             marginLeft: '4px',
@@ -106,7 +106,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
     const showBubble = hasText || hasAttachment;
 
     return (
-      <div style={{ display: 'flex', gap: '8px', flexDirection: 'column', alignItems: 'flex-start' }}>
+      <div role="group" aria-label="Message from Balance Assist" style={{ display: 'flex', gap: '8px', flexDirection: 'column', alignItems: 'flex-start' }}>
         {showBubble && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
             <BotAvatar />
@@ -213,7 +213,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
   }
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+    <div role="group" aria-label="Message from you" style={{ display: 'flex', justifyContent: 'flex-end' }}>
       <div
         className="balance-message-bubble balance-message-bubble--user"
         style={{
@@ -236,6 +236,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
 function BotAvatar() {
   return (
     <div
+      aria-hidden="true"
       style={{
         width: '28px',
         height: '28px',
@@ -295,6 +296,7 @@ function InlineCardView({ card, onClick }: { card: InlineCard; onClick?: (card: 
 
   return (
     <a
+      className="balance-widget-interactive"
       href={href}
       target={target}
       rel="noopener noreferrer"
