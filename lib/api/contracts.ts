@@ -41,6 +41,7 @@ const chatSharedWorkSchema = z.object({
 });
 const canonicalChatFields = {
   canonicalDraft: z.record(z.string()),
+  canonicalProvenance: z.record(z.enum(['user-stated', 'inferred', 'confirmed', 'cleared'])).optional(),
   draftVersion: z.number().int().nonnegative(),
   currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']),
   stageRecaps: z.array(z.string()),

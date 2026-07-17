@@ -5,7 +5,6 @@ import { brandTokens } from '@/lib/brand-tokens';
 import {
   createAttachmentConsent,
   hasAnalysisConsent,
-  hasProducerShareConsent,
   type AttachmentConsent
 } from '@/lib/uploads/consent';
 import {
@@ -20,7 +19,7 @@ import {
   CONFIDENTIAL_INTAKE_RESPONSE
 } from '@/lib/privacy/confidential-intent';
 
-export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
+export type ReferenceLink = { id?: string; sessionId?: string; kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
 
 type FileStatus = 'queued' | 'validating' | 'stored' | 'failed' | 'retryable';
@@ -121,13 +120,6 @@ export function AttachmentDropzone({
     });
   }
 
-  function setProducerShare(nextChecked: boolean) {
-    updateConsent({
-      aiAnalysis: effectiveConsent?.aiAnalysis === true,
-      producerShare: nextChecked
-    });
-  }
-
   function updateFileStatus(fileName: string, status: FileStatus, error?: string) {
     setQueuedFiles((prev) =>
       prev.map((qf) => (qf.file.name === fileName ? { ...qf, status, error } : qf))
@@ -159,13 +151,6 @@ export function AttachmentDropzone({
       return;
     }
 
-    if (!hasProducerShareConsent(effectiveConsent ?? null)) {
-      setError('Please confirm that the Balance team may review this link before adding it.');
-      return;
-    }
-
-    if (!await persistConsent('producer_transfer')) return;
-
     const res = await fetch('/api/attachments/link', {
       method: 'POST',
       credentials: 'include',
@@ -176,12 +161,17 @@ export function AttachmentDropzone({
         sessionId: sessionId ?? undefined
       })
     });
+    const body = await res.json().catch(() => null);
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
       setError(body?.error ?? 'Failed to add link.');
       return;
     }
-    onAddLink({ kind, url });
+    const saved = body?.link;
+    if (!saved || typeof saved.id !== 'string' || typeof saved.url !== 'string') {
+      setError('Failed to add link.');
+      return;
+    }
+    onAddLink({ id: saved.id, sessionId: saved.sessionId, kind, url: saved.url });
     setUrl('');
     setError(null);
   }
@@ -339,15 +329,6 @@ export function AttachmentDropzone({
           Add link
         </button>
       </form>
-      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: brandTokens.colors.lightText }}>
-        <input
-          type="checkbox"
-          checked={effectiveConsent?.producerShare === true}
-          onChange={(event) => setProducerShare(event.target.checked)}
-          disabled={consent !== undefined}
-        />
-        <span>The Balance team may review links I add here.</span>
-      </label>
 
       <div
         id="private-analysis-upload-disclosure"

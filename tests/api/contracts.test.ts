@@ -51,6 +51,19 @@ test('chat response payload validates canonical saved progress', () => {
   }).success).toBe(false);
 });
 
+test('chat response payload accepts durable canonical field provenance', () => {
+  expect(chatResponsePayloadSchema.safeParse({
+    outcome: 'draft_persisted',
+    message: 'Saved.',
+    canonicalDraft: { projectScope: 'My wording', scopePolished: 'Generated summary' },
+    canonicalProvenance: { projectScope: 'user-stated', scopePolished: 'inferred' },
+    draftVersion: 2,
+    currentStage: 'project',
+    stageRecaps: [],
+    briefReady: false
+  }).success).toBe(true);
+});
+
 test.each(['canonicalDraft', 'draftVersion', 'currentStage', 'stageRecaps', 'briefReady'] as const)(
   'chat response payload rejects persisted success without %s',
   (missingKey) => {

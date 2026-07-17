@@ -109,6 +109,19 @@ test.describe('mobile intake', () => {
   });
 
   test('uses chat/brief tabs on mobile after project intent is detected', async ({ page }) => {
+    const canonicalDraft = {
+      service: 'production',
+      projectType: 'Video',
+      projectScope: '30s animation for social media',
+      timelineBand: '1-2 months',
+      budgetBand: '$20k-$50k',
+      contactName: 'Jayden',
+      contactCompany: 'Acme',
+      contactEmail: 'jayden@example.com'
+    };
+    const producerTransferRequests: unknown[] = [];
+    let canonicalRefreshes = 0;
+    let referenceAdded = false;
     await page.route('**/api/sessions/inspect', async (route) => {
       await route.fulfill({
         status: 200,
@@ -128,24 +141,84 @@ test.describe('mobile intake', () => {
       });
     });
 
+    await page.route('**/api/projects/mobile-session-id/draft', async (route) => {
+      if (route.request().method() === 'GET') {
+        canonicalRefreshes += 1;
+        const updatedAt = '2026-07-17T10:00:00.000Z';
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            sessionId: 'mobile-session-id',
+            draft: Object.fromEntries(Object.entries(canonicalDraft).map(([field, value]) => [
+              field,
+              { value, provenance: field === 'projectScope' ? 'confirmed' : 'user-stated', updatedAt }
+            ])),
+            draftVersion: 2,
+            fieldCount: Object.keys(canonicalDraft).length,
+            referenceLinks: referenceAdded
+              ? [{ id: 'mobile-reference-1', sessionId: 'mobile-session-id', kind: 'vimeo', url: 'https://vimeo.com/123' }]
+              : [],
+            canonicalReferenceSetHash: referenceAdded ? 'with-reference' : 'without-reference'
+          })
+        });
+        return;
+      }
+      const body = route.request().postDataJSON() as { fields?: Array<{ field: string; value: string }> };
+      for (const field of body.fields ?? []) {
+        canonicalDraft[field.field as keyof typeof canonicalDraft] = field.value;
+      }
+      const updatedAt = '2026-07-17T10:00:00.000Z';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessionId: 'mobile-session-id',
+          draft: Object.fromEntries(Object.entries(canonicalDraft).map(([field, value]) => [
+            field,
+            { value, provenance: field === 'projectScope' ? 'confirmed' : 'user-stated', updatedAt }
+          ])),
+          draftVersion: 2,
+          fieldCount: Object.keys(canonicalDraft).length
+        })
+      });
+    });
+
+    await page.route('**/api/attachments/link', async (route) => {
+      const body = route.request().postDataJSON() as { url: string; kind: string; sessionId: string };
+      referenceAdded = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, persisted: true, link: { id: 'mobile-reference-1', ...body } })
+      });
+    });
+
+    await page.route('**/api/attachments/link/mobile-reference-1', async (route) => {
+      referenceAdded = false;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, deleted: true }) });
+    });
+
+    await page.route('**/api/projects/mobile-session-id/consent', async (route) => {
+      producerTransferRequests.push(route.request().postDataJSON());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+
     await page.route('**/api/chat', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          message: 'Your brief is ready. Review it in the Brief tab.',
-          draftUpdates: {
-            service: 'production',
-            projectType: 'Video',
-            projectScope: '30s animation for social media',
-            timelineBand: '1-2-months',
-            budgetBand: '20k-50k',
-            contactName: 'Jayden',
-            contactCompany: 'Acme',
-            contactEmail: 'jayden@example.com'
-          },
+          outcome: 'draft_persisted',
+          message: 'Your core brief is ready. Review it in the Brief tab.',
+          draftUpdates: canonicalDraft,
+          canonicalDraft,
+          canonicalProvenance: Object.fromEntries(Object.keys(canonicalDraft).map((field) => [field, 'user-stated'])),
+          draftVersion: 1,
+          currentStage: 'references-contact',
+          stageRecaps: [],
           briefReady: true,
-          reviewPrompt: 'Your brief is ready. Review it in the Brief tab.',
+          reviewPrompt: 'Your core brief is ready. Review it in the Brief tab.',
           missingFields: []
         })
       });
@@ -157,7 +230,7 @@ test.describe('mobile intake', () => {
     await input.fill('30s animation for social media');
     await input.press('Enter');
 
-    await expect(page.getByText(/Your brief is ready/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Your core brief is ready/i)).toBeVisible({ timeout: 5000 });
 
     const tablist = page.getByRole('tablist', { name: /widget sections/i });
     await expect(tablist).toBeVisible();
@@ -167,6 +240,22 @@ test.describe('mobile intake', () => {
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('review-rail')).toBeVisible();
     await expect(page.getByTestId('review-panel')).toHaveAttribute('data-mode', 'summary');
+
+    await page.getByRole('button', { name: 'Edit original wording' }).click();
+    const scopeEditor = page.getByRole('textbox', { name: 'Original wording' });
+    await scopeEditor.fill('Updated mobile launch film');
+    await page.getByRole('button', { name: 'Save original wording' }).click();
+    await expect(page.getByText('Updated mobile launch film')).toBeVisible();
+
+    const referenceInput = page.getByRole('textbox', { name: 'Reference URL' });
+    await referenceInput.fill('https://vimeo.com/123');
+    await page.getByRole('button', { name: 'Add reference link' }).click();
+    const referenceLink = page.getByRole('link', { name: 'https://vimeo.com/123' });
+    await expect(referenceLink).toBeVisible();
+    await page.getByRole('button', { name: 'Remove https://vimeo.com/123' }).click();
+    await expect(referenceLink).toHaveCount(0);
+    expect(canonicalRefreshes).toBe(2);
+    expect(producerTransferRequests).toEqual([]);
 
     const chatTab = page.getByRole('tab', { name: /chat/i });
     await chatTab.click();

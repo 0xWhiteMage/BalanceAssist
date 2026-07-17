@@ -256,9 +256,9 @@ describe('useWidgetSessionDraft', () => {
       updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
     }));
     await act(async () => { await result.current.hydrateDraft('session-1'); });
-    expect(result.current.referenceLinks).toEqual(restoredLinks);
-    act(() => result.current.appendReferenceLink({ kind: 'youtube', url: 'https://youtube.com/watch?v=1' }));
-    expect(result.current.referenceLinks).toEqual([...restoredLinks, { kind: 'youtube', url: 'https://youtube.com/watch?v=1' }]);
+    expect(result.current.referenceLinks).toEqual(persistedLinks);
+    act(() => result.current.appendReferenceLink({ id: 'reference-2', sessionId: 'session-1', kind: 'youtube', url: 'https://youtube.com/watch?v=1' }));
+    expect(result.current.referenceLinks).toEqual([...persistedLinks, { id: 'reference-2', sessionId: 'session-1', kind: 'youtube', url: 'https://youtube.com/watch?v=1' }]);
   });
 
   test('hydrates reference-only sessions without replacing existing draft state', async () => {
@@ -277,7 +277,7 @@ describe('useWidgetSessionDraft', () => {
 
     await act(async () => { await result.current.hydrateDraft('session-1'); });
 
-    expect(result.current.referenceLinks).toEqual([{ kind: 'vimeo', url: 'https://vimeo.com/reference-only' }]);
+    expect(result.current.referenceLinks).toEqual(persistedLinks);
     expect(result.current.draft.projectScope).toBe('Keep this local recovery value');
     expect(result.current.draftVersion).toBe(5);
   });
@@ -303,6 +303,83 @@ describe('useWidgetSessionDraft', () => {
     expect(failed).toHaveBeenCalledTimes(1);
     expect(succeeded).toHaveBeenCalledTimes(1);
     expect(result.current.briefApproved).toBe(true);
+  });
+
+  test('releases a successful approval lock when a canonical edit requires reapproval', async () => {
+    const updateProjectDraft = vi.fn(async () => ({
+      ok: true as const,
+      draftVersion: 5,
+      fieldCount: 1,
+      draft: { projectScope: 'Edited after approval' },
+      provenance: { projectScope: 'confirmed' as const }
+    }));
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),
+      getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null), updateProjectDraft,
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+    let firstApprovalToken!: number;
+    act(() => {
+      firstApprovalToken = result.current.beginApproval() as number;
+      expect(firstApprovalToken).toEqual(expect.any(Number));
+      result.current.finishApproval(firstApprovalToken, true);
+      result.current.recordApproval({ approvedDraftVersion: 4 });
+    });
+
+    await act(async () => {
+      expect(await result.current.updateDraft('projectScope', 'Edited after approval')).toMatchObject({ status: 'saved' });
+    });
+
+    expect(result.current.briefApproved).toBe(false);
+    act(() => expect(result.current.beginApproval()).toEqual(expect.any(Number)));
+  });
+
+  test('invalidates a pending approval and ignores its stale completion after a reference edit', () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+
+    let staleToken!: number;
+    act(() => {
+      staleToken = result.current.beginApproval()!;
+    });
+    expect(staleToken).toEqual(expect.any(Number));
+    expect(result.current.approvalInFlight).toBe(true);
+
+    act(() => result.current.appendReferenceLink({
+      id: 'reference-1', sessionId: 'session-1', kind: 'vimeo', url: 'https://vimeo.com/123'
+    }));
+    expect(result.current.approvalInFlight).toBe(false);
+    expect(result.current.finishApproval(staleToken, true)).toBe(false);
+    expect(result.current.briefApproved).toBe(false);
+
+    let currentToken!: number;
+    act(() => {
+      currentToken = result.current.beginApproval()!;
+      expect(result.current.finishApproval(currentToken, true)).toBe(true);
+    });
+    expect(result.current.briefApproved).toBe(true);
+  });
+
+  test('hydrates and replaces durable field provenance with canonical results', async () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => ({
+        draftVersion: 3,
+        fieldCount: 2,
+        draft: { projectScope: 'My exact words', scopePolished: 'Generated summary' },
+        provenance: { projectScope: 'user-stated' as const, scopePolished: 'inferred' as const }
+      })),
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+
+    await act(async () => { await result.current.hydrateDraft('session-1'); });
+
+    expect(result.current.fieldProvenance).toEqual({ projectScope: 'user-stated', scopePolished: 'inferred' });
   });
 
   test('exposes an expired temporary capability status', async () => {

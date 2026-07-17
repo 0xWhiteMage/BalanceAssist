@@ -442,9 +442,15 @@ async function persistAuthenticatedDraftState(
 
 function canonicalProgress(draft: VersionedDraft, draftVersion: number) {
   const canonicalDraft = getVisibleDraftValues(draft);
+  const canonicalProvenance = Object.fromEntries(
+    Object.entries(draft)
+      .filter(([, field]) => field.provenance !== 'cleared' && Boolean(field.value))
+      .map(([key, field]) => [key, field.provenance])
+  );
   const values = toLeadDraftState(canonicalDraft);
   return {
     canonicalDraft,
+    canonicalProvenance,
     draftVersion,
     currentStage: getCurrentIntakeStage(values).id,
     briefReady: isBriefReadyForApproval(values)

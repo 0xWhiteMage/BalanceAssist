@@ -10,7 +10,11 @@ import type { ProjectDraftResponse, SessionResponse } from '@/lib/api/client';
 type DraftUpdate = { field: string; value: string; provenance: 'user-stated' | 'inferred' | 'confirmed' | 'cleared' };
 type DraftUpdateResult = ({ ok: true } & ProjectDraftResponse) | ({ ok: false; conflict: true } & ProjectDraftResponse) | { ok: false; conflict: false };
 type BootstrapValidity = () => boolean;
-type VisibleReferenceLink = Pick<NonNullable<ProjectDraftResponse['referenceLinks']>[number], 'kind' | 'url'>;
+type VisibleReferenceLink = NonNullable<ProjectDraftResponse['referenceLinks']>[number];
+export type DraftEditOutcome =
+  | { status: 'saved'; ok: true }
+  | { status: 'conflict'; ok: false; conflict: true; message: string }
+  | { status: 'failed'; ok: false; conflict: false; message: string };
 export type DraftOperation = { invalidationEpoch: number; sessionId: string | null };
 
 const alwaysValid: BootstrapValidity = () => true;
@@ -30,9 +34,11 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const [draft, setDraft] = useState<LeadDraft>(createDefaultLeadDraft());
+  const [fieldProvenance, setFieldProvenance] = useState<NonNullable<ProjectDraftResponse['provenance']>>({});
   const [draftVersion, setDraftVersion] = useState(0);
   const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
+  const [approvalInFlight, setApprovalInFlight] = useState(false);
   const [referenceLinks, setReferenceLinks] = useState<VisibleReferenceLink[]>([]);
   const [approval, setApproval] = useState<{
     approvedDraftVersion?: number;
@@ -49,6 +55,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const bootstrapGenerationRef = useRef(0);
   const operationInvalidationEpochRef = useRef(0);
   const approveInFlightRef = useRef(false);
+  const approvalGenerationRef = useRef(0);
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
 
@@ -75,7 +82,8 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     values: Record<string, string>,
     version: number,
     canonical?: ProjectDraftResponse,
-    operation?: DraftOperation
+    operation?: DraftOperation,
+    provenance?: ProjectDraftResponse['provenance']
   ) => {
     if (operation && !isDraftOperationCurrent(operation)) return false;
     if (version < draftVersionRef.current) return false;
@@ -87,10 +95,14 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (sameVersion && !sameDraft) return false;
     if (sameVersion && sameDraft && !canonical) return true;
 
+    approvalGenerationRef.current += 1;
+    approveInFlightRef.current = false;
+    setApprovalInFlight(false);
     setDraft(nextDraft);
     draftRef.current = nextDraft;
     setDraftVersion(version);
     draftVersionRef.current = version;
+    setFieldProvenance(provenance ?? canonical?.provenance ?? {});
     setHasProjectIntent(detectProjectIntent(nextDraft));
     if (canonical) {
       const nextApproval = {
@@ -113,6 +125,18 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
 
   const appendReferenceLink = useCallback((link: VisibleReferenceLink) => {
     setReferenceLinks((current) => current.some((item) => item.url === link.url) ? current : [...current, link]);
+    approvalGenerationRef.current += 1;
+    approveInFlightRef.current = false;
+    setApprovalInFlight(false);
+    setBriefApproved(false);
+  }, []);
+
+  const removeReferenceLink = useCallback((linkId: string) => {
+    setReferenceLinks((current) => current.filter((link) => link.id !== linkId));
+    approvalGenerationRef.current += 1;
+    approveInFlightRef.current = false;
+    setApprovalInFlight(false);
+    setBriefApproved(false);
   }, []);
 
   const setActiveSession = useCallback((session: SessionResponse, isValid: BootstrapValidity = alwaysValid) => {
@@ -134,7 +158,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (!operationIsValid()) return;
     if (canonical) {
       if (!operationIsValid()) return;
-      setReferenceLinks((canonical.referenceLinks ?? []).map(({ kind, url }) => ({ kind, url })));
+      setReferenceLinks(canonical.referenceLinks ?? []);
       if (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0) {
         if (!operationIsValid()) return;
         applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
@@ -203,7 +227,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     const result = await dependencies.updateProjectDraft(id, updates, draftVersionRef.current);
     if (!isDraftOperationCurrent(operation)) return null;
     if ('draft' in result && result.draft) {
-      if (!applyCanonicalDraft(result.draft, result.draftVersion, undefined, operation)) return null;
+      if (!applyCanonicalDraft(result.draft, result.draftVersion, undefined, operation, result.provenance)) return null;
     }
     return result;
   }, [applyCanonicalDraft, beginDraftOperation, dependencies, isDraftOperationCurrent]);
@@ -215,30 +239,53 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }, [persistDraft]);
 
   const updateDraft = useCallback(async (field: string, value: string, operation?: DraftOperation) => {
-    return persistDraft([{ field, value, provenance: value.trim() ? 'confirmed' : 'cleared' }], operation);
+    const result = await persistDraft([{ field, value, provenance: value.trim() ? 'confirmed' : 'cleared' }], operation);
+    if (!result) return null;
+    if (result.ok) return { status: 'saved', ok: true } as const;
+    if (result.conflict) {
+      return {
+        status: 'conflict', ok: false, conflict: true,
+        message: 'This brief changed elsewhere. I reloaded the latest saved value; please reapply your edit.'
+      } as const;
+    }
+    return {
+      status: 'failed', ok: false, conflict: false,
+      message: 'This edit was not saved. Retry or cancel to keep the latest saved value.'
+    } as const;
   }, [persistDraft]);
 
   const approve = useCallback(async (operation: () => Promise<boolean>) => {
     if (approveInFlightRef.current || briefApproved) return false;
+    const token = ++approvalGenerationRef.current;
     approveInFlightRef.current = true;
+    setApprovalInFlight(true);
     try {
       const approved = await operation();
+      if (token !== approvalGenerationRef.current) return false;
       if (approved) setBriefApproved(true);
       return approved;
     } finally {
-      if (!briefApproved) approveInFlightRef.current = false;
+      if (token === approvalGenerationRef.current) {
+        approveInFlightRef.current = false;
+        setApprovalInFlight(false);
+      }
     }
   }, [briefApproved]);
 
   const beginApproval = useCallback(() => {
-    if (approveInFlightRef.current || briefApproved) return false;
+    if (approveInFlightRef.current || briefApproved) return null;
+    const token = ++approvalGenerationRef.current;
     approveInFlightRef.current = true;
-    return true;
+    setApprovalInFlight(true);
+    return token;
   }, [briefApproved]);
 
-  const finishApproval = useCallback((approved: boolean) => {
+  const finishApproval = useCallback((token: number, approved: boolean) => {
+    if (token !== approvalGenerationRef.current) return false;
     if (approved) setBriefApproved(true);
-    else approveInFlightRef.current = false;
+    approveInFlightRef.current = false;
+    setApprovalInFlight(false);
+    return true;
   }, []);
 
   const recordApproval = useCallback((result: { approvedDraftVersion?: number; crmRevision?: number }) => {
@@ -256,21 +303,24 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     sessionIdRef.current = null;
     expiresAtRef.current = null;
     draftVersionRef.current = 0;
+    approvalGenerationRef.current += 1;
     approveInFlightRef.current = false;
     setSessionId(null);
     setExpiresAt(null);
     setDraft(createDefaultLeadDraft());
+    setFieldProvenance({});
     setDraftVersion(0);
     setHasProjectIntent(false);
     setBriefApproved(false);
+    setApprovalInFlight(false);
     setReferenceLinks([]);
     setApproval({});
   }, [invalidateBootstrap]);
 
   return {
-    noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, draftVersion,
-    hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession, invalidateBootstrap,
-    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, reset,
+    noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, fieldProvenance, draftVersion,
+    hasProjectIntent, briefApproved, setBriefApproved, approvalInFlight, ensureSession, loadOrCreateSession, invalidateBootstrap,
+    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, removeReferenceLink, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),
     requestProjectDeletion: () => sessionIdRef.current ? dependencies.requestProjectDeletion(sessionIdRef.current) : Promise.resolve({ ok: false })

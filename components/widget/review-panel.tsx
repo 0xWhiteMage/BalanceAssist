@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ProjectBriefCard } from '@/components/widget/widget-overlay-parts';
+import { ProjectBriefCard, type BriefMutationOutcome } from '@/components/widget/widget-overlay-parts';
 import { brandTokens } from '@/lib/brand-tokens';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
@@ -43,39 +42,34 @@ export function ReviewPanel({
   onChange,
   onBookCatchUp,
   onTalkToHuman,
+  provenance = {},
   referenceLinks = [],
-  onEditReferences,
+  onAddReference,
+  onRemoveReference,
   transferStatus = 'saved',
+  approvalInFlight = false,
   requiresReapproval = false
 }: {
   draft: LeadDraft;
   approved: boolean;
   mode: 'essentials' | 'summary';
-  onApprove: () => void;
+  onApprove: () => void | Promise<void>;
   onContinueRefining: () => void;
-  onChange?: (key: string, value: string) => void;
+  onChange?: (key: string, value: string) => Promise<BriefMutationOutcome>;
   onBookCatchUp?: () => void;
   onTalkToHuman?: () => void;
-  referenceLinks?: ReadonlyArray<{ kind: string; url: string }>;
-  onEditReferences?: () => void;
+  provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
+  referenceLinks?: ReadonlyArray<{ id: string; kind: string; url: string }>;
+  onAddReference?: (url: string) => Promise<BriefMutationOutcome>;
+  onRemoveReference?: (id: string) => Promise<BriefMutationOutcome>;
   transferStatus?: TransferStatus;
+  approvalInFlight?: boolean;
   requiresReapproval?: boolean;
 }) {
   const ready = isBriefReadyForApproval(draft);
-  const [isApproveInFlight, setIsApproveInFlight] = useState(false);
 
-  useEffect(() => {
-    if (approved) setIsApproveInFlight(false);
-  }, [approved]);
-
-  function handleApproveClick() {
-    if (approved || isApproveInFlight || !ready) return;
-    setIsApproveInFlight(true);
-    onApprove();
-  }
-
-  const approveDisabled = !ready || approved || isApproveInFlight;
-  const approveButtonLabel = isApproveInFlight
+  const approveDisabled = !ready || approved || approvalInFlight;
+  const approveButtonLabel = approvalInFlight
     ? 'Sending...'
     : requiresReapproval
       ? 'Send updated brief to Balance'
@@ -95,12 +89,11 @@ export function ReviewPanel({
     >
       <section aria-label="Core brief status" style={{ display: 'grid', gap: 4 }}>
         <strong style={{ color: ready ? '#4ade80' : brandTokens.colors.warmGold, fontSize: 12 }}>
-          {ready ? 'Core brief ready' : 'Core brief needs a project need and contact route'}
+          {ready ? 'Core brief ready' : 'Core brief needs a project need and contact detail'}
         </strong>
       </section>
 
       <section aria-label="Optional brief details" style={{ display: 'grid', gap: 4 }}>
-        <strong style={{ color: brandTokens.colors.warmGold, fontSize: 12 }}>Optional details</strong>
         <span style={{ color: brandTokens.colors.mutedText, fontSize: 11, lineHeight: 1.45 }}>
           Add any useful context, or leave these for the team conversation
         </span>
@@ -114,8 +107,10 @@ export function ReviewPanel({
         approved={approved}
         compact={mode === 'essentials'}
         onChange={onChange}
+        provenance={provenance}
         referenceLinks={referenceLinks}
-        onEditReferences={onEditReferences}
+        onAddReference={onAddReference}
+        onRemoveReference={onRemoveReference}
       />
 
       {!approved && (
@@ -123,12 +118,12 @@ export function ReviewPanel({
           <button
             type="button"
             data-testid="approve-button"
-            onClick={handleApproveClick}
+            onClick={() => { if (!approveDisabled) void onApprove(); }}
             disabled={approveDisabled}
-            data-in-flight={isApproveInFlight ? 'true' : 'false'}
+            data-in-flight={approvalInFlight ? 'true' : 'false'}
             data-ready={ready ? 'true' : 'false'}
-            aria-busy={isApproveInFlight || undefined}
-            aria-label={!ready ? 'Add a project need and contact route to send the brief' : undefined}
+            aria-busy={approvalInFlight || undefined}
+            aria-label={!ready ? 'Add a project need and contact detail to send the brief' : undefined}
             style={{
               width: '100%',
               minHeight: 44,
@@ -150,7 +145,7 @@ export function ReviewPanel({
           </button>
           {!ready && (
             <div data-testid="approve-disabled-hint" style={{ fontSize: 10, color: brandTokens.colors.mutedText, lineHeight: 1.5, textAlign: 'center' }}>
-              Add a project need and contact route to enable sending.
+              Add a project need and contact detail to enable sending.
             </div>
           )}
           {mode === 'summary' && ready && (

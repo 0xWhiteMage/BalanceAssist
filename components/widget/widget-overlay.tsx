@@ -22,7 +22,7 @@ import { getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
-import { addReferenceLink, chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { addReferenceLink, chatRequest, createSession, deleteReferenceLink, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
@@ -555,7 +555,7 @@ export function WidgetOverlay({
       }
 
       if (data.outcome === 'draft_conflict') {
-        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation)) return;
+        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation, data.canonicalProvenance)) return;
         setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft));
         for (const reply of data.replies) await botSay(reply.text, { isValid: isCurrent });
         return;
@@ -577,7 +577,7 @@ export function WidgetOverlay({
         : null;
 
       if (data.outcome === 'draft_persisted') {
-        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation)) return;
+        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation, data.canonicalProvenance)) return;
         const nextStep = getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft);
         if (nextStep !== stepRef.current) {
           if (!isCurrent()) return;
@@ -655,52 +655,43 @@ export function WidgetOverlay({
     }
   }
 
-  function handleDraftEdit(key: string, value: string) {
+  async function handleDraftEdit(key: string, value: string) {
     const editableKeys: ReadonlySet<keyof LeadDraft> = new Set([
-      'projectScope',
-      'projectObjective',
-      'audience',
-      'intendedOutputs',
-      'scopePolished',
-      'projectType',
-      'service',
-      'timelineBand',
-      'budgetBand',
-      'contactName',
-      'contactCompany',
-      'contactEmail'
+      'projectScope', 'projectObjective', 'audience', 'intendedOutputs', 'scopePolished', 'projectType',
+      'service', 'timelineBand', 'budgetBand', 'contactName', 'contactCompany', 'contactEmail'
     ]);
-    if (!editableKeys.has(key as keyof LeadDraft)) return;
-
-    const activeSessionId = sessionId;
-    if (!activeSessionId) {
-      return;
-    }
+    if (!editableKeys.has(key as keyof LeadDraft)) return { status: 'failed', message: 'This field cannot be edited.' } as const;
+    if (!sessionId) return { status: 'failed', message: 'This edit cannot be saved without an active session.' } as const;
 
     const operation = sessionDraft.beginDraftOperation();
-    const operationIsCurrent = () => sessionDraft.isDraftOperationCurrent(operation) && !cancelRef.current;
-    void sessionDraft.updateDraft(key, value, operation).then(async (result) => {
-      if (!result) {
-        return;
-      }
-
-      if (result.ok) {
-        setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...result.draft } as LeadDraft));
-        return;
-      }
-
-      if (result.conflict) {
-        await botSay('This brief changed elsewhere, so I reloaded the latest saved version before applying more edits.', { isValid: operationIsCurrent });
-        return;
-      }
-
-      await botSay('Sorry — I could not save that brief edit. Please try again.', { isValid: operationIsCurrent });
-    });
+    const result = await sessionDraft.updateDraft(key, value, operation);
+    if (!result) return { status: 'failed', message: 'This edit was interrupted. Please retry.' } as const;
+    if (result.status === 'saved') setCurrentStep(getNextConversationStep(sessionDraft.draft));
+    return result;
   }
 
   async function appendReferenceLink(link: ReferenceLink) {
-    sessionDraft.appendReferenceLink(link);
+    if (link.id && link.sessionId) sessionDraft.appendReferenceLink({ ...link, id: link.id, sessionId: link.sessionId });
     setBriefApproved(false);
+  }
+
+  async function addPrivateReference(url: string) {
+    const kind = classifyUrl(url);
+    if (!kind) return { status: 'failed', message: 'Enter a valid HTTPS reference URL.' } as const;
+    const activeSessionId = sessionId ?? await ensureSession();
+    if (!activeSessionId) return { status: 'failed', message: 'The reference link could not be saved without an active session.' } as const;
+    const link = await addReferenceLink({ sessionId: activeSessionId, url, kind });
+    if (!link) return { status: 'failed', message: 'The reference link could not be saved. Please retry.' } as const;
+    sessionDraft.appendReferenceLink(link);
+    await sessionDraft.hydrateDraft(activeSessionId);
+    return { status: 'saved' } as const;
+  }
+
+  async function removePrivateReference(id: string) {
+    if (!await deleteReferenceLink(id)) return { status: 'failed', message: 'The reference link could not be removed. Please retry.' } as const;
+    sessionDraft.removeReferenceLink(id);
+    if (sessionId) await sessionDraft.hydrateDraft(sessionId);
+    return { status: 'saved' } as const;
   }
 
   function appendReferenceFile(file: ReferenceFile) {
@@ -722,36 +713,46 @@ export function WidgetOverlay({
   }
 
   async function handleApproveBrief() {
-    if (!sessionDraft.beginApproval()) return;
+    const approvalToken = sessionDraft.beginApproval();
+    if (approvalToken === null) return;
     setTelegramBroadcastStatus('pending');
 
     try {
       const activeSessionId = await ensureSession();
-      if (cancelRef.current) return;
+      if (cancelRef.current) {
+        sessionDraft.finishApproval(approvalToken, false);
+        return;
+      }
       if (!activeSessionId) {
-        sessionDraft.finishApproval(false);
+        sessionDraft.finishApproval(approvalToken, false);
         setTelegramBroadcastStatus('unconfigured');
         return;
       }
 
       if (!await recordProducerTransferConsent(activeSessionId)) {
-        if (cancelRef.current) return;
-        sessionDraft.finishApproval(false);
+        if (cancelRef.current) {
+          sessionDraft.finishApproval(approvalToken, false);
+          return;
+        }
+        sessionDraft.finishApproval(approvalToken, false);
         setTelegramBroadcastStatus('unconfigured');
         await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
         return;
       }
 
       const finalizeResponse = await finalizeLead({ sessionId: activeSessionId });
-      if (cancelRef.current) return;
+      if (cancelRef.current) {
+        sessionDraft.finishApproval(approvalToken, false);
+        return;
+      }
       if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
-        sessionDraft.finishApproval(false);
+        sessionDraft.finishApproval(approvalToken, false);
         setTelegramBroadcastStatus('unconfigured');
         await botSay('Sorry — the brief could not be saved. Please try again or contact the team directly.');
         return;
       }
 
-      sessionDraft.finishApproval(true);
+      if (!sessionDraft.finishApproval(approvalToken, true)) return;
       sessionDraft.recordApproval(finalizeResponse);
       if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
@@ -761,11 +762,17 @@ export function WidgetOverlay({
         setTelegramBroadcastStatus('unconfigured');
       }
       setCurrentStep('handoff');
-      await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
+      await botSay(
+        finalizeResponse.delivered === true
+          ? 'Your brief was delivered to the Balance team.'
+          : finalizeResponse.queued === true
+            ? 'Your brief is queued for the Balance team.'
+            : 'Your brief was saved. Delivery to the Balance team is not yet confirmed.'
+      );
       await advanceStep('handoff', draftRef.current);
     } catch {
+      sessionDraft.finishApproval(approvalToken, false);
       if (cancelRef.current) return;
-      sessionDraft.finishApproval(false);
       setTelegramBroadcastStatus('unconfigured');
       await botSay('Sorry — something went wrong saving your brief. Please try again.');
     }
@@ -804,11 +811,7 @@ export function WidgetOverlay({
         await appendReferenceLink(savedLink);
       }
       const statusResult = await sessionDraft.updateDraft('referencesStatus', referencesStatus);
-      const statusSaved = statusResult?.ok === true || (
-        statusResult?.ok === false &&
-        statusResult.conflict === true &&
-        statusResult.draft.referencesStatus === referencesStatus
-      );
+      const statusSaved = statusResult?.status === 'saved';
       if (!statusSaved) {
         await botSay(
           referencesStatus === 'added'
@@ -1123,7 +1126,7 @@ export function WidgetOverlay({
     await sleep(500);
     if (cancelRef.current) return;
 
-    await botSay(`Got it! I\u2019ve received ${files.length === 1 ? `**${files[0].name}**` : `${files.length} files`}. Our team will review them alongside your project details.`);
+    await botSay(`Got it! I\u2019ve received ${files.length === 1 ? `**${files[0].name}**` : `${files.length} files`} for this temporary draft.`);
     setAllowAttachment(false);
 
     await sleep(400);
@@ -1317,12 +1320,12 @@ export function WidgetOverlay({
                     setRailMode('essentials');
                   }}
                   onChange={handleDraftEdit}
+                  provenance={sessionDraft.fieldProvenance}
                   referenceLinks={referenceLinks}
-                  onEditReferences={() => {
-                    if (isMobile) setTabMode('chat');
-                    setAttachmentOpen(true);
-                  }}
+                  onAddReference={addPrivateReference}
+                  onRemoveReference={removePrivateReference}
                   transferStatus={telegramBroadcastStatus === 'sent' ? 'delivered' : telegramBroadcastStatus === 'queued' ? 'queued' : 'saved'}
+                  approvalInFlight={sessionDraft.approvalInFlight}
                   requiresReapproval={approval.crmRevision !== undefined && !briefApproved}
                   onBookCatchUp={() => {
                     if (!configuredCalendlyUrl) {

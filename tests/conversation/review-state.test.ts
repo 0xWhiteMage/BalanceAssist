@@ -68,7 +68,7 @@ test('ready with only projectScope (no service)', () => {
   expect(missingReviewFields(draft)).toEqual([]);
 });
 
-test('ready with only projectObjective and a contact route', () => {
+test('ready with only projectObjective and a contact detail', () => {
   const draft: Partial<LeadDraft> = {
     projectObjective: 'Increase awareness',
     contactEmail: 'jayden@example.com'

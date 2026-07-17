@@ -84,7 +84,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   'contact-email': {
     id: 'contact-email',
-    botMessages: ['And what\'s the best email to reach you? This ensures a producer can follow up with the right next steps.'],
+    botMessages: ['And what\'s the best email to reach you? You can leave this blank if your name is enough for now.'],
     freeText: true,
     field: 'contactEmail',
     next: 'consent'
@@ -110,7 +110,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   upload: {
     id: 'upload',
-    botMessages: ['Perfect! Tap the attach button below to upload your files. Our team will review everything you share.'],
+    botMessages: ['Tap the attach button below to add files for this temporary draft. They are not sent to the Balance team here.'],
     allowAttachment: true,
     next: 'handoff'
   },
@@ -118,7 +118,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
   handoff: {
     id: 'handoff',
     botMessages: [
-      "Thank you! I've captured everything I need for now.\n\nA producer from the Balance team will review your brief and follow up personally. You can also book a quick catch-up below if you'd like to talk sooner."
+      "Your brief is saved in this temporary session. Sending, queueing, or delivery will be shown separately when confirmed. You can also book a catch-up or contact the team directly."
     ],
     inlineCards: [
       {

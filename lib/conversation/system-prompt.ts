@@ -62,7 +62,7 @@ function buildNextQuestionBlock(draft: Record<string, string> = {}): string {
     return `    - Ask: "Would you like to add a reference URL, or Skip?"`;
   }
   if (!has('contactName') && !has('contactEmail')) {
-    return `    - Ask for one contact route: "What name or email should the team use to follow up?"`;
+    return `    - Ask for one contact detail: "What name or email would you like to add?"`;
   }
   return '    - Do not ask another intake question. Direct the user to review the saved brief.';
 }

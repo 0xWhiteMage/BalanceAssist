@@ -63,6 +63,7 @@ describe('chatRequest client', () => {
       outcome: 'draft_persisted',
       message: 'Who is this for?',
       canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
+      canonicalProvenance: { projectScope: 'user-stated', projectObjective: 'inferred' },
       draftVersion: 6,
       currentStage: 'audience',
       stageRecaps: ['So far: Canonical launch film; objective: Build awareness.'],
@@ -74,6 +75,7 @@ describe('chatRequest client', () => {
       replies: [{ text: 'Who is this for?' }],
       outcome: 'draft_persisted',
       canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
+      canonicalProvenance: { projectScope: 'user-stated', projectObjective: 'inferred' },
       draftVersion: 6,
       currentStage: 'audience',
       stageRecaps: ['So far: Canonical launch film; objective: Build awareness.'],
@@ -257,6 +259,26 @@ describe('chatRequest client', () => {
     const { fetchProjectDraft } = await import('@/lib/api/client');
 
     await expect(fetchProjectDraft('session-123')).resolves.toBeNull();
+  });
+
+  test('preserves canonical field provenance and reference IDs from project draft responses', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      sessionId: 'session-123',
+      draft: {
+        projectScope: { value: 'My wording', provenance: 'user-stated', updatedAt: '2026-07-17T00:00:00.000Z' },
+        scopePolished: { value: 'Generated summary', provenance: 'inferred', updatedAt: '2026-07-17T00:00:01.000Z' }
+      },
+      draftVersion: 3,
+      fieldCount: 2,
+      referenceLinks: [{ id: 'reference-1', url: 'https://vimeo.com/123', kind: 'vimeo' }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+    const { fetchProjectDraft } = await import('@/lib/api/client');
+
+    await expect(fetchProjectDraft('session-123')).resolves.toMatchObject({
+      draft: { projectScope: 'My wording', scopePolished: 'Generated summary' },
+      provenance: { projectScope: 'user-stated', scopePolished: 'inferred' },
+      referenceLinks: [{ id: 'reference-1', sessionId: 'session-123', url: 'https://vimeo.com/123', kind: 'vimeo' }]
+    });
   });
 
   test.each([

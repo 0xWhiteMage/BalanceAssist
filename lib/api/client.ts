@@ -346,6 +346,7 @@ export async function requestProjectDeletion(sessionId: string): Promise<{ ok: b
 
 export type ProjectDraftResponse = {
   draft: Record<string, string>;
+  provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
   draftVersion: number;
   fieldCount: number;
   referenceLinks?: ReferenceLink[];
@@ -412,6 +413,19 @@ function flattenDraftValues(value: unknown): Record<string, string> {
   return values;
 }
 
+function flattenDraftProvenance(value: unknown): NonNullable<ProjectDraftResponse['provenance']> {
+  if (!value || typeof value !== 'object') return {};
+  const provenance: NonNullable<ProjectDraftResponse['provenance']> = {};
+  for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+    if (!field || typeof field !== 'object') continue;
+    const fieldProvenance = (field as { provenance?: unknown }).provenance;
+    if (fieldProvenance === 'user-stated' || fieldProvenance === 'inferred' || fieldProvenance === 'confirmed' || fieldProvenance === 'cleared') {
+      provenance[key] = fieldProvenance;
+    }
+  }
+  return provenance;
+}
+
 export async function fetchProjectDraft(sessionId: string): Promise<ProjectDraftResponse | null> {
   try {
     const response = await fetchWithTimeout(`/api/projects/${sessionId}/draft`, { cache: 'no-store' });
@@ -424,6 +438,7 @@ export async function fetchProjectDraft(sessionId: string): Promise<ProjectDraft
     const data = parsed.data;
     return {
       draft: flattenDraftValues(data.draft),
+      provenance: flattenDraftProvenance(data.draft),
       draftVersion: data.draftVersion,
       fieldCount: data.fieldCount,
       referenceLinks: (data.referenceLinks ?? []).map((link) => ({ ...link, sessionId: link.sessionId ?? sessionId })),
@@ -463,6 +478,7 @@ export async function updateProjectDraft(
         ok: false,
         conflict: true,
         draft: flattenDraftValues(parsed.data.draft),
+        provenance: flattenDraftProvenance(parsed.data.draft),
         draftVersion: parsed.data.draftVersion,
         fieldCount: parsed.data.fieldCount,
         referenceLinks: []
@@ -478,6 +494,7 @@ export async function updateProjectDraft(
     return {
       ok: true,
       draft: flattenDraftValues(parsed.data.draft),
+      provenance: flattenDraftProvenance(parsed.data.draft),
       draftVersion: parsed.data.draftVersion,
       fieldCount: parsed.data.fieldCount,
       referenceLinks: []
@@ -527,6 +544,7 @@ type ChatResponseBase = {
 type CanonicalChatResponse = ChatResponseBase & {
   outcome: 'draft_persisted' | 'draft_conflict';
   canonicalDraft: Record<string, string>;
+  canonicalProvenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
   draftVersion: number;
   currentStage: 'project' | 'audience' | 'planning' | 'references-contact';
   stageRecaps: string[];
@@ -553,6 +571,7 @@ const clientSharedWorkSchema = z.object({ entries: z.array(z.object({
   })) });
 const clientCanonicalFields = {
   canonicalDraft: z.record(z.string()),
+  canonicalProvenance: z.record(z.enum(['user-stated', 'inferred', 'confirmed', 'cleared'])).optional(),
   draftVersion: z.number().int().nonnegative(),
   currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']),
   stageRecaps: z.array(z.string()),
@@ -644,6 +663,7 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
       ...base,
       outcome: data.outcome,
       canonicalDraft: data.canonicalDraft,
+      canonicalProvenance: data.canonicalProvenance,
       draftVersion: data.draftVersion,
       currentStage: data.currentStage,
       stageRecaps: data.stageRecaps

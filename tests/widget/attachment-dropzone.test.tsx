@@ -12,10 +12,6 @@ function enableAnalysisConsent() {
   fireEvent.click(screen.getByLabelText(/balance assist may analyse/i));
 }
 
-function enableProducerShareConsent() {
-  fireEvent.click(screen.getByLabelText(/balance team may review links/i));
-}
-
 function mockPrivateStorageAvailable() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes('/api/telegram/upload') && !init?.method) {
@@ -149,13 +145,16 @@ test('classifies a pasted YouTube URL and adds a chip', async () => {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/api/attachments/link')) {
-      return new Response(JSON.stringify({ ok: true, kind: 'youtube', url: 'https://youtu.be/abc' }), { status: 200 });
+      return new Response(JSON.stringify({
+        ok: true,
+        persisted: true,
+        link: { id: 'link-1', kind: 'youtube', url: 'https://youtu.be/abc' }
+      }), { status: 200 });
     }
     return new Response('{}', { status: 404 });
   }) as unknown as typeof fetch;
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
-  enableProducerShareConsent();
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
@@ -176,7 +175,6 @@ test('surfaces the server error message when /api/attachments/link returns a str
   }) as unknown as typeof fetch;
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
-  enableProducerShareConsent();
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
@@ -198,7 +196,6 @@ test('falls back to a generic message when the error response is not JSON', asyn
   }) as unknown as typeof fetch;
 
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
-  enableProducerShareConsent();
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
@@ -255,28 +252,17 @@ test('URL submit button uses the uppercase ADD LINK pill copy', () => {
   expect(addLinkButton.tagName).toBe('BUTTON');
 });
 
-test('blocks links until the user explicitly allows producer review', async () => {
-  global.fetch = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
-
-  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
-
-  const input = screen.getByPlaceholderText(/paste a reference link/i);
-  fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
-  fireEvent.submit(input.closest('form')!);
-
-  await waitFor(() => {
-    expect(screen.getByRole('alert')).toHaveTextContent(/balance team may review this link/i);
-  });
-  expect(global.fetch).not.toHaveBeenCalledWith('/api/attachments/link', expect.anything());
-});
-
-test('persists producer-transfer consent before linking', async () => {
+test('captures a private reference link without producer-transfer consent', async () => {
   const onAddLink = vi.fn();
   const requestBodies: Array<Record<string, unknown>> = [];
 
   global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     requestBodies.push({ url: String(_input), ...JSON.parse(String(init?.body)) });
-    return new Response(JSON.stringify({ ok: true, persisted: true }), {
+    return new Response(JSON.stringify({
+      ok: true,
+      persisted: true,
+      link: { id: 'link-1', sessionId: 'sess-1', kind: 'youtube', url: 'https://youtu.be/abc' }
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
@@ -284,8 +270,6 @@ test('persists producer-transfer consent before linking', async () => {
 
   render(<AttachmentDropzone onAddLink={onAddLink} onAddFile={vi.fn()} sessionId="sess-1" />);
 
-  enableAnalysisConsent();
-  enableProducerShareConsent();
   const input = screen.getByPlaceholderText(/paste a reference link/i);
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
@@ -294,18 +278,14 @@ test('persists producer-transfer consent before linking', async () => {
     expect(onAddLink).toHaveBeenCalledWith(expect.objectContaining({ kind: 'youtube', url: 'https://youtu.be/abc' }));
   });
 
-  expect(requestBodies).toHaveLength(2);
+  expect(requestBodies).toHaveLength(1);
   expect(requestBodies[0]).toMatchObject({
-    url: '/api/projects/sess-1/consent',
-    scope: 'producer_transfer',
-    granted: true,
-        noticeVersion: '1.1'
-  });
-  expect(requestBodies[1]).toMatchObject({
     sessionId: 'sess-1',
     url: 'https://youtu.be/abc',
     kind: 'youtube'
   });
+  expect(JSON.stringify(requestBodies)).not.toContain('producer_transfer');
+  expect(screen.queryByLabelText(/balance team may review links/i)).not.toBeInTheDocument();
 });
 
 test('does not attempt analysis-only uploads while file sharing is unavailable', async () => {

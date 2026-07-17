@@ -29,7 +29,7 @@ describe('ReviewPanel', () => {
     render(<ReviewPanel {...baseProps} draft={readyDraft} />);
 
     expect(screen.getByText('Core brief ready')).toBeInTheDocument();
-    expect(screen.getByText('Optional details')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Optional details' })).toBeInTheDocument();
     expect(screen.queryByText(/\d+ of \d+ captured/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('review-panel').textContent).not.toMatch(
       /score|qualified|unqualified|misfit|crm|telegram|revision/i
@@ -39,12 +39,12 @@ describe('ReviewPanel', () => {
   test('explains the semantic requirements when the core brief is not ready', () => {
     render(<ReviewPanel {...baseProps} draft={createDefaultLeadDraft()} />);
 
-    expect(screen.getByText('Core brief needs a project need and contact route')).toBeInTheDocument();
+    expect(screen.getByText('Core brief needs a project need and contact detail')).toBeInTheDocument();
     expect(screen.getByText('Add any useful context, or leave these for the team conversation')).toBeInTheDocument();
     expect(screen.getByTestId('approve-button')).toBeDisabled();
   });
 
-  test('keeps a legacy AI-drafted summary visible without treating it as core evidence', () => {
+  test('keeps a legacy generated summary visible without claiming unsupported attribution', () => {
     render(
       <ReviewPanel
         {...baseProps}
@@ -56,19 +56,24 @@ describe('ReviewPanel', () => {
       />
     );
 
-    expect(screen.getByText('AI-drafted summary')).toBeInTheDocument();
+    expect(screen.getByText('Project summary')).toBeInTheDocument();
     expect(screen.getByText('Legacy generated interpretation')).toBeInTheDocument();
-    expect(screen.getByText('Core brief needs a project need and contact route')).toBeInTheDocument();
+    expect(screen.getByText('Core brief needs a project need and contact detail')).toBeInTheDocument();
     expect(screen.getByTestId('approve-button')).toBeDisabled();
   });
 
-  test('uses the public send label and invokes approval once while pending', () => {
+  test('uses controller approval state to disable duplicate sends while pending', () => {
     const onApprove = vi.fn();
-    render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onApprove={onApprove} />);
+    const { rerender } = render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onApprove={onApprove} />);
 
     const button = screen.getByRole('button', { name: 'Send brief to Balance' });
     fireEvent.click(button);
-    fireEvent.click(screen.getByRole('button', { name: /sending/i }));
+    expect(onApprove).toHaveBeenCalledOnce();
+
+    rerender(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onApprove={onApprove} approvalInFlight />);
+    const pendingButton = screen.getByRole('button', { name: /sending/i });
+    expect(pendingButton).toBeDisabled();
+    fireEvent.click(pendingButton);
     expect(onApprove).toHaveBeenCalledOnce();
   });
 
@@ -93,18 +98,14 @@ describe('ReviewPanel', () => {
   });
 
   test('passes restored reference links through to the editable brief', () => {
-    const onEditReferences = vi.fn();
     render(
       <ReviewPanel
         {...baseProps}
         draft={readyDraft}
-        referenceLinks={[{ kind: 'vimeo', url: 'https://vimeo.com/123' }]}
-        onEditReferences={onEditReferences}
+        referenceLinks={[{ id: 'reference-1', kind: 'vimeo', url: 'https://vimeo.com/123' }]}
       />
     );
 
     expect(screen.getByRole('link', { name: 'https://vimeo.com/123' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit reference links' }));
-    expect(onEditReferences).toHaveBeenCalledOnce();
   });
 });

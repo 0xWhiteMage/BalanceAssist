@@ -79,7 +79,7 @@ test('system prompt treats service as optional and references status independent
       referencesStatus: 'skipped'
     })
   });
-  expect(contactPrompt).toMatch(/contact route/i);
+  expect(contactPrompt).toMatch(/contact detail/i);
   expect(contactPrompt).not.toMatch(/Would you like to add a reference URL/i);
 });
 

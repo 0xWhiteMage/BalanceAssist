@@ -427,8 +427,10 @@ export function ProjectBriefCard({
   onApprove,
   onContinueRefining,
   onChange,
+  provenance = {},
   referenceLinks = [],
-  onEditReferences,
+  onAddReference,
+  onRemoveReference,
   compact = false
 }: {
   draft: {
@@ -451,9 +453,11 @@ export function ProjectBriefCard({
   title?: string;
   onApprove?: () => void;
   onContinueRefining?: () => void;
-  onChange?: (key: string, value: string) => void;
-  referenceLinks?: ReadonlyArray<{ kind: string; url: string }>;
-  onEditReferences?: () => void;
+  onChange?: (key: string, value: string) => Promise<BriefMutationOutcome>;
+  provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
+  referenceLinks?: ReadonlyArray<{ id: string; kind: string; url: string }>;
+  onAddReference?: (url: string) => Promise<BriefMutationOutcome>;
+  onRemoveReference?: (id: string) => Promise<BriefMutationOutcome>;
   compact?: boolean;
 }) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -466,7 +470,11 @@ export function ProjectBriefCard({
     multiline?: boolean;
   }> = [
     {
-      label: 'Original wording',
+      label: provenance.projectScope === 'user-stated'
+        ? 'Original wording'
+        : provenance.projectScope === 'confirmed'
+          ? 'User-edited wording'
+          : 'Project description',
       key: 'projectScope',
       raw: draft.projectScope,
       display: draft.projectScope.trim(),
@@ -474,7 +482,11 @@ export function ProjectBriefCard({
     },
     ...(draft.scopePolished?.trim() && draft.scopePolished.trim() !== draft.projectScope.trim()
       ? [{
-          label: 'AI-drafted summary',
+          label: provenance.scopePolished === 'inferred'
+            ? 'AI-drafted summary'
+            : provenance.scopePolished === 'confirmed'
+              ? 'Edited draft'
+              : 'Project summary',
           key: 'scopePolished',
           raw: draft.scopePolished,
           display: draft.scopePolished.trim(),
@@ -547,6 +559,11 @@ export function ProjectBriefCard({
   ];
 
   const completed = rows.filter((row) => row.raw.trim().length > 0).length;
+  const coreKeys = new Set(['projectScope', 'scopePolished', 'projectObjective', 'service', 'contactName', 'contactEmail']);
+  const rowGroups = [
+    { label: 'Core details', rows: rows.filter((row) => coreKeys.has(row.key)) },
+    { label: 'Optional details', rows: rows.filter((row) => !coreKeys.has(row.key)), includesReferences: true }
+  ];
 
   const labelFontSize = compact ? 9 : 10;
   const bodyFontSize = compact ? 11 : 12;
@@ -573,20 +590,16 @@ export function ProjectBriefCard({
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
-        {rows.map((row, rowIndex) => {
+      {rowGroups.map((group) => (
+      <div key={group.label} role="group" aria-label={group.label} style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
+        <div style={{ fontSize: labelFontSize, fontWeight: 700, color: brandTokens.colors.warmGold }}>{group.label}</div>
+        {group.rows.map((row, rowIndex) => {
           const filled = row.raw.trim().length > 0;
           const editing = editingKey === row.key;
           const openEditor = () => {
             if (onChange) setEditingKey(row.key);
           };
-          const rowClick = onChange
-            ? (event: React.MouseEvent<HTMLDivElement>) => {
-                if (event.defaultPrevented) return;
-                openEditor();
-              }
-            : undefined;
-          const isLastRow = rowIndex === rows.length - 1;
+          const isLastRow = rowIndex === group.rows.length - 1;
           const labelStyle: React.CSSProperties = {
             fontSize: labelFontSize,
             fontWeight: 400,
@@ -605,7 +618,7 @@ export function ProjectBriefCard({
                 flexDirection: 'column' as const,
                 gap: '2px',
                 fontSize: bodyFontSize,
-                cursor: onChange ? 'pointer' : 'default',
+                cursor: 'default',
                 borderBottom: isLastRow ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
                 paddingBottom: isLastRow ? 0 : 4
               }
@@ -614,7 +627,7 @@ export function ProjectBriefCard({
                 flexDirection: 'column' as const,
                 gap: '6px',
                 fontSize: bodyFontSize,
-                cursor: onChange ? 'pointer' : 'default',
+                cursor: 'default',
                 borderBottom: isLastRow ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
                 paddingBottom: isLastRow ? 0 : 6
               };
@@ -627,7 +640,6 @@ export function ProjectBriefCard({
                 data-row-key={row.key}
                 data-filled={filled ? 'true' : 'false'}
                 data-editing={editing ? 'true' : 'false'}
-                onClick={rowClick}
                 style={baseRowStyle}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -679,6 +691,8 @@ export function ProjectBriefCard({
                         border: 'none',
                         color: brandTokens.colors.mutedText,
                         cursor: 'pointer',
+                        minWidth: 44,
+                        minHeight: 44,
                         padding: 2,
                         fontSize: 10,
                         lineHeight: 1
@@ -694,9 +708,10 @@ export function ProjectBriefCard({
                     style={{
                       ...valueStyle,
                       marginLeft: 20,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      whiteSpace: row.multiline ? 'pre-wrap' : 'nowrap',
+                      overflowWrap: row.multiline ? 'anywhere' : undefined,
+                      overflow: row.multiline ? 'visible' : 'hidden',
+                      textOverflow: row.multiline ? 'clip' : 'ellipsis'
                     }}
                   >
                     {row.display}
@@ -706,10 +721,8 @@ export function ProjectBriefCard({
                   <BriefRowEditor
                     row={row}
                     compact={true}
-                    onCommit={(value) => {
-                      onChange?.(row.key, value);
-                      setEditingKey(null);
-                    }}
+                    onCommit={(value) => onChange?.(row.key, value) ?? Promise.resolve({ status: 'failed', message: 'This edit cannot be saved.' })}
+                    onSaved={() => setEditingKey(null)}
                     onCancel={() => setEditingKey(null)}
                   />
                 )}
@@ -723,7 +736,6 @@ export function ProjectBriefCard({
               data-row-key={row.key}
               data-filled={filled ? 'true' : 'false'}
               data-editing={editing ? 'true' : 'false'}
-              onClick={rowClick}
               style={baseRowStyle}
             >
               <div
@@ -786,6 +798,8 @@ export function ProjectBriefCard({
                         border: 'none',
                         color: brandTokens.colors.mutedText,
                         cursor: 'pointer',
+                        minWidth: 44,
+                        minHeight: 44,
                         padding: 2,
                         fontSize: 10,
                         lineHeight: 1,
@@ -801,50 +815,25 @@ export function ProjectBriefCard({
                 <BriefRowEditor
                   row={row}
                   compact={false}
-                  onCommit={(value) => {
-                    onChange?.(row.key, value);
-                    setEditingKey(null);
-                  }}
+                  onCommit={(value) => onChange?.(row.key, value) ?? Promise.resolve({ status: 'failed', message: 'This edit cannot be saved.' })}
+                  onSaved={() => setEditingKey(null)}
                   onCancel={() => setEditingKey(null)}
                 />
               )}
             </div>
           );
         })}
-      </div>
-
-      <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: labelFontSize, color: brandTokens.colors.mutedText, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-            Reference links
-          </span>
-          {onEditReferences && (
-            <button
-              type="button"
-              aria-label="Edit reference links"
-              onClick={onEditReferences}
-              style={{ minWidth: 44, minHeight: 44, border: 'none', background: 'transparent', color: brandTokens.colors.warmGold, cursor: 'pointer' }}
-            >
-              Edit
-            </button>
-          )}
-        </div>
-        {referenceLinks.length > 0 ? referenceLinks.map((link) => (
-          <a
-            key={link.url}
-            href={link.url}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere', minWidth: 0 }}
-          >
-            {link.url}
-          </a>
-        )) : (
-          <span style={{ color: brandTokens.colors.mutedText, fontSize: bodyFontSize, fontStyle: 'italic' }}>
-            Not yet captured
-          </span>
+        {group.includesReferences && (
+          <ReferenceLinkManager
+            links={referenceLinks}
+            onAdd={onAddReference}
+            onRemove={onRemoveReference}
+            labelFontSize={labelFontSize}
+            bodyFontSize={bodyFontSize}
+          />
         )}
       </div>
+      ))}
 
       {showNudge && completed < rows.length && (
         <div style={{ fontSize: nudgeFontSize, color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
@@ -912,6 +901,11 @@ type BriefRow = {
   multiline?: boolean;
 };
 
+export type BriefMutationOutcome =
+  | { status: 'saved' }
+  | { status: 'conflict'; message: string }
+  | { status: 'failed'; message: string };
+
 function formatProjectType(value: string | undefined): string {
   const trimmed = (value ?? '').trim();
   if (!trimmed) return '';
@@ -923,14 +917,31 @@ function BriefRowEditor({
   row,
   compact = true,
   onCommit,
+  onSaved,
   onCancel
 }: {
   row: BriefRow;
   compact?: boolean;
-  onCommit: (value: string) => void;
+  onCommit: (value: string) => Promise<BriefMutationOutcome>;
+  onSaved: () => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(row.raw);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    const outcome = await onCommit(value);
+    setSaving(false);
+    if (!outcome || outcome.status === 'saved') {
+      onSaved();
+      return;
+    }
+    setError(outcome.message);
+  }
 
   const containerStyle: React.CSSProperties = compact
     ? { marginLeft: 20, display: 'grid', gap: 6 }
@@ -986,16 +997,18 @@ function BriefRowEditor({
         <button
           type="button"
           aria-label={`Save ${row.label.toLowerCase()}`}
+          disabled={saving}
           onClick={(event) => {
             event.stopPropagation();
-            onCommit(value);
+            void save();
           }}
           style={{ minWidth: 44, minHeight: 44, borderRadius: 6, border: 'none', background: brandTokens.colors.warmGold, color: brandTokens.colors.baseBlack, cursor: 'pointer', fontWeight: 700 }}
         >
-          Save
+          {saving ? 'Saving...' : 'Save'}
         </button>
         <button
           type="button"
+          disabled={saving}
           onClick={(event) => {
             event.stopPropagation();
             onCancel();
@@ -1006,6 +1019,101 @@ function BriefRowEditor({
           Cancel
         </button>
       </div>
+      {error && (
+        <div role="alert" style={{ display: 'grid', gap: 6, color: '#fca5a5', fontSize: 11 }}>
+          <span>{error}</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              aria-label={`Retry saving ${row.label.toLowerCase()}`}
+              onClick={() => void save()}
+              style={{ minWidth: 44, minHeight: 44 }}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              aria-label={`Cancel editing ${row.label.toLowerCase()} after error`}
+              onClick={onCancel}
+              style={{ minWidth: 44, minHeight: 44 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReferenceLinkManager({
+  links,
+  onAdd,
+  onRemove,
+  labelFontSize,
+  bodyFontSize
+}: {
+  links: ReadonlyArray<{ id: string; kind: string; url: string }>;
+  onAdd?: (url: string) => Promise<BriefMutationOutcome>;
+  onRemove?: (id: string) => Promise<BriefMutationOutcome>;
+  labelFontSize: number;
+  bodyFontSize: number;
+}) {
+  const [url, setUrl] = useState('');
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function add() {
+    if (!onAdd || pending || !url.trim()) return;
+    setPending('add');
+    setError(null);
+    const outcome = await onAdd(url.trim());
+    setPending(null);
+    if (outcome.status === 'saved') setUrl('');
+    else setError(outcome.message);
+  }
+
+  async function remove(id: string) {
+    if (!onRemove || pending) return;
+    setPending(id);
+    setError(null);
+    const outcome = await onRemove(id);
+    setPending(null);
+    if (outcome.status !== 'saved') setError(outcome.message);
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+      <label htmlFor="brief-reference-url" style={{ fontSize: labelFontSize, color: brandTokens.colors.mutedText }}>Reference links</label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          id="brief-reference-url"
+          type="url"
+          aria-label="Reference URL"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          disabled={pending === 'add'}
+          style={{ flex: 1, minWidth: 0, minHeight: 44 }}
+        />
+        <button type="button" onClick={() => void add()} disabled={!onAdd || Boolean(pending) || !url.trim()} style={{ minWidth: 44, minHeight: 44 }}>
+          Add reference link
+        </button>
+      </div>
+      {links.length > 0 ? links.map((link) => (
+        <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <a href={link.url} target="_blank" rel="noreferrer" style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere', minWidth: 0, flex: 1 }}>{link.url}</a>
+          <button
+            type="button"
+            aria-label={`Remove ${link.url}`}
+            onClick={() => void remove(link.id)}
+            disabled={!onRemove || Boolean(pending)}
+            style={{ minWidth: 44, minHeight: 44 }}
+          >
+            Remove
+          </button>
+        </div>
+      )) : <span style={{ color: brandTokens.colors.mutedText, fontSize: bodyFontSize, fontStyle: 'italic' }}>No reference links added</span>}
+      {error && <div role="alert" style={{ color: '#fca5a5', fontSize: 11 }}>{error}</div>}
     </div>
   );
 }

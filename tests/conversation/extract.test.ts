@@ -121,6 +121,18 @@ test('chooses the next missing conversation step dynamically', () => {
   expect(getNextConversationStep({ ...planningComplete, referencesStatus: 'skipped' })).toBe('contact-name');
 });
 
+test('handoff and contact flow avoid unproved producer review or follow-up promises', () => {
+  const messagesFor = (step: typeof conversationSteps[keyof typeof conversationSteps]) =>
+    typeof step.botMessages === 'function' ? step.botMessages(createDefaultLeadDraft()) : step.botMessages;
+  const visibleCopy = [
+    ...messagesFor(conversationSteps['contact-email']),
+    ...messagesFor(conversationSteps.upload),
+    ...messagesFor(conversationSteps.handoff)
+  ].join(' ');
+
+  expect(visibleCopy).not.toMatch(/producer.*(?:will|follow up)|team will review|will review everything/i);
+});
+
 test('captures canonical prose from its dedicated intake step', () => {
   const objective = applyTextToDraft(
     'Build awareness for the launch',

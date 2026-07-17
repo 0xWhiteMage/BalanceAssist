@@ -773,10 +773,10 @@ describe('canonical chat response ownership', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await screen.findByText('Original launch film', {}, { timeout: 7000 });
 
-    fireEvent.click(screen.getByText('Original wording'));
-    const scopeInput = screen.getByRole('textbox', { name: 'Original wording' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit project description' }));
+    const scopeInput = screen.getByRole('textbox', { name: 'Project description' });
     fireEvent.change(scopeInput, { target: { value: 'Late stale edit' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save original wording' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save project description' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Close chat' }));
 
@@ -836,10 +836,10 @@ describe('canonical chat response ownership', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await screen.findByText('Original launch film', {}, { timeout: 7000 });
 
-    fireEvent.click(screen.getByText('Original wording'));
-    const scopeInput = screen.getByRole('textbox', { name: 'Original wording' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit project description' }));
+    const scopeInput = screen.getByRole('textbox', { name: 'Project description' });
     fireEvent.change(scopeInput, { target: { value: 'Saved after provider outage' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save original wording' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save project description' }));
     await waitFor(() => expect(editCalls).toBe(1));
     const chatInput = screen.getByPlaceholderText(/Type your message/i);
     await waitFor(() => expect(chatInput).not.toBeDisabled(), { timeout: 7000 });

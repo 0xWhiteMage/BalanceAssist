@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ProjectBriefCard } from '@/components/widget/widget-overlay-parts';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
@@ -19,6 +19,106 @@ const readyDraft = {
 };
 
 describe('ProjectBriefCard', () => {
+  test('uses attribution labels only when canonical provenance supports them', () => {
+    const { rerender } = render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        provenance={{ projectScope: 'user-stated', scopePolished: 'inferred' }}
+        compact={false}
+        readyForApproval={false}
+        approved={false}
+      />
+    );
+    expect(screen.getByText('Original wording')).toBeInTheDocument();
+    expect(screen.getByText('AI-drafted summary')).toBeInTheDocument();
+
+    rerender(
+      <ProjectBriefCard
+        draft={readyDraft}
+        provenance={{ projectScope: 'confirmed', scopePolished: 'confirmed' }}
+        compact={false}
+        readyForApproval={false}
+        approved={false}
+      />
+    );
+    expect(screen.getByText('User-edited wording')).toBeInTheDocument();
+    expect(screen.getByText('Edited draft')).toBeInTheDocument();
+    expect(screen.queryByText('Original wording')).not.toBeInTheDocument();
+    expect(screen.queryByText('AI-drafted summary')).not.toBeInTheDocument();
+  });
+
+  test('keeps an editor open with entered text and retry controls after async save failure', async () => {
+    const onChange = vi.fn()
+      .mockResolvedValueOnce({ status: 'failed', message: 'The edit was not saved.' })
+      .mockResolvedValueOnce({ status: 'saved' });
+    render(
+      <ProjectBriefCard draft={readyDraft} provenance={{ projectScope: 'user-stated' }} compact onChange={onChange} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit original wording' }));
+    const editor = screen.getByRole('textbox', { name: 'Original wording' });
+    fireEvent.change(editor, { target: { value: 'My retained correction' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save original wording' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The edit was not saved.');
+    expect(screen.getByRole('textbox', { name: 'Original wording' })).toHaveValue('My retained correction');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry saving original wording' }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Original wording' })).not.toBeInTheDocument());
+  });
+
+  test('disables duplicate Save while an async edit is pending', async () => {
+    let resolveSave!: (value: { status: 'saved' }) => void;
+    const onChange = vi.fn(() => new Promise<{ status: 'saved' }>((resolve) => { resolveSave = resolve; }));
+    render(<ProjectBriefCard draft={readyDraft} provenance={{ projectScope: 'user-stated' }} compact onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit original wording' }));
+    const save = screen.getByRole('button', { name: 'Save original wording' });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(save).toBeDisabled();
+    resolveSave({ status: 'saved' });
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Original wording' })).not.toBeInTheDocument());
+  });
+
+  test('groups core and optional fields and uses only native 44px edit controls', () => {
+    render(<ProjectBriefCard draft={readyDraft} provenance={{ projectScope: 'user-stated' }} compact onChange={vi.fn()} />);
+    const core = screen.getByRole('group', { name: 'Core details' });
+    const optional = screen.getByRole('group', { name: 'Optional details' });
+    expect(within(core).getByText('Original wording')).toBeInTheDocument();
+    expect(within(core).getByText('Contact name')).toBeInTheDocument();
+    expect(within(optional).getByText('Audience')).toBeInTheDocument();
+    expect(within(optional).getByText('Timeline')).toBeInTheDocument();
+    const editButtons = screen.getAllByRole('button', { name: /^edit /i });
+    expect(editButtons.length).toBeGreaterThan(0);
+    for (const button of editButtons) {
+      expect(button.style.minWidth).toBe('44px');
+      expect(button.style.minHeight).toBe('44px');
+    }
+    fireEvent.click(screen.getByText('Company'));
+    expect(screen.queryByRole('textbox', { name: 'Company' })).not.toBeInTheDocument();
+  });
+
+  test('adds and removes private reference links inline with visible errors', async () => {
+    const onAddReference = vi.fn().mockResolvedValueOnce({ status: 'failed', message: 'Link could not be saved.' });
+    const onRemoveReference = vi.fn().mockResolvedValueOnce({ status: 'failed', message: 'Link could not be removed.' });
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        provenance={{ projectScope: 'user-stated' }}
+        compact
+        referenceLinks={[{ id: 'reference-1', kind: 'vimeo', url: 'https://vimeo.com/123' }]}
+        onAddReference={onAddReference}
+        onRemoveReference={onRemoveReference}
+      />
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reference URL' }), { target: { value: 'https://example.com/board' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add reference link' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Link could not be saved.');
+    expect(screen.getByRole('textbox', { name: 'Reference URL' })).toHaveValue('https://example.com/board');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove https://vimeo.com/123' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Link could not be removed.');
+  });
   test('shows the "Project Brief" title and no "key fields captured" subhead', () => {
     render(
       <ProjectBriefCard
@@ -76,8 +176,8 @@ describe('ProjectBriefCard', () => {
         approved={false}
       />
     );
-    expect(screen.getByText('Original wording')).toBeInTheDocument();
-    expect(screen.getByText('AI-drafted summary')).toBeInTheDocument();
+    expect(screen.getByText('Project description')).toBeInTheDocument();
+    expect(screen.getByText('Project summary')).toBeInTheDocument();
     expect(screen.getByText('Project objective')).toBeInTheDocument();
     expect(screen.getByText('Audience')).toBeInTheDocument();
     expect(screen.getByText('Intended outputs')).toBeInTheDocument();
@@ -183,7 +283,13 @@ describe('ProjectBriefCard', () => {
 
   test('keeps original wording and AI-drafted summary separate without substitution', () => {
     render(
-      <ProjectBriefCard draft={readyDraft} compact={false} readyForApproval={false} approved={false} />
+      <ProjectBriefCard
+        draft={readyDraft}
+        provenance={{ projectScope: 'user-stated', scopePolished: 'inferred' }}
+        compact={false}
+        readyForApproval={false}
+        approved={false}
+      />
     );
 
     const originalRow = screen.getByText('Original wording').closest('[data-testid="brief-row"]') as HTMLElement;
@@ -202,15 +308,15 @@ describe('ProjectBriefCard', () => {
         onChange={onChange}
       />
     );
-    for (const label of ['Original wording', 'AI-drafted summary', 'Project objective', 'Audience', 'Intended outputs']) {
+    for (const label of ['Project description', 'Project summary', 'Project objective', 'Audience', 'Intended outputs']) {
       const row = screen.getByText(label).closest('[data-testid="brief-row"]') as HTMLElement;
       fireEvent.click(within(row).getByRole('button', { name: new RegExp(`edit ${label}`, 'i') }));
       expect(within(row).getByRole('textbox', { name: label }).tagName).toBe('TEXTAREA');
     }
   });
 
-  test('Enter adds a newline and explicit Save commits a multiline edit', () => {
-    const onChange = vi.fn();
+  test('Enter adds a newline and explicit Save commits a multiline edit', async () => {
+    const onChange = vi.fn().mockResolvedValue({ status: 'saved' });
     render(
       <ProjectBriefCard
         draft={readyDraft}
@@ -220,14 +326,14 @@ describe('ProjectBriefCard', () => {
         onChange={onChange}
       />
     );
-    const projectScopeRow = screen.getByText('Original wording').closest('[data-testid="brief-row"]') as HTMLElement;
-    fireEvent.click(within(projectScopeRow).getByRole('button', { name: /edit original wording/i }));
+    const projectScopeRow = screen.getByText('Project description').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(projectScopeRow).getByRole('button', { name: /edit project description/i }));
     const input = within(projectScopeRow).getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: '60s hero spot\nwith cut-downs' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onChange).not.toHaveBeenCalled();
-    fireEvent.click(within(projectScopeRow).getByRole('button', { name: 'Save original wording' }));
-    expect(onChange).toHaveBeenCalledWith('projectScope', '60s hero spot\nwith cut-downs');
+    fireEvent.click(within(projectScopeRow).getByRole('button', { name: 'Save project description' }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith('projectScope', '60s hero spot\nwith cut-downs'));
   });
 
   test('service row uses a free-text editor (no <select>)', () => {
@@ -319,7 +425,7 @@ describe('ProjectBriefCard', () => {
     }
   });
 
-  test('clicking an unfilled row opens the editor on that row', () => {
+  test('clicking an unfilled row does not open an editor', () => {
     const onChange = vi.fn();
     const empty = createDefaultLeadDraft();
     render(
@@ -334,9 +440,7 @@ describe('ProjectBriefCard', () => {
     const companyRow = screen.getByText('Company').closest('[data-testid="brief-row"]') as HTMLElement;
     expect(companyRow.getAttribute('data-filled')).toBe('false');
     fireEvent.click(companyRow);
-    const input = within(companyRow).getByRole('textbox') as HTMLInputElement;
-    expect(input).toBeInTheDocument();
-    expect(input.value).toBe('');
+    expect(within(companyRow).queryByRole('textbox')).not.toBeInTheDocument();
   });
 
   test('clicking the pencil on a row opens the editor and does not bubble', () => {
@@ -361,7 +465,7 @@ describe('ProjectBriefCard', () => {
     expect(within(emailRow).getAllByRole('textbox')).toHaveLength(1);
   });
 
-  test('clicking an unfilled row in non-compact mode also opens the editor', () => {
+  test('clicking an unfilled row in non-compact mode does not open an editor', () => {
     const onChange = vi.fn();
     const empty = createDefaultLeadDraft();
     render(
@@ -376,12 +480,10 @@ describe('ProjectBriefCard', () => {
     const companyRow = screen.getByText('Company').closest('[data-testid="brief-row"]') as HTMLElement;
     expect(companyRow.getAttribute('data-filled')).toBe('false');
     fireEvent.click(companyRow);
-    const input = within(companyRow).getByRole('textbox') as HTMLInputElement;
-    expect(input).toBeInTheDocument();
-    expect(input.value).toBe('');
+    expect(within(companyRow).queryByRole('textbox')).not.toBeInTheDocument();
   });
 
-  test('brief rows carry cursor: pointer when onChange is provided', () => {
+  test('brief rows do not imply pointer activation when only Edit is interactive', () => {
     const onChange = vi.fn();
     render(
       <ProjectBriefCard
@@ -394,7 +496,7 @@ describe('ProjectBriefCard', () => {
     );
     const rows = screen.getAllByTestId('brief-row');
     for (const row of rows) {
-      expect((row as HTMLElement).style.cursor).toBe('pointer');
+      expect((row as HTMLElement).style.cursor).toBe('default');
     }
   });
 });
