@@ -56,6 +56,7 @@ test.describe('mobile intake', () => {
     let draftVersion = 0;
     let chatCalls = 0;
     let finalizeAttempts = 0;
+    const eventPayloads: Array<{ eventName?: string; properties?: Record<string, unknown> }> = [];
 
     type StageFixture = {
       currentStage: 'audience' | 'planning' | 'references-contact';
@@ -118,6 +119,11 @@ test.describe('mobile intake', () => {
       contentType: 'application/json',
       body: JSON.stringify({ sessionId, persisted: true })
     }));
+    await page.route('**/api/events', async (route) => {
+      const payload = route.request().postDataJSON() as { eventName?: string; properties?: Record<string, unknown> };
+      eventPayloads.push({ eventName: payload.eventName, properties: payload.properties });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, eventName: payload.eventName }) });
+    });
     await page.route(`**/api/projects/${sessionId}/draft`, async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({
@@ -375,6 +381,16 @@ test.describe('mobile intake', () => {
     await assertNoHorizontalOverflow(page.locator('#widget-brief-panel'), 'queued Brief panel');
     await assertNoHorizontalOverflow(approvalConfirmation, 'queued approval');
     await assertNoHorizontalOverflow(approvalConfirmation.locator('button, a'), 'queued approval actions');
+    const clearYes = page.getByRole('button', { name: 'Yes', exact: true });
+    const clearNo = page.getByRole('button', { name: 'Not quite', exact: true });
+    await assertMinimumTarget(clearYes);
+    await assertMinimumTarget(clearNo);
+    await clearNo.click();
+    await expect(page.getByText('Thanks for the feedback.')).toBeVisible();
+    await expect.poll(() => eventPayloads.filter(({ eventName }) => eventName === 'trust_feedback')).toEqual([{
+      eventName: 'trust_feedback',
+      properties: { dimension: 'clarity_helpfulness', response: 'not_quite' }
+    }]);
     await expect(progress).toContainText('Stage 4 of 4');
     const motion = await page.locator('.balance-widget-motion').evaluateAll((elements) => elements.map((element) => {
       const style = getComputedStyle(element);

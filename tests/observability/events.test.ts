@@ -133,4 +133,38 @@ describe('emitEvent', () => {
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
+
+  test('emits only bounded trust feedback fields and values', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    emitEvent('trust_feedback', {
+      sessionId: 'session-1',
+      dimension: 'clarity_helpfulness',
+      response: 'not_quite',
+      comment: 'private feedback',
+      transcript: 'private transcript',
+      email: 'user@example.com',
+      providerError: 'provider token failed'
+    });
+
+    const parsed = JSON.parse(spy.mock.calls[0][1] as string);
+    expect(parsed).toMatchObject({
+      event: 'trust_feedback',
+      v: 1,
+      sessionId: 'session-1',
+      dimension: 'clarity_helpfulness',
+      response: 'not_quite'
+    });
+    expect(parsed.comment).toBeUndefined();
+    expect(parsed.transcript).toBeUndefined();
+    expect(parsed.email).toBeUndefined();
+    expect(parsed.providerError).toBeUndefined();
+    spy.mockRestore();
+  });
+
+  test('does not emit non-enumerated trust feedback values', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    emitEvent('trust_feedback', { sessionId: 'session-1', dimension: 'clarity_helpfulness', response: 'maybe' });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });

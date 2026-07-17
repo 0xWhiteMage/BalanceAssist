@@ -11,6 +11,8 @@ const policyBaseline = 37n;
 const reviewedCleanupVersions = ['038', '039', '040', '041', '042', '043'];
 const reviewedTrustControlsVersion = '054';
 const reviewedFinalReviewVersion = '055';
+const reviewedSessionControlsVersion = '056';
+const reviewedTrustFeedbackVersion = '057';
 
 export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
   const recorded = new Set(recordedVersions);
@@ -40,10 +42,24 @@ export function assertReviewedFinalReviewMigrationRecorded(recordedVersions) {
   }
 }
 
+export function assertReviewedSessionControlsMigrationRecorded(recordedVersions) {
+  if (!recordedVersions.includes(reviewedSessionControlsVersion)) {
+    throw new Error('056 is pending; run Production trust controls migration 056 before this release.');
+  }
+}
+
+export function assertReviewedTrustFeedbackMigrationRecorded(recordedVersions) {
+  if (!recordedVersions.includes(reviewedTrustFeedbackVersion)) {
+    throw new Error('057 is pending; run Production trust feedback migration 057 before this release.');
+  }
+}
+
 export function selectOrdinaryProductionMigrations(migrations) {
   return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version)
     && migration.version !== reviewedTrustControlsVersion
-    && migration.version !== reviewedFinalReviewVersion);
+    && migration.version !== reviewedFinalReviewVersion
+    && migration.version !== reviewedSessionControlsVersion
+    && migration.version !== reviewedTrustFeedbackVersion);
 }
 
 export function assertExpandOnlyMigration(source, filename) {
@@ -91,6 +107,8 @@ export async function applyProductionMigrations(connectionString = process.env.P
   assertReviewedCrmMigrationsRecorded(recordedVersions);
   assertReviewedTrustControlsMigrationRecorded(recordedVersions);
   assertReviewedFinalReviewMigrationRecorded(recordedVersions);
+  assertReviewedSessionControlsMigrationRecorded(recordedVersions);
+  assertReviewedTrustFeedbackMigrationRecorded(recordedVersions);
 
   const migrations = selectOrdinaryProductionMigrations(getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')));
   for (const migration of migrations) {

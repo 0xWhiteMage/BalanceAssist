@@ -2,7 +2,7 @@
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-const { finalizeLeadMock } = vi.hoisted(() => ({
+const { finalizeLeadMock, logEventMock } = vi.hoisted(() => ({
   finalizeLeadMock: vi.fn(async () => ({
     ok: true,
     sessionId: 'mock-session-id',
@@ -16,7 +16,8 @@ const { finalizeLeadMock } = vi.hoisted(() => ({
     approvedDraftVersion: 1,
     approvalInputHash: 'approval-hash-v1',
     approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
-  }))
+  })),
+  logEventMock: vi.fn(async () => ({ ok: true, eventName: 'mock-event' }))
 }));
 
 vi.mock('@/lib/api/client', async () => {
@@ -31,7 +32,7 @@ vi.mock('@/lib/api/client', async () => {
       fileRequestNote: null,
       scheduleRequestOpen: false
     })),
-    logEvent: vi.fn(async () => ({ ok: true, eventName: 'mock-event' })),
+    logEvent: logEventMock,
     createSession: vi.fn(async () => ({ sessionId: 'mock-session-id', status: 'new', sourceUrl: '', persisted: true })),
     getCurrentSession: vi.fn(async () => null)
   };
@@ -57,6 +58,8 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  logEventMock.mockReset();
+  logEventMock.mockResolvedValue({ ok: true, eventName: 'mock-event' });
   finalizeLeadMock.mockReset();
   finalizeLeadMock.mockResolvedValue({
     ok: true,
@@ -301,7 +304,16 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       expect(confirmation).not.toBeNull();
       expect(screen.getByRole('button', { name: /book a catch-up/i })).toBeInTheDocument();
       expect(screen.getByText('Queued for the Balance team')).toBeInTheDocument();
+      expect(screen.getByText('Was this clear?')).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+    await waitFor(() => expect(logEventMock).toHaveBeenCalledWith({
+      sessionId: 'mock-session-id',
+      eventName: 'trust_feedback',
+      properties: { dimension: 'clarity_helpfulness', response: 'yes' }
+    }));
+    expect(screen.getByText('Thanks for the feedback.')).toHaveAttribute('role', 'status');
 
     expect(screen.getByTestId('review-panel').textContent).not.toMatch(/crm|telegram|revision|reviewed/i);
   });

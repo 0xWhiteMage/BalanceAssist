@@ -11,6 +11,7 @@ export const MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS = 128;
 export const MAX_CHAT_CAPTURED_FIELDS = 20;
 export const MAX_CHAT_CAPTURED_FIELD_CHARACTERS = 64;
 export const MAX_SESSION_BODY_BYTES = 16_384;
+export const MAX_EVENT_BODY_BYTES = 2_048;
 
 export const createSessionPayloadSchema = z.object({
   sourceUrl: z.string().url(),
@@ -20,11 +21,45 @@ export const createSessionPayloadSchema = z.object({
   consentedAt: z.string().datetime()
 });
 
-export const eventPayloadSchema = z.object({
-  sessionId: z.string().min(1),
-  eventName: z.string().min(1),
-  properties: z.record(z.unknown()).optional()
-});
+export const trustFeedbackDimensionSchema = z.enum(['clarity_helpfulness', 'comfort', 'reuse']);
+export const trustFeedbackResponseSchema = z.enum(['yes', 'not_quite']);
+export const trustFeedbackPropertiesSchema = z.object({
+  dimension: trustFeedbackDimensionSchema,
+  response: trustFeedbackResponseSchema
+}).strict();
+
+const conversationStepSchema = z.enum([
+  'intro', 'scope', 'objective', 'service', 'audience', 'outputs', 'timeline', 'budget',
+  'references', 'contact-name', 'contact-email', 'consent', 'offer-upload', 'upload',
+  'handoff', 'free-chat'
+]);
+const sessionIdSchema = z.string().min(1).max(128);
+const noPropertyEventNames = [
+  'widget_closed', 'human_handoff', 'memory_inspected',
+  'memory_reset_requested', 'memory_correction_requested'
+] as const;
+const noPropertyEventSchema = z.object({
+  sessionId: sessionIdSchema,
+  eventName: z.enum(noPropertyEventNames)
+}).strict();
+
+export const eventPayloadSchema = z.discriminatedUnion('eventName', [
+  noPropertyEventSchema,
+  z.object({
+    sessionId: sessionIdSchema,
+    eventName: z.literal('step_advanced'),
+    properties: z.object({ from: conversationStepSchema, to: conversationStepSchema }).strict()
+  }).strict(),
+  z.object({
+    sessionId: sessionIdSchema,
+    eventName: z.literal('trust_feedback'),
+    properties: trustFeedbackPropertiesSchema
+  }).strict()
+]);
+
+export type TrustFeedbackDimension = z.infer<typeof trustFeedbackDimensionSchema>;
+export type TrustFeedbackResponse = z.infer<typeof trustFeedbackResponseSchema>;
+export type EventPayload = z.infer<typeof eventPayloadSchema>;
 
 export const finalizeLeadPayloadSchema = z.object({
   sessionId: z.string().min(1)

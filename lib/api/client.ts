@@ -1,3 +1,5 @@
+import type { EventPayload } from '@/lib/api/contracts';
+
 export type SessionResponse = {
   sessionId: string;
   status: string;
@@ -138,11 +140,7 @@ export async function getCurrentSession(): Promise<SessionResponse | null> {
   }
 }
 
-export async function logEvent(payload: {
-  sessionId: string;
-  eventName: string;
-  properties?: Record<string, unknown>;
-}): Promise<EventResponse | null> {
+export async function logEvent(payload: EventPayload): Promise<EventResponse | null> {
   return postJson<EventResponse>('/api/events', payload);
 }
 

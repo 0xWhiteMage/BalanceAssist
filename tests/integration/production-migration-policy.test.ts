@@ -30,8 +30,8 @@ describe('production migration policy', () => {
       .toThrow('053 is pending; run Production CRM migrations before this release');
   });
 
-  it('requires the reviewed trust-controls and final-review migrations before ordinary production releases', () => {
-    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053', '054', '055'];
+  it('requires every reviewed trust migration before ordinary production releases', () => {
+    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053', '054', '055', '056', '057'];
 
     expect(productionMigrations.assertReviewedTrustControlsMigrationRecorded).toBeTypeOf('function');
     expect(() => productionMigrations.assertReviewedTrustControlsMigrationRecorded(recordedVersions)).not.toThrow();
@@ -41,6 +41,12 @@ describe('production migration policy', () => {
     expect(() => productionMigrations.assertReviewedFinalReviewMigrationRecorded(recordedVersions)).not.toThrow();
     expect(() => productionMigrations.assertReviewedFinalReviewMigrationRecorded(recordedVersions.filter((version) => version !== '055')))
       .toThrow('055 is pending; run Production final review migration before this release');
+    expect(() => productionMigrations.assertReviewedSessionControlsMigrationRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedSessionControlsMigrationRecorded(recordedVersions.filter((version) => version !== '056')))
+      .toThrow('056 is pending; run Production trust controls migration 056 before this release');
+    expect(() => productionMigrations.assertReviewedTrustFeedbackMigrationRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedTrustFeedbackMigrationRecorded(recordedVersions.filter((version) => version !== '057')))
+      .toThrow('057 is pending; run Production trust feedback migration 057 before this release');
   });
 
   it('does not select reviewed CRM or trust-controls migrations for the ordinary runner', () => {
@@ -50,7 +56,9 @@ describe('production migration policy', () => {
       { version: '047', filename: '047_atomic_crm_approval.sql', path: '/tmp/047' },
       { version: '053', filename: '053_monday_reconciliation.sql', path: '/tmp/053' },
       { version: '054', filename: '054_additive.sql', path: '/tmp/054' },
-      { version: '055', filename: '055_final_review_approval.sql', path: '/tmp/055' }
+      { version: '055', filename: '055_final_review_approval.sql', path: '/tmp/055' },
+      { version: '056', filename: '056_trust_centered_session_controls.sql', path: '/tmp/056' },
+      { version: '057', filename: '057_event_deletion_freeze.sql', path: '/tmp/057' }
     ]).map(({ version }) => version)).toEqual(['043']);
   });
 
