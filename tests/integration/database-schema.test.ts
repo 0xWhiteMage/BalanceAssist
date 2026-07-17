@@ -2,6 +2,7 @@
 
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 type MigrationResult = {
@@ -267,7 +268,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                 '049_monday_crm_lifecycle.sql',
                 '052_monday_scheduler_health.sql',
                 '053_monday_reconciliation.sql',
-                '054_human_contact_consent.sql'
+                 '054_human_contact_consent.sql',
+                 '055_final_review_approval.sql'
     ]);
   });
 
@@ -1203,7 +1205,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                  '048:048_monday_sync_state_machine.sql',
                   '049:049_monday_crm_lifecycle.sql',
                   '052:052_monday_scheduler_health.sql',
-                  '053:053_monday_reconciliation.sql'
+                  '053:053_monday_reconciliation.sql',
+                  '054:054_human_contact_consent.sql',
+                  '055:055_final_review_approval.sql'
     ]);
   });
 
@@ -1330,6 +1334,29 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
+  it('treats an objective as sufficient project detail for persistence readiness', async () => {
+    const session = await client!.query(
+      `insert into public.sessions (source_url, draft, draft_expires_at)
+       values ('https://objective-finalize.example.test', $1::jsonb, now() + interval '1 hour') returning id`,
+      [JSON.stringify({
+        projectObjective: { value: 'Build awareness with first-time buyers.', provenance: 'confirmed' },
+        contactEmail: { value: 'objective@example.test', provenance: 'confirmed' }
+      })]
+    );
+    const sessionId = session.rows[0].id;
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+
+    try {
+      const finalized = await client!.query('select * from public.finalize_session_lead($1)', [sessionId]);
+      const persisted = await client!.query('select lead_draft from public.leads where session_id = $1', [sessionId]);
+
+      expect(finalized.rows[0]).toMatchObject({ persisted: true, consent_required: false });
+      expect(persisted.rows[0].lead_draft.projectObjective.value).toBe('Build awareness with first-time buyers.');
+    } finally {
+      await deleteSessionForTest(client!, sessionId);
+    }
+  });
+
   it('atomically snapshots a 1.1-consented canonical draft into one CRM revision and one Monday obligation', async () => {
     const session = await client!.query(
       `insert into public.sessions (source_url, draft, draft_version, draft_expires_at)
@@ -1337,6 +1364,11 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       [JSON.stringify({
         service: { value: 'production', provenance: 'confirmed' },
         projectScope: { value: 'A detailed launch film for a new product.', provenance: 'confirmed' },
+        projectObjective: { value: 'Build launch awareness.', provenance: 'confirmed' },
+        audience: { value: 'First-time buyers', provenance: 'confirmed' },
+        intendedOutputs: { value: '30-second hero film', provenance: 'confirmed' },
+        scopePolished: { value: 'A polished launch film for a new product.', provenance: 'confirmed' },
+        referencesStatus: { value: 'added', provenance: 'confirmed' },
         timelineBand: { value: '1-2 months', provenance: 'confirmed' },
         budgetBand: { value: '20k-50k', provenance: 'confirmed' },
         contactName: { value: 'Sam', provenance: 'confirmed' },
@@ -1360,7 +1392,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       ]);
       const projection = await client!.query(
         `select c.desired_revision, c.review_due_at >= r.approved_at + interval '90 days' as review_due_after_90_days,
-                r.source_draft_version, r.consent_notice_version, r.payload,
+                r.source_draft_version, r.consent_notice_version, r.approval_input_hash, r.payload,
                 (select count(*) from public.monday_sync_outbox o where o.crm_lead_id = c.id and o.revision = r.revision and o.operation = 'upsert') as monday_rows,
                 (select count(*) from public.handoff_outbox h where h.session_id = $1 and h.idempotency_key = 'finalize:' || $1::text) as telegram_rows
          from public.crm_leads c
@@ -1371,6 +1403,17 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
 
       expect(first.rows[0]).toMatchObject({ persisted: true, crm_revision: 1, approved_draft_version: 3, crm_queued: true });
       expect(retry.rows[0]).toMatchObject({ persisted: true, crm_revision: 1, approved_draft_version: 3, crm_queued: false });
+      const approvedReferenceSetHash = createHash('sha256').update(JSON.stringify([
+        { kind: 'Moodboard', url: 'https://example.com/references?a=1&b=2' }
+      ])).digest('hex');
+      expect(first.rows[0]).toMatchObject({
+        approval_input_hash: projection.rows[0].approval_input_hash,
+        approved_reference_set_hash: approvedReferenceSetHash
+      });
+      expect(retry.rows[0]).toMatchObject({
+        approval_input_hash: projection.rows[0].approval_input_hash,
+        approved_reference_set_hash: approvedReferenceSetHash
+      });
       expect(projection.rows).toEqual([expect.objectContaining({ desired_revision: 1, source_draft_version: 3, consent_notice_version: '1.1', monday_rows: '1', telegram_rows: '1' })]);
       expect(projection.rows[0].review_due_after_90_days).toBe(true);
       expect(projection.rows[0].payload).toEqual(expect.objectContaining({
@@ -1384,13 +1427,16 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         contactName: 'Sam', contactEmail: 'sam@example.test', company: null,
         service: 'production', projectType: null,
         projectScope: 'A detailed launch film for a new product.', timeline: '1-2 months', budget: '20k-50k',
+        projectObjective: 'Build launch awareness.', audience: 'First-time buyers', intendedOutputs: '30-second hero film',
+        scopePolished: 'A polished launch film for a new product.', referencesStatus: 'added',
         qualificationStatus: 'qualified', score: 10, recommendedNextStep: 'schedule',
         referenceLinks: [{ url: 'https://example.com/references?a=1&b=2', label: 'Moodboard' }]
       }));
       expect(Object.keys(projection.rows[0].payload).sort()).toEqual([
-        'approvedAt', 'approvedDraftVersion', 'approvedRevision', 'budget', 'company', 'contactEmail', 'contactName', 'crmRecordId',
-        'producerTransferNoticeVersion', 'producerTransferRecordedAt', 'projectScope', 'projectType', 'qualificationStatus',
-        'recommendedNextStep', 'referenceLinks', 'schemaVersion', 'score', 'service', 'timeline'
+        'approvedAt', 'approvedDraftVersion', 'approvedRevision', 'audience', 'budget', 'company', 'contactEmail', 'contactName',
+        'crmRecordId', 'intendedOutputs', 'producerTransferNoticeVersion', 'producerTransferRecordedAt', 'projectObjective',
+        'projectScope', 'projectType', 'qualificationStatus', 'recommendedNextStep', 'referenceLinks', 'referencesStatus',
+        'schemaVersion', 'scopePolished', 'score', 'service', 'timeline'
       ]);
     } finally {
       const crm = await client!.query('select id from public.crm_leads where source_session_id = $1', [sessionId]);

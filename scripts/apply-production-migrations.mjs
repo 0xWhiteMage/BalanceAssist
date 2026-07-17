@@ -10,6 +10,7 @@ import { crmMigrationVersions } from './apply-production-crm-migrations.mjs';
 const policyBaseline = 37n;
 const reviewedCleanupVersions = ['038', '039', '040', '041', '042', '043'];
 const reviewedTrustControlsVersion = '054';
+const reviewedFinalReviewVersion = '055';
 
 export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
   const recorded = new Set(recordedVersions);
@@ -33,8 +34,16 @@ export function assertReviewedTrustControlsMigrationRecorded(recordedVersions) {
   }
 }
 
+export function assertReviewedFinalReviewMigrationRecorded(recordedVersions) {
+  if (!recordedVersions.includes(reviewedFinalReviewVersion)) {
+    throw new Error('055 is pending; run Production final review migration before this release.');
+  }
+}
+
 export function selectOrdinaryProductionMigrations(migrations) {
-  return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version) && migration.version !== reviewedTrustControlsVersion);
+  return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version)
+    && migration.version !== reviewedTrustControlsVersion
+    && migration.version !== reviewedFinalReviewVersion);
 }
 
 export function assertExpandOnlyMigration(source, filename) {
@@ -81,6 +90,7 @@ export async function applyProductionMigrations(connectionString = process.env.P
   assertReviewedCleanupMigrationsRecorded(recordedVersions);
   assertReviewedCrmMigrationsRecorded(recordedVersions);
   assertReviewedTrustControlsMigrationRecorded(recordedVersions);
+  assertReviewedFinalReviewMigrationRecorded(recordedVersions);
 
   const migrations = selectOrdinaryProductionMigrations(getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')));
   for (const migration of migrations) {

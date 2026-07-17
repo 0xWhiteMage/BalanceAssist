@@ -30,13 +30,17 @@ describe('production migration policy', () => {
       .toThrow('053 is pending; run Production CRM migrations before this release');
   });
 
-  it('requires the reviewed trust-controls migration before ordinary production releases', () => {
-    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053', '054'];
+  it('requires the reviewed trust-controls and final-review migrations before ordinary production releases', () => {
+    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053', '054', '055'];
 
     expect(productionMigrations.assertReviewedTrustControlsMigrationRecorded).toBeTypeOf('function');
     expect(() => productionMigrations.assertReviewedTrustControlsMigrationRecorded(recordedVersions)).not.toThrow();
     expect(() => productionMigrations.assertReviewedTrustControlsMigrationRecorded(recordedVersions.filter((version) => version !== '054')))
       .toThrow('054 is pending; run Production trust controls migrations before this release');
+    expect(productionMigrations.assertReviewedFinalReviewMigrationRecorded).toBeTypeOf('function');
+    expect(() => productionMigrations.assertReviewedFinalReviewMigrationRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedFinalReviewMigrationRecorded(recordedVersions.filter((version) => version !== '055')))
+      .toThrow('055 is pending; run Production final review migration before this release');
   });
 
   it('does not select reviewed CRM or trust-controls migrations for the ordinary runner', () => {
@@ -45,7 +49,8 @@ describe('production migration policy', () => {
       { version: '044', filename: '044_monday_crm_projection_tables.sql', path: '/tmp/044' },
       { version: '047', filename: '047_atomic_crm_approval.sql', path: '/tmp/047' },
       { version: '053', filename: '053_monday_reconciliation.sql', path: '/tmp/053' },
-      { version: '054', filename: '054_additive.sql', path: '/tmp/054' }
+      { version: '054', filename: '054_additive.sql', path: '/tmp/054' },
+      { version: '055', filename: '055_final_review_approval.sql', path: '/tmp/055' }
     ]).map(({ version }) => version)).toEqual(['043']);
   });
 
