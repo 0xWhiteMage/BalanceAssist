@@ -36,6 +36,15 @@ test('system prompt defines four ordered stages and one-question intake', () => 
 });
 
 test('system prompt treats service as optional and references status independently from contact', () => {
+  for (const projectNeed of [{ service: 'production' }, { projectType: 'Animation' }]) {
+    const objectivePrompt = buildSystemPrompt({
+      currentStage: { id: 'project', label: 'Project and objective' },
+      draft: JSON.stringify(projectNeed)
+    });
+    expect(objectivePrompt).toMatch(/What should this project achieve\?/);
+    expect(objectivePrompt).not.toMatch(/What's the project about\?/);
+  }
+
   const audiencePrompt = buildSystemPrompt({
     currentStage: { id: 'audience', label: 'Audience and outputs' },
     draft: JSON.stringify({ projectScope: 'Launch film', projectObjective: 'Build awareness', service: '' })

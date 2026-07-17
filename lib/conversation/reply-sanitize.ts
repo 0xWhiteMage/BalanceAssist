@@ -181,10 +181,8 @@ const INTERNAL_STATUS_TERMS = [
   /\brevision\b/i
 ];
 
-function assertsInternalStatus(reply: string, userMessage: string): boolean {
-  return INTERNAL_STATUS_TERMS.some((term) =>
-    !term.test(userMessage) && term.test(reply)
-  );
+function assertsInternalStatus(reply: string): boolean {
+  return INTERNAL_STATUS_TERMS.some((term) => term.test(reply));
 }
 
 export function sanitizeReply(
@@ -193,7 +191,7 @@ export function sanitizeReply(
   options?: { toolCallArguments?: Record<string, unknown>; enforceInternalLanguage?: boolean }
 ): { reply: string; draft: Record<string, unknown>; overridden: boolean } {
   const { displayText, draft: proseDraft } = parseAssistantReply(rawReply);
-  if (options?.enforceInternalLanguage !== false && assertsInternalStatus(displayText, userMessage)) {
+  if (options?.enforceInternalLanguage !== false && assertsInternalStatus(displayText)) {
     return { reply: INTERNAL_STATUS_REPLY, draft: {}, overridden: true };
   }
   const refusal = matchesRefusal(displayText, userMessage);

@@ -1639,4 +1639,23 @@ describe('POST /api/chat', () => {
     expect(data.message).not.toMatch(/score|qualified|unqualified|misfit|CRM|Telegram|revision/i);
     expect(data.draftUpdates).toEqual({});
   });
+
+  test('sanitizes provider qualification assertions when the user asks if they are qualified', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'You are qualified for this service.',
+      'record_brief_updates',
+      JSON.stringify({ projectScope: 'Injected scope' })
+    )) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'Am I qualified?' }],
+      context: { step: 'scope', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toMatch(/brief/i);
+    expect(data.message).not.toMatch(/score|qualified|unqualified|misfit|CRM|Telegram|revision/i);
+    expect(data.draftUpdates).toEqual({});
+  });
 });

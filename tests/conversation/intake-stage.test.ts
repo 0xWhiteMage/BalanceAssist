@@ -53,12 +53,12 @@ describe('intake stage model', () => {
     }).id).toBe('audience');
   });
 
-  test('does not treat an internal service classification as the project need', () => {
+  test('treats a service-only canonical draft as project-need evidence', () => {
     expect(getCurrentIntakeStage({
       ...createDefaultLeadDraft(),
       service: 'production',
       projectObjective: 'Build awareness'
-    }).id).toBe('project');
+    }).id).toBe('audience');
   });
 
   test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(

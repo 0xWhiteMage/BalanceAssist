@@ -22,7 +22,7 @@ test('chooses the next missing conversation step dynamically', () => {
   const draft = createDefaultLeadDraft();
 
   expect(getNextConversationStep(draft)).toBe('scope');
-  expect(getNextConversationStep({ ...draft, service: 'production' })).toBe('scope');
+  expect(getNextConversationStep({ ...draft, service: 'production' })).toBe('objective');
   expect(getNextConversationStep({ ...draft, projectType: 'Animation' })).toBe('objective');
   expect(getNextConversationStep({ ...draft, projectScope: 'Launch film' })).toBe('objective');
   expect(getNextConversationStep({

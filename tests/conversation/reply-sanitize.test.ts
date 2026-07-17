@@ -77,16 +77,26 @@ test.each([
   expect(result.draft).toEqual({});
 });
 
-test.each(['score', 'qualified', 'CRM', 'Telegram', 'revision'])(
-  'does not block a provider answer merely because the user used the word %s',
-  (term) => {
-    const reply = `You asked about ${term}. I can help with your Balance brief.`;
-    const result = sanitizeReply(reply, `What does ${term} mean?`, {
-      enforceInternalLanguage: true
-    });
-    expect(result).toEqual({ reply, draft: {}, overridden: false });
-  }
-);
+test('sanitizes a provider qualification assertion even when the user asked about qualification', () => {
+  const result = sanitizeReply('You are qualified for this service.', 'Am I qualified?', {
+    toolCallArguments: { projectScope: 'Injected scope' },
+    enforceInternalLanguage: true
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(/brief/i);
+  expect(result.reply).not.toMatch(/score|qualified|unqualified|misfit|CRM|Telegram|revision/i);
+  expect(result.draft).toEqual({});
+});
+
+test('preserves a neutral user-facing provider answer to a qualification question', () => {
+  const reply = 'I can help you capture and review your project brief, and you can contact the team directly at any time.';
+  expect(sanitizeReply(reply, 'Am I qualified?', { enforceInternalLanguage: true })).toEqual({
+    reply,
+    draft: {},
+    overridden: false
+  });
+});
 
 test('uses tool-call arguments over prose draft line when both present', () => {
   const result = sanitizeReply(

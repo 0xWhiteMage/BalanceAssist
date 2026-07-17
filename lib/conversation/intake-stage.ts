@@ -15,7 +15,8 @@ export function getCurrentIntakeStage(draft: Partial<LeadDraft>) {
   if (
     !(
       hasValue(draft.projectScope) ||
-      hasValue(draft.projectType)
+      hasValue(draft.projectType) ||
+      hasValue(draft.service)
     ) ||
     !hasValue(draft.projectObjective)
   ) {

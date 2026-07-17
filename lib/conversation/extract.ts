@@ -219,7 +219,7 @@ export function applyTextToDraft(text: string, currentDraft: LeadDraft, currentS
 
 export function getNextConversationStep(draft: LeadDraft): ConversationStepId {
   const hasProjectNeed = Boolean(
-    draft.projectScope.trim() || draft.projectType?.trim()
+    draft.projectScope.trim() || draft.projectType?.trim() || draft.service?.trim()
   );
   if (!hasProjectNeed) return 'scope';
   if (!draft.projectObjective) return 'objective';

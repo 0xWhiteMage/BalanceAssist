@@ -46,7 +46,7 @@ export type BriefFieldName = (typeof FIELD_LIST)[number];
 
 function buildNextQuestionBlock(draft: Record<string, string> = {}): string {
   const has = (field: string) => Boolean(draft[field]?.trim());
-  if (!(has('projectScope') || has('projectType'))) {
+  if (!(has('projectScope') || has('projectType') || has('service'))) {
     return `    - Ask: "What's the project about?"`;
   }
   if (!has('projectObjective')) return `    - Ask: "What should this project achieve?"`;
