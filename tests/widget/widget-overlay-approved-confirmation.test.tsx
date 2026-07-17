@@ -96,6 +96,29 @@ function setMobileViewport(matches: boolean) {
   });
 }
 
+function setResponsiveViewport(initialMatches: boolean) {
+  let matches = initialMatches;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      get matches() { return query === '(max-width: 639px)' ? matches : false; },
+      media: query,
+      onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+      dispatchEvent: vi.fn()
+    }))
+  });
+  return (nextMatches: boolean) => {
+    matches = nextMatches;
+    const event = { matches: nextMatches, media: '(max-width: 639px)' } as MediaQueryListEvent;
+    listeners.forEach((listener) => listener(event));
+  };
+}
+
 function mockWidgetFetch() {
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -168,18 +191,24 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay approved confirmation (Fix 5)', () => {
-  test.each([
-    [false, 'Your core brief is ready. Review it in the brief panel.'],
-    [true, 'Your core brief is ready. Review it in the Brief tab.']
-  ])('replaces directional server prose with viewport-correct ready copy (mobile: %s)', async (mobile, expected) => {
-    setMobileViewport(mobile);
+  test('renders one live canonical ready direction that follows viewport changes without entering chat history', async () => {
+    const resize = setResponsiveViewport(false);
     mockWidgetFetch();
     render(<WidgetOverlay autoOpen={true} />);
     const input = await startAiConversation();
     fireEvent.change(input, { target: { value: '30s animation for social media' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(await screen.findByText(expected, {}, { timeout: 7000 })).toBeVisible();
+    const readyStatus = await screen.findByRole('status', { name: 'Brief ready' }, { timeout: 7000 });
+    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the brief panel.');
+    expect(screen.getByRole('log')).not.toHaveTextContent(/Your core brief is ready|tab on the right/i);
+
+    act(() => resize(true));
+    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the Brief tab.');
+    expect(screen.getAllByText(/Your core brief is ready/i)).toHaveLength(1);
+
+    act(() => resize(false));
+    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the brief panel.');
     expect(screen.queryByText(/tab on the right|rail on the right/i)).toBeNull();
   }, 15_000);
 

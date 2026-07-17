@@ -4,6 +4,14 @@ import { describe, expect, test, vi } from 'vitest';
 import { HumanFallbacks, HumanFooter } from '@/components/widget/widget-overlay-parts';
 
 describe('human relay public status', () => {
+  test('keeps the human handoff as a shared 44px action', () => {
+    render(<HumanFooter isTeamConnected={false} humanStatus="idle" onConnect={vi.fn()} />);
+
+    const action = screen.getByRole('button', { name: 'Talk to a human' });
+    expect(action).toHaveAttribute('type', 'button');
+    expect(action).toHaveClass('balance-widget-action');
+  });
+
   test('describes unavailable delivery without provider detail', () => {
     render(<HumanFooter isTeamConnected={true} humanStatus="unavailable" onConnect={vi.fn()} />);
 

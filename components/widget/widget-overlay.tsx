@@ -570,7 +570,7 @@ export function WidgetOverlay({
           ? data.replies.map((reply) => reply.text)
           : [CHAT_UNAVAILABLE_MESSAGE];
         return data.briefReady
-          ? [...replies.slice(0, -1), getReviewPrompt(isMobile)]
+          ? replies.slice(0, -1)
           : replies;
       })();
       const sharedWork = data.sharedWork
@@ -1168,6 +1168,7 @@ export function WidgetOverlay({
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
   const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
+  const briefReady = entryPath === 'ai' && !isTeamConnected && isBriefReadyForApproval(draft);
   const optionalAnswerActions =
     currentStep === 'objective' || currentStep === 'timeline'
       ? [OPTIONAL_ANSWER_ACTIONS[0]]
@@ -1242,6 +1243,18 @@ export function WidgetOverlay({
 
           {entryPath === 'ai' && hasStarted && !isTeamConnected && (
             <IntakeStageProgress currentStageId={getCurrentIntakeStage(draft).id} />
+          )}
+
+          {briefReady && (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label="Brief ready"
+              className="balance-widget-wrap"
+              style={{ padding: '8px 14px', color: brandTokens.colors.warmGold, borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`, fontSize: 11, lineHeight: 1.5 }}
+            >
+              {getReviewPrompt(isMobile)}
+            </div>
           )}
 
           {isMobile && !isTeamConnected && hasProjectIntent && (
@@ -1344,12 +1357,15 @@ export function WidgetOverlay({
               position: 'relative'
             }}
           >
-            {!isTeamConnected && hasProjectIntent && !(isMobile && tabMode !== 'brief') && (
+            {!isTeamConnected && hasProjectIntent && (
               <div
                 data-testid="review-rail"
-                id={isMobile ? 'widget-brief-panel' : undefined}
+                id="widget-brief-panel"
                 role={isMobile ? 'tabpanel' : undefined}
                 aria-labelledby={isMobile ? 'widget-brief-tab' : undefined}
+                aria-hidden={isMobile && tabMode !== 'brief' ? 'true' : undefined}
+                hidden={isMobile && tabMode !== 'brief'}
+                inert={isMobile && tabMode !== 'brief' ? true : undefined}
                 style={{
                   width: isMobile ? '100%' : 280,
                   flexShrink: 0,
@@ -1388,24 +1404,26 @@ export function WidgetOverlay({
               </div>
             )}
 
-            {!(isMobile && tabMode !== 'chat') && (
-              <div
-                id={isMobile ? 'widget-chat-panel' : undefined}
-                role={isMobile ? 'tabpanel' : undefined}
-                aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
-                style={{
-                  flex: 1,
-                  overflowY: 'auto',
-                  overflowX: 'hidden',
-                  padding: '16px 14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '14px',
-                  minWidth: 0,
-                  maxWidth: '100%',
-                  position: 'relative'
-                }}
-              >
+            <div
+              id="widget-chat-panel"
+              role={isMobile ? 'tabpanel' : undefined}
+              aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
+              aria-hidden={isMobile && tabMode !== 'chat' ? 'true' : undefined}
+              hidden={isMobile && tabMode !== 'chat'}
+              inert={isMobile && tabMode !== 'chat' ? true : undefined}
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                padding: '16px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+                minWidth: 0,
+                maxWidth: '100%',
+                position: 'relative'
+              }}
+            >
                 {showNoticeGate ? (
                   <DataUseNotice onConsent={chooseAi} onHuman={chooseHuman} onLeave={handleClose} />
                 ) : showStartChoices ? (
@@ -1505,8 +1523,7 @@ export function WidgetOverlay({
                 )}
 
                 <div ref={messagesEndRef} />
-              </div>
-            )}
+            </div>
           </div>
 
           {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (

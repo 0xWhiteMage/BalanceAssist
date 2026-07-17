@@ -232,10 +232,19 @@ test.describe('mobile intake', () => {
 
     await expect(page.getByText(/Your core brief is ready/i)).toBeVisible({ timeout: 5000 });
 
+    const readyStatus = page.getByRole('status', { name: 'Brief ready' });
+    await expect(readyStatus).toHaveText('Your core brief is ready. Review it in the Brief tab.');
+    await expect(page.getByRole('log')).not.toContainText('Your core brief is ready');
+
     const tablist = page.getByRole('tablist', { name: /widget sections/i });
     await expect(tablist).toBeVisible();
 
     const briefTab = page.getByRole('tab', { name: /brief/i });
+    const chatPanel = page.locator('#widget-chat-panel');
+    const briefPanel = page.locator('#widget-brief-panel');
+    await expect(chatPanel).toBeVisible();
+    await expect(briefPanel).toBeHidden();
+    await expect(briefPanel).toHaveAttribute('inert', '');
     await briefTab.click();
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('review-rail')).toBeVisible();
@@ -244,6 +253,13 @@ test.describe('mobile intake', () => {
     await page.getByRole('button', { name: 'Edit original wording' }).click();
     const scopeEditor = page.getByRole('textbox', { name: 'Original wording' });
     await scopeEditor.fill('Updated mobile launch film');
+    const chatTab = page.getByRole('tab', { name: /chat/i });
+    await chatTab.click();
+    await expect(chatPanel).toBeVisible();
+    await expect(briefPanel).toBeHidden();
+    await expect(briefPanel).toHaveAttribute('inert', '');
+    await briefTab.click();
+    await expect(scopeEditor).toHaveValue('Updated mobile launch film');
     await page.getByRole('button', { name: 'Save original wording' }).click();
     await expect(page.getByText('Updated mobile launch film')).toBeVisible();
 
@@ -257,7 +273,6 @@ test.describe('mobile intake', () => {
     expect(canonicalRefreshes).toBe(2);
     expect(producerTransferRequests).toEqual([]);
 
-    const chatTab = page.getByRole('tab', { name: /chat/i });
     await chatTab.click();
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
     await expect(input).toBeVisible();
@@ -266,5 +281,13 @@ test.describe('mobile intake', () => {
     await chatTab.press('ArrowRight');
     await expect(briefTab).toBeFocused();
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
+
+    const human = page.getByRole('button', { name: 'Talk to a human' });
+    await expect(human).toBeVisible();
+    await expect(human).toHaveClass(/balance-widget-action/);
+    const humanBounds = await human.boundingBox();
+    expect(humanBounds).not.toBeNull();
+    expect(humanBounds!.width).toBeGreaterThanOrEqual(44);
+    expect(humanBounds!.height).toBeGreaterThanOrEqual(44);
   });
 });

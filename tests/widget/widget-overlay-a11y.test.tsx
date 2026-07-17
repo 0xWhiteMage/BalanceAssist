@@ -282,7 +282,15 @@ describe('WidgetOverlay accessibility', () => {
     const progress = screen.getByTestId('intake-stage-progress');
     const chat = screen.getByRole('tab', { name: 'Chat' });
     const brief = screen.getByRole('tab', { name: 'Brief' });
+    const chatPanel = document.getElementById('widget-chat-panel');
+    const briefPanel = document.getElementById('widget-brief-panel');
     expect(progress).toBeVisible();
+    expect(chatPanel).toBeVisible();
+    expect(chatPanel).not.toHaveAttribute('aria-hidden');
+    expect(briefPanel).toBeInTheDocument();
+    expect(briefPanel).not.toBeVisible();
+    expect(briefPanel).toHaveAttribute('aria-hidden', 'true');
+    expect(briefPanel).toHaveAttribute('inert');
     expect(chat).toHaveAttribute('aria-controls', 'widget-chat-panel');
     expect(brief).toHaveAttribute('aria-controls', 'widget-brief-panel');
     expect(chat).toHaveClass('balance-widget-action');
@@ -291,6 +299,20 @@ describe('WidgetOverlay accessibility', () => {
     expect(brief).toHaveFocus();
     expect(brief).toHaveAttribute('aria-selected', 'true');
     expect(progress).toBeVisible();
+    expect(chatPanel).not.toBeVisible();
+    expect(chatPanel).toHaveAttribute('aria-hidden', 'true');
+    expect(chatPanel).toHaveAttribute('inert');
+    expect(briefPanel).toBeVisible();
+
+    const edit = screen.getByRole('button', { name: 'Edit project description' });
+    fireEvent.click(edit);
+    const editor = screen.getByRole('textbox', { name: 'Project description' });
+    fireEvent.change(editor, { target: { value: 'Unsaved mobile wording' } });
+    fireEvent.click(chat);
+    expect(editor).not.toBeVisible();
+    expect(editor.closest('[inert]')).toBe(briefPanel);
+    fireEvent.click(brief);
+    expect(screen.getByRole('textbox', { name: 'Project description' })).toHaveValue('Unsaved mobile wording');
 
     fireEvent.keyDown(brief, { key: 'ArrowLeft' });
     expect(chat).toHaveFocus();
@@ -298,5 +320,9 @@ describe('WidgetOverlay accessibility', () => {
     expect(brief).toHaveFocus();
     fireEvent.keyDown(brief, { key: 'Home' });
     expect(chat).toHaveFocus();
+
+    const human = screen.getByRole('button', { name: 'Talk to a human' });
+    expect(human).toHaveClass('balance-widget-action');
+    expect(human).toBeVisible();
   }, 15_000);
 });

@@ -283,6 +283,8 @@ export function HumanFooter({
     >
       {!isTeamConnected ? (
         <button
+          type="button"
+          className="balance-widget-action"
           onClick={onConnect}
           style={{
             display: 'flex',
