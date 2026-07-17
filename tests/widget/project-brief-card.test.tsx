@@ -7,8 +7,11 @@ const readyDraft = {
   ...createDefaultLeadDraft(),
   service: 'production' as const,
   projectType: 'Video',
-  projectScope: '30s launch animation',
-  scopePolished: '30s launch animation',
+  projectScope: 'Make it feel raw\nand human',
+  projectObjective: 'Build launch awareness',
+  audience: 'Young adults',
+  intendedOutputs: 'Hero film and social cut-downs',
+  scopePolished: 'A naturalistic launch campaign',
   timelineBand: '3 weeks',
   budgetBand: '$20,000 SGD',
   contactName: 'Jayden',
@@ -42,7 +45,7 @@ describe('ProjectBriefCard', () => {
     expect(screen.queryAllByTestId('brief-row-status')).toHaveLength(0);
     // Non-compact mode now exposes per-row edit affordances too, but does
     // NOT use the dedicated "value line" indent that compact mode uses.
-    expect(screen.queryAllByTestId('brief-row-value')).toHaveLength(7);
+    expect(screen.queryAllByTestId('brief-row-value')).toHaveLength(11);
   });
 
   test('compact mode marks the card and renders one filled-row indicator per captured field', () => {
@@ -56,12 +59,11 @@ describe('ProjectBriefCard', () => {
     );
     expect(screen.getByTestId('project-brief-card')).toHaveAttribute('data-compact', 'true');
 
-    // readyDraft fills 7 of 8 rows (Company is left empty)
-    expect(screen.getAllByTestId('brief-row-status')).toHaveLength(7);
-    expect(screen.getAllByTestId('brief-row-value')).toHaveLength(7);
+    expect(screen.getAllByTestId('brief-row-status')).toHaveLength(11);
+    expect(screen.getAllByTestId('brief-row-value')).toHaveLength(11);
 
     // Captured values are still rendered in the DOM (just on a second indented line).
-    expect(screen.getByText('30s launch animation')).toBeInTheDocument();
+    expect(screen.getByText(/Make it feel raw/)).toBeInTheDocument();
     expect(screen.getByText('jayden@example.com')).toBeInTheDocument();
   });
 
@@ -74,7 +76,11 @@ describe('ProjectBriefCard', () => {
         approved={false}
       />
     );
-    expect(screen.getByText('Project scope')).toBeInTheDocument();
+    expect(screen.getByText('Original wording')).toBeInTheDocument();
+    expect(screen.getByText('AI-drafted summary')).toBeInTheDocument();
+    expect(screen.getByText('Project objective')).toBeInTheDocument();
+    expect(screen.getByText('Audience')).toBeInTheDocument();
+    expect(screen.getByText('Intended outputs')).toBeInTheDocument();
     expect(screen.getByText('Project type')).toBeInTheDocument();
     expect(screen.getByText('Service')).toBeInTheDocument();
     expect(screen.getByText('Timeline')).toBeInTheDocument();
@@ -175,26 +181,17 @@ describe('ProjectBriefCard', () => {
     expect((valueSpan as HTMLElement).style.fontWeight).toBe('600');
   });
 
-  test('clicking the edit button on a free-text row opens an inline input', () => {
-    const onChange = vi.fn();
+  test('keeps original wording and AI-drafted summary separate without substitution', () => {
     render(
-      <ProjectBriefCard
-        draft={readyDraft}
-        compact={true}
-        readyForApproval={false}
-        approved={false}
-        onChange={onChange}
-      />
+      <ProjectBriefCard draft={readyDraft} compact={false} readyForApproval={false} approved={false} />
     );
-    const projectScopeRow = screen.getByText('Project scope').closest('[data-testid="brief-row"]') as HTMLElement;
-    const editButton = within(projectScopeRow).getByRole('button', { name: /edit project scope/i });
-    fireEvent.click(editButton);
-    const input = within(projectScopeRow).getByRole('textbox', { name: 'Project scope' });
-    expect(input).toBeInTheDocument();
-    expect((input as HTMLInputElement).value).toBe('30s launch animation');
+
+    const originalRow = screen.getByText('Original wording').closest('[data-testid="brief-row"]') as HTMLElement;
+    expect(originalRow).toHaveTextContent('Make it feel raw and human');
+    expect(screen.getByText('A naturalistic launch campaign')).toBeInTheDocument();
   });
 
-  test('pressing Enter on the inline input fires onChange with the new value', () => {
+  test('opens long semantic fields in labelled multiline editors', () => {
     const onChange = vi.fn();
     render(
       <ProjectBriefCard
@@ -205,12 +202,32 @@ describe('ProjectBriefCard', () => {
         onChange={onChange}
       />
     );
-    const projectScopeRow = screen.getByText('Project scope').closest('[data-testid="brief-row"]') as HTMLElement;
-    fireEvent.click(within(projectScopeRow).getByRole('button', { name: /edit project scope/i }));
-    const input = within(projectScopeRow).getByRole('textbox') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: '60s hero spot' } });
+    for (const label of ['Original wording', 'AI-drafted summary', 'Project objective', 'Audience', 'Intended outputs']) {
+      const row = screen.getByText(label).closest('[data-testid="brief-row"]') as HTMLElement;
+      fireEvent.click(within(row).getByRole('button', { name: new RegExp(`edit ${label}`, 'i') }));
+      expect(within(row).getByRole('textbox', { name: label }).tagName).toBe('TEXTAREA');
+    }
+  });
+
+  test('Enter adds a newline and explicit Save commits a multiline edit', () => {
+    const onChange = vi.fn();
+    render(
+      <ProjectBriefCard
+        draft={readyDraft}
+        compact={true}
+        readyForApproval={false}
+        approved={false}
+        onChange={onChange}
+      />
+    );
+    const projectScopeRow = screen.getByText('Original wording').closest('[data-testid="brief-row"]') as HTMLElement;
+    fireEvent.click(within(projectScopeRow).getByRole('button', { name: /edit original wording/i }));
+    const input = within(projectScopeRow).getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: '60s hero spot\nwith cut-downs' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(onChange).toHaveBeenCalledWith('projectScope', '60s hero spot');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(within(projectScopeRow).getByRole('button', { name: 'Save original wording' }));
+    expect(onChange).toHaveBeenCalledWith('projectScope', '60s hero spot\nwith cut-downs');
   });
 
   test('service row uses a free-text editor (no <select>)', () => {
@@ -256,7 +273,8 @@ describe('ProjectBriefCard', () => {
         approved={false}
       />
     );
-    const placeholder = screen.getByText('Not yet captured');
+    const companyRow = screen.getByText('Company').closest('[data-testid="brief-row"]') as HTMLElement;
+    const placeholder = within(companyRow).getByText('Not yet captured');
     expect(placeholder).toBeInTheDocument();
     expect((placeholder as HTMLElement).style.fontStyle).toBe('italic');
   });
@@ -274,7 +292,7 @@ describe('ProjectBriefCard', () => {
       />
     );
     const rows = screen.getAllByTestId('brief-row');
-    expect(rows.length).toBe(8);
+    expect(rows.length).toBe(11);
     for (const row of rows) {
       const pencil = within(row as HTMLElement).getByRole('button', { name: /^edit /i });
       expect(pencil).toBeInTheDocument();
@@ -294,7 +312,7 @@ describe('ProjectBriefCard', () => {
       />
     );
     const rows = screen.getAllByTestId('brief-row');
-    expect(rows.length).toBe(8);
+    expect(rows.length).toBe(11);
     for (const row of rows) {
       const pencil = within(row as HTMLElement).getByRole('button', { name: /^edit /i });
       expect(pencil).toBeInTheDocument();

@@ -204,7 +204,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     }
   });
 
-  test('after a successful approve, the rail renders a "Book a catch-up" CTA inside the green approved confirmation', async () => {
+  test('after a successful send, the rail renders queued public copy and follow-up actions', async () => {
     mockWidgetFetch();
 
     render(<WidgetOverlay autoOpen={true} />);
@@ -230,32 +230,17 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
 
     fireEvent.click(approveButton);
 
-    // After approval, the green confirmation banner + Book a catch-up CTA render.
     await waitFor(() => {
       const confirmation = document.querySelector('[data-testid="approve-confirmation"]');
       expect(confirmation).not.toBeNull();
-      const bookCta = document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement | null;
-      expect(bookCta).not.toBeNull();
-      expect(bookCta?.textContent).toMatch(/book a catch-up/i);
+      expect(screen.getByRole('button', { name: /book a catch-up/i })).toBeInTheDocument();
+      expect(screen.getByText('Queued for the Balance team')).toBeInTheDocument();
     });
 
-    // The confirmation copy stays truthful when delivery is queued but not verified.
-    const countLine = document.querySelector('[data-testid="approve-confirmation-count"]') as HTMLElement | null;
-    expect(countLine).not.toBeNull();
-    expect(countLine?.textContent).toMatch(/Approval saved\. Team notification queued\./i);
-
-    // Telegram status line shows "Telegram notification queued" since queued was true in finalize response.
-    const telegramStatus = document.querySelector('[data-testid="approve-confirmation-telegram"]') as HTMLElement | null;
-    expect(telegramStatus).not.toBeNull();
-    expect(telegramStatus?.textContent).toMatch(/Telegram notification queued/i);
-
-    const crmStatus = document.querySelector('[data-testid="approve-confirmation-crm"]') as HTMLElement | null;
-    expect(crmStatus).not.toBeNull();
-    expect(crmStatus?.textContent).toMatch(/CRM transfer queued.*revision 1/i);
-    expect(crmStatus?.textContent).not.toMatch(/delivered to Monday/i);
+    expect(screen.getByTestId('review-panel').textContent).not.toMatch(/crm|telegram|revision|reviewed/i);
   });
 
-  test('when finalize responds with queued=false and delivered=false, the rail shows "Telegram connection pending"', async () => {
+  test('when finalization persists without queue or delivery, the rail says Brief saved', async () => {
     mockWidgetFetch();
     finalizeLeadMock.mockResolvedValueOnce({
       ok: true,
@@ -290,9 +275,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.click(approveButton);
 
     await waitFor(() => {
-      const telegramStatus = document.querySelector('[data-testid="approve-confirmation-telegram"]') as HTMLElement | null;
-      expect(telegramStatus).not.toBeNull();
-      expect(telegramStatus?.textContent).toMatch(/Telegram connection pending/i);
+      expect(screen.getByText('Brief saved')).toBeInTheDocument();
     });
   });
 
@@ -402,11 +385,10 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.click(approveButton);
 
     await waitFor(() => {
-      const bookCta = document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement | null;
-      expect(bookCta).not.toBeNull();
+      expect(screen.getByRole('button', { name: /book a catch-up/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: /book a catch-up/i }));
 
     await waitFor(() => {
       const embed = document.querySelector('[data-testid="mock-calendly-embed"]');

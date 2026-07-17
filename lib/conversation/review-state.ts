@@ -1,11 +1,18 @@
 import type { LeadDraft } from '@/lib/onboarding/types';
 
-export const REVIEW_PROMPT = 'Your brief is ready. Review it in the panel on the left.';
+export function getReviewPrompt(isMobile: boolean): string {
+  return isMobile
+    ? 'Your core brief is ready. Review it in the Brief tab.'
+    : 'Your core brief is ready. Review it in the brief panel.';
+}
+
+export const REVIEW_PROMPT = getReviewPrompt(false);
 
 export function missingReviewFields(draft: Partial<LeadDraft>): string[] {
   const missing: string[] = [];
-  if (!draft.projectScope?.trim() && !draft.service?.trim()) {
+  if (!draft.projectScope?.trim() && !draft.projectObjective?.trim() && !draft.service?.trim()) {
     missing.push('projectScope');
+    missing.push('projectObjective');
     missing.push('service');
   }
   if (!draft.contactName?.trim() && !draft.contactEmail?.trim()) {
@@ -16,7 +23,9 @@ export function missingReviewFields(draft: Partial<LeadDraft>): string[] {
 }
 
 export function isBriefReadyForApproval(draft: Partial<LeadDraft>): boolean {
-  const hasProjectNeed = Boolean(draft.projectScope?.trim() || draft.service?.trim());
+  const hasProjectNeed = Boolean(
+    draft.projectScope?.trim() || draft.projectObjective?.trim() || draft.service?.trim()
+  );
   const hasContactMethod = Boolean(draft.contactName?.trim() || draft.contactEmail?.trim());
   return hasProjectNeed && hasContactMethod;
 }

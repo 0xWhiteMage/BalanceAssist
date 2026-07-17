@@ -158,7 +158,6 @@ export function WidgetOverlay({
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
-  const [crmQueued, setCrmQueued] = useState(false);
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
   const submitInFlightRef = useRef<boolean>(false);
@@ -754,7 +753,6 @@ export function WidgetOverlay({
 
       sessionDraft.finishApproval(true);
       sessionDraft.recordApproval(finalizeResponse);
-      setCrmQueued(finalizeResponse.crmQueued === true);
       if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
       } else if (finalizeResponse.queued === true) {
@@ -1319,9 +1317,12 @@ export function WidgetOverlay({
                     setRailMode('essentials');
                   }}
                   onChange={handleDraftEdit}
-                  telegramBroadcastStatus={telegramBroadcastStatus}
-                  crmQueued={crmQueued}
-                  crmRevision={approval.crmRevision}
+                  referenceLinks={referenceLinks}
+                  onEditReferences={() => {
+                    if (isMobile) setTabMode('chat');
+                    setAttachmentOpen(true);
+                  }}
+                  transferStatus={telegramBroadcastStatus === 'sent' ? 'delivered' : telegramBroadcastStatus === 'queued' ? 'queued' : 'saved'}
                   requiresReapproval={approval.crmRevision !== undefined && !briefApproved}
                   onBookCatchUp={() => {
                     if (!configuredCalendlyUrl) {

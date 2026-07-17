@@ -427,10 +427,15 @@ export function ProjectBriefCard({
   onApprove,
   onContinueRefining,
   onChange,
+  referenceLinks = [],
+  onEditReferences,
   compact = false
 }: {
   draft: {
     projectScope: string;
+    projectObjective: string;
+    audience: string;
+    intendedOutputs: string;
     scopePolished?: string;
     projectType?: string;
     service: string;
@@ -447,6 +452,8 @@ export function ProjectBriefCard({
   onApprove?: () => void;
   onContinueRefining?: () => void;
   onChange?: (key: string, value: string) => void;
+  referenceLinks?: ReadonlyArray<{ kind: string; url: string }>;
+  onEditReferences?: () => void;
   compact?: boolean;
 }) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -456,12 +463,44 @@ export function ProjectBriefCard({
     key: string;
     raw: string;
     display: string;
+    multiline?: boolean;
   }> = [
     {
-      label: 'Project scope',
+      label: 'Original wording',
       key: 'projectScope',
-      raw: draft.scopePolished || draft.projectScope,
-      display: (draft.scopePolished || draft.projectScope).trim()
+      raw: draft.projectScope,
+      display: draft.projectScope.trim(),
+      multiline: true
+    },
+    ...(draft.scopePolished?.trim() && draft.scopePolished.trim() !== draft.projectScope.trim()
+      ? [{
+          label: 'AI-drafted summary',
+          key: 'scopePolished',
+          raw: draft.scopePolished,
+          display: draft.scopePolished.trim(),
+          multiline: true
+        }]
+      : []),
+    {
+      label: 'Project objective',
+      key: 'projectObjective',
+      raw: draft.projectObjective,
+      display: draft.projectObjective.trim(),
+      multiline: true
+    },
+    {
+      label: 'Audience',
+      key: 'audience',
+      raw: draft.audience,
+      display: draft.audience.trim(),
+      multiline: true
+    },
+    {
+      label: 'Intended outputs',
+      key: 'intendedOutputs',
+      raw: draft.intendedOutputs,
+      display: draft.intendedOutputs.trim(),
+      multiline: true
     },
     {
       label: 'Project type',
@@ -618,9 +657,10 @@ export function ProjectBriefCard({
                       ...labelStyle,
                       flex: 1,
                       minWidth: 0,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      whiteSpace: row.multiline ? 'pre-wrap' : 'nowrap',
+                      overflowWrap: row.multiline ? 'anywhere' : undefined,
+                      overflow: row.multiline ? 'visible' : 'hidden',
+                      textOverflow: row.multiline ? 'clip' : 'ellipsis'
                     }}
                   >
                     {row.label}
@@ -710,7 +750,15 @@ export function ProjectBriefCard({
                   <span
                     style={
                       filled
-                        ? { ...valueStyle, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+                        ? {
+                            ...valueStyle,
+                            flex: 1,
+                            minWidth: 0,
+                            whiteSpace: row.multiline ? 'pre-wrap' : 'nowrap',
+                            overflowWrap: row.multiline ? 'anywhere' : undefined,
+                            overflow: row.multiline ? 'visible' : 'hidden',
+                            textOverflow: row.multiline ? 'clip' : 'ellipsis'
+                          }
                         : {
                             flex: 1,
                             minWidth: 0,
@@ -763,6 +811,39 @@ export function ProjectBriefCard({
             </div>
           );
         })}
+      </div>
+
+      <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: labelFontSize, color: brandTokens.colors.mutedText, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+            Reference links
+          </span>
+          {onEditReferences && (
+            <button
+              type="button"
+              aria-label="Edit reference links"
+              onClick={onEditReferences}
+              style={{ minWidth: 44, minHeight: 44, border: 'none', background: 'transparent', color: brandTokens.colors.warmGold, cursor: 'pointer' }}
+            >
+              Edit
+            </button>
+          )}
+        </div>
+        {referenceLinks.length > 0 ? referenceLinks.map((link) => (
+          <a
+            key={link.url}
+            href={link.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere', minWidth: 0 }}
+          >
+            {link.url}
+          </a>
+        )) : (
+          <span style={{ color: brandTokens.colors.mutedText, fontSize: bodyFontSize, fontStyle: 'italic' }}>
+            Not yet captured
+          </span>
+        )}
       </div>
 
       {showNudge && completed < rows.length && (
@@ -819,11 +900,6 @@ export function ProjectBriefCard({
         </div>
       )}
 
-      {approved && (
-        <div role="status" aria-live="polite" style={{ fontSize: '11px', color: '#4ade80', lineHeight: 1.5 }}>
-          Brief approved. You can now continue refining it or speak to the team.
-        </div>
-      )}
     </div>
   );
 }
@@ -833,6 +909,7 @@ type BriefRow = {
   key: string;
   raw: string;
   display: string;
+  multiline?: boolean;
 };
 
 function formatProjectType(value: string | undefined): string {
@@ -855,62 +932,80 @@ function BriefRowEditor({
 }) {
   const [value, setValue] = useState(row.raw);
 
-  function commit() {
-    onCommit(value);
-  }
-
   const containerStyle: React.CSSProperties = compact
-    ? { marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }
-    : { display: 'flex', alignItems: 'center', gap: 6, width: '100%' };
+    ? { marginLeft: 20, display: 'grid', gap: 6 }
+    : { display: 'grid', gap: 6, width: '100%' };
+
+  const editorStyle: React.CSSProperties = {
+    width: '100%',
+    background: 'rgba(255,255,255,0.04)',
+    border: `1px solid ${brandTokens.colors.border}`,
+    color: brandTokens.colors.lightText,
+    borderRadius: 6,
+    padding: '8px 10px',
+    fontSize: 12,
+    outline: 'none',
+    minWidth: 0,
+    resize: row.multiline ? 'vertical' : undefined
+  };
 
   return (
     <div style={containerStyle}>
-      <input
-        type="text"
-        value={value}
-        aria-label={row.label}
-        autoFocus
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            commit();
-          } else if (event.key === 'Escape') {
-            event.preventDefault();
+      {row.multiline ? (
+        <textarea
+          rows={3}
+          value={value}
+          aria-label={row.label}
+          autoFocus
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          style={editorStyle}
+        />
+      ) : (
+        <input
+          type="text"
+          value={value}
+          aria-label={row.label}
+          autoFocus
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          style={editorStyle}
+        />
+      )}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          type="button"
+          aria-label={`Save ${row.label.toLowerCase()}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCommit(value);
+          }}
+          style={{ minWidth: 44, minHeight: 44, borderRadius: 6, border: 'none', background: brandTokens.colors.warmGold, color: brandTokens.colors.baseBlack, cursor: 'pointer', fontWeight: 700 }}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
             onCancel();
-          }
-        }}
-        onBlur={commit}
-        style={{
-          flex: 1,
-          background: 'rgba(255,255,255,0.04)',
-          border: `1px solid ${brandTokens.colors.border}`,
-          color: brandTokens.colors.lightText,
-          borderRadius: 6,
-          padding: '4px 6px',
-          fontSize: 12,
-          outline: 'none',
-          minWidth: 0
-        }}
-      />
-      <button
-        type="button"
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onCancel();
-        }}
-        aria-label={`Cancel editing ${row.label.toLowerCase()}`}
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: brandTokens.colors.mutedText,
-          cursor: 'pointer',
-          fontSize: 11
-        }}
-      >
-        ×
-      </button>
+          }}
+          aria-label={`Cancel editing ${row.label.toLowerCase()}`}
+          style={{ minWidth: 44, minHeight: 44, borderRadius: 6, border: `1px solid ${brandTokens.colors.border}`, background: 'transparent', color: brandTokens.colors.lightText, cursor: 'pointer' }}
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

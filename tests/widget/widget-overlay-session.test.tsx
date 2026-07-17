@@ -324,7 +324,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     fireEvent.click(screen.getByTestId('brief-row-edit-contactName'));
     const editor = await screen.findByDisplayValue('Taylor');
     fireEvent.change(editor, { target: { value: 'Jordan' } });
-    fireEvent.keyDown(editor, { key: 'Enter', code: 'Enter', charCode: 13 });
+    fireEvent.click(screen.getByRole('button', { name: 'Save contact name' }));
 
     await waitFor(() => {
       const updateRequest = requestLog.find(

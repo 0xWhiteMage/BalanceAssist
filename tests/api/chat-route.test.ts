@@ -1277,7 +1277,7 @@ describe('POST /api/chat', () => {
     expect(data.message).toBe('Got it.');
     expect(data.draftUpdates.contactName).toBe('Tool');
     expect(data.briefReady).toBe(true);
-    expect(data.reviewPrompt).toBe('Your brief is ready. Review it in the panel on the left.');
+    expect(data.reviewPrompt).toBe('Your core brief is ready. Review it in the brief panel.');
     expect(data.missingFields).toEqual([]);
   });
 
