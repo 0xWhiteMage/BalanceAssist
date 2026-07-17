@@ -32,6 +32,15 @@ describe('detectProjectIntent', () => {
     expect(detectProjectIntent(withOverrides({ contactEmail: 'jayden@example.com' }))).toBe(false);
   });
 
+  test.each([
+    ['projectObjective', { projectObjective: 'Build launch awareness' }],
+    ['audience', { audience: 'Young adults' }],
+    ['intendedOutputs', { intendedOutputs: 'Hero film and cut-downs' }],
+    ['scopePolished', { scopePolished: '30s brand animation' }]
+  ] as const)('returns false when only %s is populated', (_field, values) => {
+    expect(detectProjectIntent(withOverrides(values))).toBe(false);
+  });
+
   test('returns true when projectScope alone is populated', () => {
     expect(detectProjectIntent(withOverrides({ projectScope: '30s animation' }))).toBe(true);
   });
@@ -42,10 +51,6 @@ describe('detectProjectIntent', () => {
 
   test('returns true when projectType alone is populated', () => {
     expect(detectProjectIntent(withOverrides({ projectType: 'Animation' }))).toBe(true);
-  });
-
-  test('returns true when scopePolished alone is populated', () => {
-    expect(detectProjectIntent(withOverrides({ scopePolished: '30s brand animation' }))).toBe(true);
   });
 
   test('ignores whitespace-only strong fields', () => {

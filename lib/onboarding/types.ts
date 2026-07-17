@@ -15,6 +15,9 @@ export type LeadDraft = {
   service: ServiceOptionId | '';
   projectType?: string;
   projectScope: string;
+  projectObjective: string;
+  audience: string;
+  intendedOutputs: string;
   scopePolished?: string;
   timelineBand: string;
   budgetBand: string;

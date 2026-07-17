@@ -178,6 +178,16 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
     updates.projectScope = trimmedText;
   }
 
+  const proseFieldByStep = {
+    objective: 'projectObjective',
+    audience: 'audience',
+    outputs: 'intendedOutputs'
+  } as const;
+  const proseField = proseFieldByStep[currentStep as keyof typeof proseFieldByStep];
+  if (proseField && trimmedText && (!currentDraft[proseField] || overwrite)) {
+    updates[proseField] = trimmedText;
+  }
+
   if (currentStep === 'contact-name' && !updates.contactName && (!currentDraft.contactName || overwrite)) {
     const explicit = text.match(/(?:my name is|i'm called|this is|name's)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/i);
     if (explicit?.[1]) updates.contactName = explicit[1].trim();
@@ -209,13 +219,16 @@ export function applyTextToDraft(text: string, currentDraft: LeadDraft, currentS
 
 export function getNextConversationStep(draft: LeadDraft): ConversationStepId {
   if (!draft.projectScope) return 'scope';
+  if (!draft.projectObjective) return 'objective';
   if (!draft.service) return 'service';
+  if (!draft.audience) return 'audience';
+  if (!draft.intendedOutputs) return 'outputs';
   if (!draft.timelineBand) return 'timeline';
   if (!draft.budgetBand) return 'budget';
-  if (!draft.contactName) return 'contact-name';
+  if (!draft.contactName) return 'references';
   if (!draft.contactEmail) return 'contact-email';
   if (!draft.consentToShare) return 'consent';
-  return 'qualification';
+  return 'handoff';
 }
 
 export function getDraftSummaryLines(draft: LeadDraft): string[] {
