@@ -144,7 +144,7 @@ export async function POST(request: Request) {
 
   const { data: consents, error: consentError } = await authResult.supabase
     .from('session_consents')
-    .select('scope, granted')
+    .select('scope, granted, notice_version')
     .eq('session_id', sessionId)
     .order('created_at', { ascending: false });
   if (consentError) {
@@ -153,8 +153,8 @@ export async function POST(request: Request) {
   const requiredScope = mode === 'analysis' ? 'analysis' : 'producer_transfer';
   const requiredConsent = (consents ?? []).find(
     (entry: { scope?: unknown }) => entry.scope === requiredScope
-  ) as { granted?: unknown } | undefined;
-  if (requiredConsent?.granted !== true) {
+  ) as { granted?: unknown; notice_version?: unknown } | undefined;
+  if (requiredConsent?.granted !== true || requiredConsent.notice_version !== '1.2') {
     const code = mode === 'analysis' ? 'analysis_consent_required' : 'producer_transfer_consent_required';
     return jsonWithCors({ ok: false, code }, { status: 403 }, request);
   }

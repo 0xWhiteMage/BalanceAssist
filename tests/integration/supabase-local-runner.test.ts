@@ -9,6 +9,9 @@ describe('local Supabase release runner', () => {
     const source = await readFile(resolve(process.cwd(), 'scripts/test-supabase.mjs'), 'utf8');
 
     expect(source).toContain('Skipping local Supabase release journey');
+    expect(source).toContain("process.env.CI === 'true'");
+    expect(source).toContain("process.env.REQUIRE_SUPABASE_RELEASE_PROOF === '1'");
+    expect(source).toContain('Supabase release proof is required but unavailable');
     expect(source).toContain("run('docker', ['info'])");
     expect(source).toContain("['scripts/apply-test-migrations.mjs']");
     expect(source).toContain("['status', '-o', 'env']");

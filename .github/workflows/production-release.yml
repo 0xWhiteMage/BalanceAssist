@@ -7,9 +7,39 @@ on:
         description: Immutable commit SHA to release
         required: true
         type: string
+      reviewed_sha:
+        description: Exact commit SHA covered by all five discipline reviews
+        required: true
+        type: string
+      product_review_ref:
+        description: Product/UX review GitHub issue number
+        required: true
+        type: string
+      engineering_review_ref:
+        description: Engineering review GitHub issue number
+        required: true
+        type: string
+      accessibility_review_ref:
+        description: Accessibility review GitHub issue number
+        required: true
+        type: string
+      conversation_review_ref:
+        description: Conversation review GitHub issue number
+        required: true
+        type: string
+      privacy_review_ref:
+        description: Trust/privacy review GitHub issue number
+        required: true
+        type: string
+      deployment_proof_ref:
+        description: Deployment proof GitHub issue number
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
+  issues: read
 
 concurrency:
   group: production-release
@@ -24,11 +54,24 @@ jobs:
       - name: Validate release commit
         id: validate
         env:
+          ACCESSIBILITY_REVIEW_REF: ${{ inputs.accessibility_review_ref }}
+          CONVERSATION_REVIEW_REF: ${{ inputs.conversation_review_ref }}
+          DEPLOYMENT_PROOF_REF: ${{ inputs.deployment_proof_ref }}
+          ENGINEERING_REVIEW_REF: ${{ inputs.engineering_review_ref }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PRIVACY_REVIEW_REF: ${{ inputs.privacy_review_ref }}
+          PRODUCT_REVIEW_REF: ${{ inputs.product_review_ref }}
           RELEASE_REF: ${{ inputs.ref }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
         run: |
           set -euo pipefail
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-release.yml@refs/heads/main"
           [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$REVIEWED_SHA" = "$RELEASE_REF"
+          for review_ref in "$PRODUCT_REVIEW_REF" "$ENGINEERING_REVIEW_REF" "$ACCESSIBILITY_REVIEW_REF" "$CONVERSATION_REVIEW_REF" "$PRIVACY_REVIEW_REF" "$DEPLOYMENT_PROOF_REF"; do
+            [[ "$review_ref" =~ ^[1-9][0-9]{0,9}$ ]]
+          done
+          test "$(printf '%s\n' "$PRODUCT_REVIEW_REF" "$ENGINEERING_REVIEW_REF" "$ACCESSIBILITY_REVIEW_REF" "$CONVERSATION_REVIEW_REF" "$PRIVACY_REVIEW_REF" "$DEPLOYMENT_PROOF_REF" | sort -u | wc -l)" = "6"
           git init --quiet release
           cd release
           git remote add origin "https://github.com/${{ github.repository }}.git"
@@ -36,6 +79,73 @@ jobs:
           git cat-file -e "$RELEASE_REF^{commit}"
           git merge-base --is-ancestor "$RELEASE_REF" origin/main
           release_sha="$(git rev-parse "$RELEASE_REF^{commit}")"
+          proof_path="$(mktemp)"
+          trap 'rm -f "$proof_path"' EXIT
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$proof_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$release_sha&status=completed&per_page=100"
+          node - "$proof_path" "$release_sha" <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const sha = process.argv[3];
+          const proof = payload.workflow_runs?.filter((run) => run.head_sha === sha) ?? [];
+          if (!proof.some((run) => run.status === 'completed' && run.conclusion === 'success' && run.event === 'push' && run.head_branch === 'main' && run.path === '.github/workflows/ci.yml')) process.exit(1);
+          NODE
+          validate_review() {
+            local role="$1" issue="$2" review_path comments_path
+            review_path="$(mktemp)"
+            comments_path="$(mktemp)"
+            curl --fail --silent --show-error --retry 3 --retry-all-errors \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GITHUB_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --output "$review_path" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$issue"
+            curl --fail --silent --show-error --retry 3 --retry-all-errors \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GITHUB_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --output "$comments_path" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$issue/comments?per_page=100"
+            node - "$review_path" "$comments_path" "$release_sha" "$role" <<'NODE'
+          const fs = require('node:fs');
+          const issue = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const comments = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+          const sha = process.argv[4];
+          const role = process.argv[5];
+          const body = issue.body ?? '';
+          const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+          const line = (name, value) => new RegExp(`^${name}:\\s*${value}\\s*$`, 'm').test(body);
+          const reviewer = body.match(/^Reviewer-GitHub:\s*@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\s*$/m)?.[1];
+          if (issue.pull_request || issue.state !== 'closed' || !labels.has('release-review') || !labels.has('release-approved')) process.exit(1);
+          if (!line('Reviewed-SHA', sha) || !line('Review-Role', role) || !line('Decision', 'approved') || !line('Open-P0', '0') || !line('Open-P1', '0')) process.exit(1);
+          if (!reviewer || !(issue.assignees ?? []).some((assignee) => assignee.login.toLowerCase() === reviewer.toLowerCase())) process.exit(1);
+          const trustedAssociations = new Set(['OWNER']);
+          const approved = comments.some((comment) => comment.user?.login.toLowerCase() === reviewer.toLowerCase()
+            && trustedAssociations.has(comment.author_association)
+            && new RegExp(`^Reviewed-SHA:\\s*${sha}\\s*$`, 'm').test(comment.body ?? '')
+            && new RegExp(`^Review-Role:\\s*${role}\\s*$`, 'm').test(comment.body ?? '')
+            && /^Decision:\s*approved\s*$/m.test(comment.body ?? '')
+            && /^Open-P0:\s*0\s*$/m.test(comment.body ?? '')
+            && /^Open-P1:\s*0\s*$/m.test(comment.body ?? '')
+            && !Number.isNaN(Date.parse(comment.created_at)));
+          if (!approved) process.exit(1);
+          fs.appendFileSync(process.env.REVIEWER_LIST, `${reviewer.toLowerCase()}\n`);
+          NODE
+            rm -f "$review_path" "$comments_path"
+          }
+          reviewer_list="$(mktemp)"
+          export REVIEWER_LIST="$reviewer_list"
+          validate_review product-ux "$PRODUCT_REVIEW_REF"
+          validate_review engineering "$ENGINEERING_REVIEW_REF"
+          validate_review accessibility "$ACCESSIBILITY_REVIEW_REF"
+          validate_review conversation "$CONVERSATION_REVIEW_REF"
+          validate_review trust-privacy "$PRIVACY_REVIEW_REF"
+          test "$(sort -u "$reviewer_list" | wc -l)" = "5"
+          rm -f "$reviewer_list"
           echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
 
   gates:
@@ -67,6 +177,7 @@ jobs:
       - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1
       - run: npm ci
       - name: Verify Vercel production session configuration
+        id: runtime-config
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -99,17 +210,75 @@ jobs:
           ]);
           const origins = (config.ALLOWED_ORIGINS ?? '').split(',').map((origin) => origin.trim());
           if (origins.length !== expectedOrigins.size || origins.some((origin) => !expectedOrigins.has(origin) || origin.includes('*'))) process.exit(1);
+          const required = [
+            'NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_PRIVATE_UPLOAD_BUCKET', 'DEEPSEEK_API_KEY',
+            'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_WEBHOOK_SECRET',
+            'TELEGRAM_ALLOWED_USERNAMES', 'SETUP_TOKEN', 'CRON_SECRET'
+          ];
+          if (required.some((name) => !config[name]?.trim())) process.exit(1);
+          if (!config.SUPABASE_SERVICE_ROLE_KEY?.trim() && !config.SUPABASE_SECRET_KEY?.trim()) process.exit(1);
+          if (config.SUPABASE_PRIVATE_UPLOAD_BUCKET !== 'temporary-attachments') process.exit(1);
+          if (config.MONDAY_UPSERT_ENABLED !== 'false' || config.MONDAY_CLEANUP_ENABLED !== 'false') process.exit(1);
+          try {
+            const supabase = new URL(config.NEXT_PUBLIC_SUPABASE_URL);
+            if (supabase.protocol !== 'https:' || supabase.hostname !== 'vbdqjgwcmckutwehrbvo.supabase.co' || supabase.username || supabase.password || supabase.pathname !== '/' || supabase.search || supabase.hash) process.exit(1);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `supabase_url=${supabase.origin}\n`);
+          } catch { process.exit(1); }
+          NODE
+      - name: Verify production trust schema readiness
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VERCEL_SUPABASE_URL: ${{ steps.runtime-config.outputs.supabase_url }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          test -n "$VERCEL_SUPABASE_URL"
+          node <<'NODE'
+          const expected = new URL(process.env.VERCEL_SUPABASE_URL);
+          const actual = new URL(process.env.SUPABASE_URL);
+          if (actual.protocol !== 'https:' || actual.username || actual.password || actual.pathname !== '/' || actual.search || actual.hash || actual.origin !== expected.origin) process.exit(1);
+          NODE
+          schema_path="$(mktemp)"
+          trap 'rm -f "$schema_path"' EXIT
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            --output "$schema_path" \
+            "$SUPABASE_URL/rest/v1/schema_migrations?version=in.(054,055,056,057,058,059)&select=version,filename"
+          node - "$schema_path" <<'NODE'
+          const fs = require('node:fs');
+          const expected = new Map([
+            ['054', '054_human_contact_consent.sql'],
+            ['055', '055_final_review_approval.sql'],
+            ['056', '056_trust_centered_session_controls.sql'],
+            ['057', '057_event_deletion_freeze.sql'],
+            ['058', '058_unsent_crm_deletion.sql'],
+            ['059', '059_consent_1_2_compatibility.sql'],
+          ]);
+          let rows;
+          try { rows = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')); } catch { process.exit(1); }
+          if (!Array.isArray(rows) || rows.length !== expected.size) process.exit(1);
+          for (const row of rows) {
+            if (typeof row?.version !== 'string' || row.filename !== expected.get(row.version)) process.exit(1);
+            expected.delete(row.version);
+          }
+          if (expected.size) process.exit(1);
           NODE
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
       - name: Verify Monday release-proof controls
         run: npm test -- tests/integration/monday-release-proof.test.ts
-      - run: npm run test:supabase
+      - name: Run mandatory Supabase release proof
+        env:
+          REQUIRE_SUPABASE_RELEASE_PROOF: '1'
+        run: npm run test:supabase
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
-      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
       - run: git diff --check
       - name: Stop local Supabase stack
         if: always()
@@ -179,7 +348,7 @@ jobs:
           session_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
             --header "content-type: application/json" \
             --header "origin: https://balance-assist.vercel.app" \
-            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"1.1\",\"consentedAt\":\"$consented_at\"}" \
+            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"1.2\",\"consentedAt\":\"$consented_at\"}" \
             --cookie-jar "$probe_dir/cookies" \
             --dump-header "$probe_dir/session-headers" \
             --output "$probe_dir/session.json" \
@@ -209,10 +378,26 @@ jobs:
           const fs = require('node:fs');
           try {
             const deletion = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-            if (deletion.ok !== true || typeof deletion.jobId !== 'string' || typeof deletion.status !== 'string' || typeof deletion.requestedAt !== 'string') process.exit(1);
+            if (deletion.ok !== true || typeof deletion.receiptId !== 'string' || typeof deletion.receipt !== 'string' || deletion.status !== 'requested' || deletion.deleted !== false || typeof deletion.requestedAt !== 'string' || typeof deletion.updatedAt !== 'string') process.exit(1);
           } catch {
             process.exit(1);
           }
+          NODE
+          event_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
+            --header "content-type: application/json" \
+            --header "origin: https://balance-assist.vercel.app" \
+            --cookie "$probe_dir/cookies" \
+            --data "{\"sessionId\":\"$session_id\",\"eventName\":\"widget_closed\"}" \
+            --output "$probe_dir/event.json" \
+            --write-out '%{http_code}' \
+            "$DEPLOYMENT_URL/api/events")"
+          test "$event_status" = "409"
+          node - "$probe_dir/event.json" <<'NODE'
+          const fs = require('node:fs');
+          try {
+            const event = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+            if (event.ok !== false || event.error !== 'event_session_inactive') process.exit(1);
+          } catch { process.exit(1); }
           NODE
 
   migration:
@@ -233,16 +418,161 @@ jobs:
       - run: npm ci
       - name: Apply production migrations
         env:
+          EXPECTED_SUPABASE_PROJECT_REF: vbdqjgwcmckutwehrbvo
           PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
         run: |
           set -euo pipefail
           test -n "$PRODUCTION_DATABASE_URL"
+          node --input-type=module <<'NODE'
+          const database = new URL(process.env.PRODUCTION_DATABASE_URL);
+          const projectRef = process.env.EXPECTED_SUPABASE_PROJECT_REF;
+          const direct = database.hostname === `db.${projectRef}.supabase.co` && database.username === 'postgres';
+          const pooled = database.hostname.endsWith('.pooler.supabase.com') && database.username === `postgres.${projectRef}`;
+          if (database.protocol !== 'postgresql:' && database.protocol !== 'postgres:') process.exit(1);
+          if ((!direct && !pooled) || database.pathname !== '/postgres' || database.search || database.hash) process.exit(1);
+          NODE
           # The runner enforces expand-only SQL; cleanup needs a separate approved workflow.
           node scripts/apply-production-migrations.mjs
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import pg from 'pg';
+          function reviewedBody(path, functionName) {
+            const source = fs.readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+            const signature = source.indexOf(`FUNCTION public.${functionName}`);
+            const start = source.indexOf('AS $$', signature) + 5;
+            const end = source.indexOf('\n$$;', start);
+            if (signature < 0 || start < 5 || end < 0) process.exit(1);
+            return source.slice(start, end).trim();
+          }
+          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL, ssl: { rejectUnauthorized: true } });
+          try {
+            await client.connect();
+            const { rows } = await client.query(`
+              SELECT m.filename, t.tgenabled, pg_get_triggerdef(t.oid) AS trigger_definition,
+                p.prosrc, p.prosecdef, p.proconfig, l.lanname, pg_get_userbyid(p.proowner) AS owner,
+                pg_get_function_result(p.oid) AS result
+              FROM public.schema_migrations m
+              JOIN pg_trigger t ON t.tgname = 'events_require_active_session'
+                AND t.tgrelid = 'public.events'::regclass AND NOT t.tgisinternal
+              JOIN pg_proc p ON p.oid = t.tgfoid
+              JOIN pg_language l ON l.oid = p.prolang
+              WHERE m.version = '057'
+                AND EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '058' AND filename = '058_unsent_crm_deletion.sql')
+            `);
+            const row = rows[0];
+            if (rows.length !== 1 || row.filename !== '057_event_deletion_freeze.sql' || row.tgenabled !== 'O') process.exit(1);
+            if (!/BEFORE INSERT ON public\.events FOR EACH ROW EXECUTE FUNCTION public\.guard_event_session_active\(\)/i.test(row.trigger_definition)) process.exit(1);
+            if (row.prosrc.trim() !== reviewedBody('supabase/migrations/057_event_deletion_freeze.sql', 'guard_event_session_active(')) process.exit(1);
+            if (row.prosecdef !== true || row.lanname !== 'plpgsql' || row.result !== 'trigger' || !row.proconfig?.includes('search_path=public, pg_temp')) process.exit(1);
+            if (row.owner !== 'postgres') process.exit(1);
+
+            const live058 = await client.query(`
+              SELECT m.filename, p.prosrc, p.prosecdef, p.proconfig, l.lanname,
+                pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result
+              FROM public.schema_migrations m
+              JOIN pg_proc p ON p.oid = 'public.queue_crm_lead_deletion(uuid,text)'::regprocedure
+              JOIN pg_language l ON l.oid = p.prolang
+              WHERE m.version = '058'
+            `);
+            const crmDeletion = live058.rows[0];
+            if (live058.rows.length !== 1 || crmDeletion.filename !== '058_unsent_crm_deletion.sql') process.exit(1);
+            if (crmDeletion.prosrc.trim() !== reviewedBody('supabase/migrations/058_unsent_crm_deletion.sql', 'queue_crm_lead_deletion(')) process.exit(1);
+            if (crmDeletion.prosecdef !== true || crmDeletion.lanname !== 'plpgsql' || crmDeletion.result !== 'boolean' || !crmDeletion.proconfig?.includes('search_path=public, pg_temp')) process.exit(1);
+            if (crmDeletion.owner !== 'postgres') process.exit(1);
+
+            const live059 = await client.query(`
+              SELECT p.prosrc, p.prosecdef, p.proconfig, l.lanname,
+                pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result
+              FROM pg_proc p
+              JOIN pg_language l ON l.oid = p.prolang
+              WHERE p.oid = 'public.assert_session_processing_allowed(uuid)'::regprocedure
+                AND EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '059' AND filename = '059_consent_1_2_compatibility.sql')
+            `);
+            const compatibility = live059.rows[0];
+            if (live059.rows.length !== 1 || compatibility.prosrc.trim() !== reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(')) process.exit(1);
+            if (compatibility.prosecdef !== true || compatibility.lanname !== 'plpgsql' || compatibility.result !== 'boolean' || !compatibility.proconfig?.includes('search_path=public, pg_temp') || compatibility.owner !== 'postgres') process.exit(1);
+          } finally {
+            await client.end();
+          }
+          NODE
+
+  deployment-review:
+    needs: [deploy, migration, validate]
+    environment: production-release-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify immutable deployment entry accessibility
+        env:
+          DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: node scripts/verify-deployment-widget.mjs
+      - name: Verify approved deployment proof record
+        env:
+          DEPLOYMENT_PROOF_ISSUE: ${{ inputs.deployment_proof_ref }}
+          DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          proof_path="$(mktemp)"
+          comments_path="$(mktemp)"
+          trap 'rm -f "$proof_path" "$comments_path"' EXIT
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$proof_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$DEPLOYMENT_PROOF_ISSUE"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$comments_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$DEPLOYMENT_PROOF_ISSUE/comments?per_page=100"
+          node - "$proof_path" "$comments_path" <<'NODE'
+          const fs = require('node:fs');
+          const issue = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const comments = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+          const body = issue.body ?? '';
+          const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+          const line = (name, value) => new RegExp(`^${name}:\\s*${value}\\s*$`, 'm').test(body);
+          const deploymentOrigin = new URL(process.env.DEPLOYMENT_URL).origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const reviewer = body.match(/^Reviewer-GitHub:\s*@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\s*$/m)?.[1];
+          if (issue.pull_request || issue.state !== 'closed' || !labels.has('release-review') || !labels.has('release-approved')) process.exit(1);
+          if (!reviewer || !(issue.assignees ?? []).some((assignee) => assignee.login.toLowerCase() === reviewer.toLowerCase())) process.exit(1);
+          if (!line('Reviewed-SHA', process.env.RELEASE_SHA) || !line('Review-Role', 'deployment-proof') || !line('Deployment-Origin', deploymentOrigin) || !line('Decision', 'approved') || !line('Open-P0', '0') || !line('Open-P1', '0')) process.exit(1);
+          for (const proof of ['Desktop-AI-Entry', 'Mobile-AI-Entry', 'Desktop-Human-Entry', 'Mobile-Human-Entry', 'Confidential-Diversion', 'Relay-Queued', 'Relay-Delivered', 'Relay-Replied']) {
+            if (!line(proof, 'passed')) process.exit(1);
+          }
+          const trustedAssociations = new Set(['OWNER']);
+          const approved = comments.some((comment) => comment.user?.login.toLowerCase() === reviewer.toLowerCase()
+            && trustedAssociations.has(comment.author_association)
+            && new RegExp(`^Reviewed-SHA:\\s*${process.env.RELEASE_SHA}\\s*$`, 'm').test(comment.body ?? '')
+            && /^Review-Role:\s*deployment-proof\s*$/m.test(comment.body ?? '')
+            && new RegExp(`^Deployment-Origin:\\s*${deploymentOrigin}\\s*$`, 'm').test(comment.body ?? '')
+            && /^Decision:\s*approved\s*$/m.test(comment.body ?? '')
+            && /^Open-P0:\s*0\s*$/m.test(comment.body ?? '')
+            && /^Open-P1:\s*0\s*$/m.test(comment.body ?? '')
+            && ['Desktop-AI-Entry', 'Mobile-AI-Entry', 'Desktop-Human-Entry', 'Mobile-Human-Entry', 'Confidential-Diversion', 'Relay-Queued', 'Relay-Delivered', 'Relay-Replied'].every((proof) => new RegExp(`^${proof}:\\s*passed\\s*$`, 'm').test(comment.body ?? ''))
+            && !Number.isNaN(Date.parse(comment.created_at)));
+          if (!approved) process.exit(1);
+          NODE
 
   promote:
-    needs: [deploy, migration, validate]
-    environment: production
+    needs: [deploy, migration, deployment-review, validate]
+    environment: production-consent-cutover
     runs-on: ubuntu-latest
     steps:
       - name: Checkout validated release commit
@@ -257,6 +587,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Promote immutable deployment
+        id: production-alias
         env:
           DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
@@ -270,7 +601,106 @@ jobs:
           test -n "$RELEASE_SHA"
           test -n "$PRODUCTION_URL"
           test -n "$VERCEL_TOKEN"
+          production_host="$(node -e "process.stdout.write(new URL(process.env.PRODUCTION_URL).hostname)")"
+          alias_path="$(mktemp)"
+          trap 'rm -f "$alias_path"' EXIT
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header "Authorization: Bearer $VERCEL_TOKEN" \
+            --output "$alias_path" \
+            "https://api.vercel.com/v4/aliases/$production_host?teamId=$VERCEL_ORG_ID"
+          previous_deployment_url="$(node - "$alias_path" <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const url = payload.deployment?.url;
+          if (typeof url !== 'string' || !url.endsWith('.vercel.app')) process.exit(1);
+          process.stdout.write(`https://${url}`);
+          NODE
+          )"
+          echo "previous_deployment_url=$previous_deployment_url" >> "$GITHUB_OUTPUT"
           ./node_modules/.bin/vercel alias set "$DEPLOYMENT_URL" "$PRODUCTION_URL" --token="$VERCEL_TOKEN"
+      - name: Apply consent 1.2 cutover
+        env:
+          EXPECTED_SUPABASE_PROJECT_REF: vbdqjgwcmckutwehrbvo
+          PREVIOUS_DEPLOYMENT_URL: ${{ steps.production-alias.outputs.previous_deployment_url }}
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          cutover_applied=""
+          rollback_if_safe() {
+            if [[ -z "$cutover_applied" || ! -s "$cutover_applied" ]]; then
+              ./node_modules/.bin/vercel alias set "$PREVIOUS_DEPLOYMENT_URL" "$PRODUCTION_URL" --token="$VERCEL_TOKEN"
+            fi
+          }
+          trap rollback_if_safe ERR
+          test -n "$PREVIOUS_DEPLOYMENT_URL"
+          test -n "$PRODUCTION_DATABASE_URL"
+          test -n "$PRODUCTION_URL"
+          test -n "$VERCEL_TOKEN"
+          node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run
+          cutover_applied="$(mktemp)"
+          if ! node --input-type=module - "$cutover_applied" <<'NODE'
+          import fs from 'node:fs';
+          import pg from 'pg';
+          const database = new URL(process.env.PRODUCTION_DATABASE_URL);
+          const projectRef = process.env.EXPECTED_SUPABASE_PROJECT_REF;
+          const direct = database.hostname === `db.${projectRef}.supabase.co` && database.username === 'postgres';
+          const pooled = database.hostname.endsWith('.pooler.supabase.com') && database.username === `postgres.${projectRef}`;
+          if ((database.protocol !== 'postgresql:' && database.protocol !== 'postgres:') || (!direct && !pooled) || database.pathname !== '/postgres' || database.search || database.hash) process.exit(1);
+          function reviewedBody(functionName) {
+            const source = fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8').replace(/\r\n/g, '\n');
+            const signature = source.indexOf(`FUNCTION public.${functionName}`);
+            const start = source.indexOf('AS $$', signature) + 5;
+            const end = source.indexOf('\n$$;', start);
+            if (signature < 0 || start < 5 || end < 0) process.exit(1);
+            return source.slice(start, end).trim();
+          }
+          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL, ssl: { rejectUnauthorized: true } });
+          try {
+            await client.connect();
+            const recorded = await client.query("SELECT filename FROM public.schema_migrations WHERE version = '060'");
+            if (!recorded.rows.length) {
+              await client.query(fs.readFileSync('supabase/production-consent-1-2-cutover-060.sql', 'utf8'));
+            } else if (recorded.rows.length !== 1 || recorded.rows[0].filename !== '060_consent_1_2_cutover.sql') {
+              process.exit(1);
+            }
+            fs.writeFileSync(process.argv[2], 'applied');
+            const live = await client.query(`
+              SELECT p.proname, p.prosrc, p.prosecdef, p.proconfig, l.lanname,
+                pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result
+              FROM pg_proc p
+              JOIN pg_language l ON l.oid = p.prolang
+              WHERE p.oid IN (
+                'public.assert_session_processing_allowed(uuid)'::regprocedure,
+                'public.finalize_session_lead(uuid)'::regprocedure,
+                'public.relay_human_message(uuid,text,text)'::regprocedure,
+                'public.reserve_handoff_send(uuid,uuid)'::regprocedure
+              )
+                AND EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '060' AND filename = '060_consent_1_2_cutover.sql')
+            `);
+            if (live.rows.length !== 4) process.exit(1);
+            for (const fn of live.rows) {
+              const expectedResult = fn.proname === 'finalize_session_lead'
+                ? 'TABLE(persisted boolean, consent_required boolean, qualification_status text, score integer, recommended_next_step text, lead_id bigint, handoff_id uuid, crm_record_id uuid, crm_revision integer, approved_draft_version integer, crm_queued boolean, approval_input_hash text, approved_reference_set_hash text)'
+                : fn.proname === 'relay_human_message'
+                  ? 'TABLE(persisted boolean, consent_required boolean, message_id bigint, handoff_id uuid, thread_id bigint)'
+                  : 'boolean';
+              if (fn.prosrc.trim() !== reviewedBody(`${fn.proname}(`) || fn.prosecdef !== true || fn.lanname !== 'plpgsql' || fn.result !== expectedResult || !fn.proconfig?.includes('search_path=public, pg_temp') || fn.owner !== 'postgres') process.exit(1);
+            }
+          } finally {
+            await client.end();
+          }
+          NODE
+          then
+            if ! test -s "$cutover_applied"; then
+              ./node_modules/.bin/vercel alias set "$PREVIOUS_DEPLOYMENT_URL" "$PRODUCTION_URL" --token="$VERCEL_TOKEN"
+            fi
+            rm -f "$cutover_applied"
+            exit 1
+          fi
+          rm -f "$cutover_applied"
+          trap - ERR
       - name: Smoke promoted production alias
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
@@ -294,7 +724,7 @@ jobs:
           session_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
             --header "content-type: application/json" \
             --header "origin: https://balance-assist.vercel.app" \
-            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"1.1\",\"consentedAt\":\"$consented_at\"}" \
+            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"1.2\",\"consentedAt\":\"$consented_at\"}" \
             --cookie-jar "$probe_dir/cookies" \
             --dump-header "$probe_dir/session-headers" \
             --output "$probe_dir/session.json" \
@@ -324,10 +754,26 @@ jobs:
           const fs = require('node:fs');
           try {
             const deletion = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-            if (deletion.ok !== true || typeof deletion.jobId !== 'string' || typeof deletion.status !== 'string' || typeof deletion.requestedAt !== 'string') process.exit(1);
+            if (deletion.ok !== true || typeof deletion.receiptId !== 'string' || typeof deletion.receipt !== 'string' || deletion.status !== 'requested' || deletion.deleted !== false || typeof deletion.requestedAt !== 'string' || typeof deletion.updatedAt !== 'string') process.exit(1);
           } catch {
             process.exit(1);
           }
+          NODE
+          event_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
+            --header "content-type: application/json" \
+            --header "origin: https://balance-assist.vercel.app" \
+            --cookie "$probe_dir/cookies" \
+            --data "{\"sessionId\":\"$session_id\",\"eventName\":\"widget_closed\"}" \
+            --output "$probe_dir/event.json" \
+            --write-out '%{http_code}' \
+            "$PRODUCTION_URL/api/events")"
+          test "$event_status" = "409"
+          node - "$probe_dir/event.json" <<'NODE'
+          const fs = require('node:fs');
+          try {
+            const event = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+            if (event.ok !== false || event.error !== 'event_session_inactive') process.exit(1);
+          } catch { process.exit(1); }
           NODE
 
   telegram:

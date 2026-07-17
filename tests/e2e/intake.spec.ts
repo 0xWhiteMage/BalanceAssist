@@ -116,7 +116,7 @@ test.describe('balance assist intake via persistent rail', () => {
     const expectedConsent = {
       scope: 'producer_transfer',
       granted: true,
-      noticeVersion: '1.1'
+      noticeVersion: '1.2'
     } as const;
     const consentRequests: Array<Record<string, unknown>> = [];
     const requestOrder: Array<

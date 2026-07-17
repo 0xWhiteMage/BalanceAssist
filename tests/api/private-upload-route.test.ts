@@ -51,7 +51,7 @@ describe('POST /api/telegram/upload private storage', () => {
       supabase: {
         from: vi.fn(() => ({
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: consents, error: null })) }))
+            eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: consents.map((consent) => ({ ...consent, notice_version: '1.2' })), error: null })) }))
           }))
         }))
       }
@@ -74,7 +74,7 @@ describe('POST /api/telegram/upload private storage', () => {
         auth: { sessionId, capability: 'capability' },
         supabase: {
           from: vi.fn(() => ({
-            select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true }], error: null })) })) }))
+            select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true, notice_version: '1.2' }], error: null })) })) }))
           }))
         }
       };

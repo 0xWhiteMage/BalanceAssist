@@ -44,6 +44,9 @@ export async function POST(request: Request) {
     .from('events')
     .insert({ session_id: sessionId, event_name: eventName, properties: properties ?? null });
 
+  if (error?.code === 'P0001' && error.message?.includes('session_unavailable')) {
+    return jsonWithCors({ ok: false, error: 'event_session_inactive' }, { status: 409 }, request);
+  }
   if (error) {
     return jsonWithCors({ ok: false, error: 'event_persist_failed' }, { status: 500 }, request);
   }

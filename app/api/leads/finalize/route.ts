@@ -1,6 +1,7 @@
 import { finalizeLeadPayloadSchema } from '@/lib/api/contracts';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
+import { isConsent12CutoverActive } from '@/lib/api/consent-cutover';
 
 export async function OPTIONS(request: Request) {
   return corsOptionsResponse(request);
@@ -16,6 +17,10 @@ export async function POST(request: Request) {
   const { sessionId } = parsed.data;
   if (sessionId !== authResult.auth.sessionId) {
     return jsonWithCors({ error: 'Session mismatch' }, { status: 403 }, request);
+  }
+
+  if (!await isConsent12CutoverActive(authResult.supabase)) {
+    return jsonWithCors({ ok: false, sessionId, persisted: false, retryable: true, error: 'consent_cutover_pending' }, { status: 503 }, request);
   }
 
   const { data, error } = await authResult.supabase.rpc('finalize_session_lead', {

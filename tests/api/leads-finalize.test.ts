@@ -1,8 +1,12 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-const { requireSessionMock } = vi.hoisted(() => ({ requireSessionMock: vi.fn() }));
+const { requireSessionMock, isConsent12CutoverActiveMock } = vi.hoisted(() => ({
+  requireSessionMock: vi.fn(),
+  isConsent12CutoverActiveMock: vi.fn()
+}));
 vi.mock('@/lib/api/require-session', () => ({ requireSession: requireSessionMock }));
+vi.mock('@/lib/api/consent-cutover', () => ({ isConsent12CutoverActive: isConsent12CutoverActiveMock }));
 
 async function finalize(body: Record<string, unknown>) {
   const { POST } = await import('@/app/api/leads/finalize/route');
@@ -17,7 +21,16 @@ describe('POST /api/leads/finalize', () => {
   beforeEach(() => {
     rpc.mockReset();
     requireSessionMock.mockReset();
+    isConsent12CutoverActiveMock.mockResolvedValue(true);
     requireSessionMock.mockResolvedValue({ ok: true, auth: { sessionId: '11111111-2222-3333-4444-555555555555' }, supabase: { rpc } });
+  });
+
+  test('fails closed before finalization while the 1.2 cutover is pending', async () => {
+    isConsent12CutoverActiveMock.mockResolvedValue(false);
+    const response = await finalize({ sessionId: '11111111-2222-3333-4444-555555555555' });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ retryable: true, error: 'consent_cutover_pending' });
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   test('returns server-owned CRM approval fields from the atomic RPC', async () => {

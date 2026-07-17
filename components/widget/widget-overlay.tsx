@@ -720,7 +720,7 @@ export function WidgetOverlay({
       const connectMsg: ChatMessage = {
         id: nextId(),
         sender: 'bot',
-        text: `Your private relay is ready. ${DATA_USE_NOTICE_COPY.humanDisclosure}`,
+        text: `Your human-only relay is ready. ${DATA_USE_NOTICE_COPY.humanDisclosure}`,
         timestamp: Date.now(),
         isSystem: true
       };
@@ -1296,7 +1296,7 @@ export function WidgetOverlay({
     setEntryPath('human');
     // The existing session contract requires consentVersion and consentedAt. This
     // records first-party relay-session disclosure, not AI processing consent.
-    setNoticeConsent({ consentVersion: 'human-relay-1.1', consentedAt: new Date().toISOString() });
+    setNoticeConsent({ consentVersion: 'human-relay-1.2', consentedAt: new Date().toISOString() });
   }
 
   const canInteract = !confidentialRecoveryOpen && !isSessionExpired && (hasStarted || humanRequested);
@@ -1358,7 +1358,11 @@ export function WidgetOverlay({
 
           {showUploadPolicy && <UploadPolicyModal onClose={() => setShowUploadPolicy(false)} />}
 
-          <WidgetOverlayHeader isTeamConnected={isTeamConnected} onClose={handleClose} />
+          <WidgetOverlayHeader
+            isTeamConnected={isTeamConnected}
+            humanRelayActive={humanRequested || entryPath === 'human'}
+            onClose={handleClose}
+          />
 
           {entryPath === 'ai' && hasStarted && !isTeamConnected && (
             <IntakeStageProgress currentStageId={getCurrentIntakeStage(draft).id} />

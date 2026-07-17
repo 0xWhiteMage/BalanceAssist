@@ -9,7 +9,7 @@ const reviewedMigration = {
   filename: '057_event_deletion_freeze.sql',
   sha256: '70b7a0c25ae5875ad568ce731d434eb58b9e864d05596bf522a0cda2c673476e'
 };
-const reviewedArtifactSha256 = '6b42808529ce148fcf15c08923ad72adb180ddc86a2552728db2f3d2868d6950';
+const reviewedArtifactSha256 = 'c92e1bed196b1a435eae4b2c4537f2cd27417833e0ac82a5438dca96976a2612';
 
 export const trustFeedback057MigrationVersion = reviewedMigration.version;
 

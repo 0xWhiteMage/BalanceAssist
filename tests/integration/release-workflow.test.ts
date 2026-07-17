@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -24,7 +25,16 @@ describe('production release workflows', () => {
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
     const jobs = release.jobs ?? {};
 
-    expect(release.on).toEqual({ workflow_dispatch: { inputs: { ref: { description: 'Immutable commit SHA to release', required: true, type: 'string' } } } });
+    expect(release.on?.workflow_dispatch).toMatchObject({ inputs: {
+      ref: { description: 'Immutable commit SHA to release', required: true, type: 'string' },
+      reviewed_sha: { required: true, type: 'string' },
+      product_review_ref: { required: true, type: 'string' },
+      engineering_review_ref: { required: true, type: 'string' },
+      accessibility_review_ref: { required: true, type: 'string' },
+      conversation_review_ref: { required: true, type: 'string' },
+      privacy_review_ref: { required: true, type: 'string' },
+      deployment_proof_ref: { required: true, type: 'string' }
+    } });
     expect(release.concurrency).toEqual({ group: 'production-release', 'cancel-in-progress': false });
     expect(jobs.validate?.environment).toBeUndefined();
     expect(jobs.gates?.needs).toEqual(['validate']);
@@ -43,6 +53,11 @@ describe('production release workflows', () => {
     expect(sessionConfig?.run).toContain("config.TRUSTED_CLIENT_IP_HEADER !== 'x-vercel-forwarded-for'");
     expect(sessionConfig?.run).toContain('https://balance-assist.vercel.app');
     expect(sessionConfig?.run).toContain("origin.includes('*')");
+    expect(sessionConfig?.run).toContain("config.MONDAY_UPSERT_ENABLED !== 'false'");
+    expect(sessionConfig?.run).toContain("config.MONDAY_CLEANUP_ENABLED !== 'false'");
+    expect(sessionConfig?.run).toContain("config.SUPABASE_PRIVATE_UPLOAD_BUCKET !== 'temporary-attachments'");
+    expect(sessionConfig?.run).toContain('TELEGRAM_WEBHOOK_SECRET');
+    expect(sessionConfig?.run).toContain('CRON_SECRET');
     expect(envExample).toContain('ALLOWED_ORIGINS=https://balancestudio.tv,https://www.balancestudio.tv,https://balance-assist.vercel.app');
     expect(envExample).toContain('TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for');
     expect(readme).toContain('ALLOWED_ORIGINS=https://balancestudio.tv,https://www.balancestudio.tv,https://balance-assist.vercel.app');
@@ -52,11 +67,30 @@ describe('production release workflows', () => {
     expect(vercelAudit?.run).toContain('test -n "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT"');
     expect(vercelAudit?.run).toContain('^[0-9]{4}-[0-9]{2}-[0-9]{2}T');
     expect(vercelAudit?.run).toContain('90 * 24 * 60 * 60');
+    const schemaReadiness = jobs.gates?.steps?.find((step) => step.name === 'Verify production trust schema readiness');
+    expect(schemaReadiness?.env?.SUPABASE_URL).toBe('${{ secrets.SUPABASE_URL }}');
+    expect(schemaReadiness?.env?.SUPABASE_SERVICE_ROLE_KEY).toBe('${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}');
+    expect(schemaReadiness?.env?.VERCEL_SUPABASE_URL).toBe('${{ steps.runtime-config.outputs.supabase_url }}');
+    expect(schemaReadiness?.run).toContain('actual.origin !== expected.origin');
+    expect(schemaReadiness?.run).toContain('version=in.(054,055,056,057,058,059)&select=version,filename');
+    expect(schemaReadiness?.run).toContain("['057', '057_event_deletion_freeze.sql']");
+    expect(schemaReadiness?.run).toContain("['058', '058_unsent_crm_deletion.sql']");
+    expect(schemaReadiness?.run).toContain("['059', '059_consent_1_2_compatibility.sql']");
+    expect(sessionConfig?.run).toContain("supabase.hostname !== 'vbdqjgwcmckutwehrbvo.supabase.co'");
+    const supabaseProof = jobs.gates?.steps?.find((step) => step.name === 'Run mandatory Supabase release proof');
+    expect(supabaseProof?.env?.REQUIRE_SUPABASE_RELEASE_PROOF).toBe('1');
+    expect(supabaseProof?.run).toBe('npm run test:supabase');
     expect(jobs.deploy?.needs).toEqual(['gates', 'validate']);
     expect(jobs.smoke?.needs).toEqual(['deploy', 'validate']);
     expect(jobs.migration?.needs).toEqual(['smoke', 'validate']);
     expect(jobs.migration?.environment).toBe('production-migrations');
-    expect(jobs.promote?.needs).toEqual(['deploy', 'migration', 'validate']);
+    expect(jobs['deployment-review']?.needs).toEqual(['deploy', 'migration', 'validate']);
+    expect(jobs['deployment-review']?.environment).toBe('production-release-review');
+    expect(jobs['deployment-review']?.steps?.find((step) => step.name === 'Verify immutable deployment entry accessibility')?.run)
+      .toBe('node scripts/verify-deployment-widget.mjs');
+    expect(jobs['deployment-review']?.steps?.find((step) => step.name === 'Verify approved deployment proof record')?.run)
+      .toContain("'Relay-Replied'");
+    expect(jobs.promote?.needs).toEqual(['deploy', 'migration', 'deployment-review', 'validate']);
     expect(jobs.telegram?.needs).toEqual(['promote', 'validate']);
     const promoteCheckout = jobs.promote?.steps?.find((step) => step.name === 'Checkout validated release commit');
     expect(promoteCheckout?.uses).toBe('actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5');
@@ -75,7 +109,20 @@ describe('production release workflows', () => {
     }
     const validate = jobs.validate?.steps?.find((step) => step.name === 'Validate release commit');
     expect(validate?.env?.RELEASE_REF).toBe('${{ inputs.ref }}');
+    expect(validate?.env?.REVIEWED_SHA).toBe('${{ inputs.reviewed_sha }}');
+    expect(validate?.env?.GITHUB_TOKEN).toBe('${{ github.token }}');
     expect(validate?.run).toContain('test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-release.yml@refs/heads/main"');
+    expect(validate?.run).toContain('test "$REVIEWED_SHA" = "$RELEASE_REF"');
+    expect(validate?.run).toContain('/actions/workflows/ci.yml/runs?head_sha=');
+    expect(validate?.run).toContain("run.path === '.github/workflows/ci.yml'");
+    expect(validate?.run).toContain("run.conclusion === 'success'");
+    expect(validate?.run).toContain("labels.has('release-approved')");
+    expect(validate?.run).toContain("line('Open-P1', '0')");
+    expect(validate?.run).toContain('Reviewer-GitHub');
+    expect(validate?.run).toContain('sort -u "$reviewer_list"');
+    expect(validate?.run).toContain('/comments?per_page=100');
+    expect(validate?.run).toContain("trustedAssociations.has(comment.author_association)");
+    expect(validate?.run).toContain("new Set(['OWNER'])");
     expect(validate?.run).toContain('^[0-9a-f]{40}$');
     expect(validate?.run).toContain('git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main');
     expect(validate?.run).toContain('git merge-base --is-ancestor "$RELEASE_REF" origin/main');
@@ -98,14 +145,18 @@ describe('production release workflows', () => {
     expect(immutableSmoke?.run).toContain('POST');
     expect(immutableSmoke?.run).toContain('$DEPLOYMENT_URL/api/sessions');
     expect(immutableSmoke?.run).toContain('origin: https://balance-assist.vercel.app');
-    expect(immutableSmoke?.run).toContain('{\\"sourceUrl\\":\\"https://balance-assist.vercel.app/session-smoke\\",\\"consentVersion\\":\\"1.1\\",\\"consentedAt\\":\\"$consented_at\\"}');
+    expect(immutableSmoke?.run).toContain('{\\"sourceUrl\\":\\"https://balance-assist.vercel.app/session-smoke\\",\\"consentVersion\\":\\"1.2\\",\\"consentedAt\\":\\"$consented_at\\"}');
     expect(immutableSmoke?.run).toContain('date -u +%Y-%m-%dT%H:%M:%SZ');
     expect(immutableSmoke?.run).not.toContain('consents');
     expect(immutableSmoke?.run).toContain('session.persisted !== true');
     expect(immutableSmoke?.run).toContain('set-cookie:');
     expect(immutableSmoke?.run).toContain('HttpOnly');
     expect(immutableSmoke?.run).toContain('/api/projects/$session_id/delete');
-    expect(immutableSmoke?.run).toContain("typeof deletion.jobId !== 'string'");
+    expect(immutableSmoke?.run).toContain("typeof deletion.receiptId !== 'string'");
+    expect(immutableSmoke?.run).toContain("deletion.status !== 'requested'");
+    expect(immutableSmoke?.run).toContain('$DEPLOYMENT_URL/api/events');
+    expect(immutableSmoke?.run).toContain('test "$event_status" = "409"');
+    expect(immutableSmoke?.run).toContain("event.error !== 'event_session_inactive'");
     expect(immutableSmoke?.run).toContain('trap');
     expect(jobs.promote?.steps?.find((step) => step.name === 'Promote immutable deployment')?.run).toContain('vercel alias set');
     const aliasSmoke = jobs.promote?.steps?.find((step) => step.name === 'Smoke promoted production alias');
@@ -114,14 +165,18 @@ describe('production release workflows', () => {
     expect(aliasSmoke?.run).toContain('POST');
     expect(aliasSmoke?.run).toContain('$PRODUCTION_URL/api/sessions');
     expect(aliasSmoke?.run).toContain('origin: https://balance-assist.vercel.app');
-    expect(aliasSmoke?.run).toContain('{\\"sourceUrl\\":\\"https://balance-assist.vercel.app/session-smoke\\",\\"consentVersion\\":\\"1.1\\",\\"consentedAt\\":\\"$consented_at\\"}');
+    expect(aliasSmoke?.run).toContain('{\\"sourceUrl\\":\\"https://balance-assist.vercel.app/session-smoke\\",\\"consentVersion\\":\\"1.2\\",\\"consentedAt\\":\\"$consented_at\\"}');
     expect(aliasSmoke?.run).toContain('date -u +%Y-%m-%dT%H:%M:%SZ');
     expect(aliasSmoke?.run).not.toContain('consents');
     expect(aliasSmoke?.run).toContain('session.persisted !== true');
     expect(aliasSmoke?.run).toContain('set-cookie:');
     expect(aliasSmoke?.run).toContain('HttpOnly');
     expect(aliasSmoke?.run).toContain('/api/projects/$session_id/delete');
-    expect(aliasSmoke?.run).toContain("typeof deletion.jobId !== 'string'");
+    expect(aliasSmoke?.run).toContain("typeof deletion.receiptId !== 'string'");
+    expect(aliasSmoke?.run).toContain("deletion.status !== 'requested'");
+    expect(aliasSmoke?.run).toContain('$PRODUCTION_URL/api/events');
+    expect(aliasSmoke?.run).toContain('test "$event_status" = "409"');
+    expect(aliasSmoke?.run).toContain("event.error !== 'event_session_inactive'");
     expect(aliasSmoke?.run).toContain('trap');
     const telegram = jobs.telegram?.steps?.find((step) => step.name === 'Configure Telegram webhook');
     expect(telegram?.run).toContain('test -n "$PRODUCTION_URL"');
@@ -134,7 +189,21 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain('test -n "$PRODUCTION_DATABASE_URL"');
     expect(migrate?.run).toContain('node scripts/apply-production-migrations.mjs');
     expect(migrate?.run).toContain('expand-only');
+    expect(migrate?.run).toContain("t.tgname = 'events_require_active_session'");
+    expect(migrate?.run).toContain("row.tgenabled !== 'O'");
+    expect(migrate?.run).toContain("row.prosrc.trim() !== reviewedBody('supabase/migrations/057_event_deletion_freeze.sql'");
+    expect(migrate?.run).toContain("crmDeletion.prosrc.trim() !== reviewedBody('supabase/migrations/058_unsent_crm_deletion.sql'");
+    expect(migrate?.run).toContain("compatibility.prosrc.trim() !== reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql'");
+    expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");
+    expect(migrate?.run).toContain("row.owner !== 'postgres'");
+    expect(jobs.promote?.environment).toBe('production-consent-cutover');
+    const cutover = jobs.promote?.steps?.find((step) => step.name === 'Apply consent 1.2 cutover');
+    expect(cutover?.run).toContain('node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run');
+    expect(cutover?.run).toContain("fn.owner !== 'postgres'");
+    expect(cutover?.run).toContain('vercel alias set "$PREVIOUS_DEPLOYMENT_URL" "$PRODUCTION_URL"');
     expect(migrate?.run).not.toContain('secrets.');
+    expect(source).not.toContain('deletion.jobId');
+    expect(source).toContain('npm audit --omit=dev --audit-level=high');
     for (const [, action] of source.matchAll(/^\s*uses:\s+([^\s]+)$/gm)) {
       expect(action).toMatch(/@[0-9a-f]{40}$/);
     }
@@ -153,7 +222,15 @@ describe('production release workflows', () => {
     expect(source).toContain('./node_modules/.bin/vercel deploy');
     expect(source).toContain('./node_modules/.bin/vercel alias set');
     expect(source).not.toMatch(/(?:npx|npm exec) vercel/);
-    expect(JSON.stringify(release)).not.toContain('schedule');
-    expect(JSON.stringify(release)).not.toContain('push');
-  });
+    expect(release.on).not.toHaveProperty('schedule');
+    expect(release.on).not.toHaveProperty('push');
+
+    const shellSource = Object.values(jobs)
+      .flatMap((job) => job.steps ?? [])
+      .flatMap((step) => step.run?.includes('\n') ? [step.run] : [])
+      .join('\n');
+    const syntax = spawnSync('bash', ['-n'], { input: shellSource, encoding: 'utf8' });
+    expect(syntax.error, 'could not invoke bash').toBeUndefined();
+    expect(syntax.status, syntax.stderr).toBe(0);
+  }, 15_000);
 });

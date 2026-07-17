@@ -334,7 +334,7 @@ describe('chatRequest client', () => {
       '/api/projects/session-123/consent',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.1' })
+        body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.2' })
       })
     );
   });

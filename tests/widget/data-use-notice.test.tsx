@@ -128,7 +128,7 @@ describe('DataUseNotice', () => {
   test('discloses the 24-hour temporary draft period without promising follow-up storage', () => {
     renderNotice();
 
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/temporary draft.*24 hours/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/temporary session expires 24 hours after the latest meaningful activity/i);
     expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/follow up/i);
   });
 
@@ -142,14 +142,14 @@ describe('DataUseNotice', () => {
     renderNotice();
 
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/monday\.com/i);
-    expect(CONSENT_VERSION).toBe('1.1');
+    expect(CONSENT_VERSION).toBe('1.2');
   });
 
   test('distinguishes AI session processing from team-contact relay delivery', () => {
     renderNotice();
 
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI stays in this temporary session pending producer-transfer approval/i);
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/team contact.*relay message.*Balance Assist team/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/DeepSeek receives each message and relevant temporary draft or extracted file text/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/team-contact mode.*message.*Balance team through Telegram/i);
   });
 
   test('links to the privacy page for more detail', () => {

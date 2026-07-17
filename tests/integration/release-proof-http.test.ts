@@ -121,7 +121,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     if (telegramServer) await new Promise<void>((resolve) => telegramServer!.close(() => resolve()));
   });
 
-  it('drives the consented handoff and team reply across real HTTP boundaries', async () => {
+  it('drives a consented human relay from queued through delivered and replied across real HTTP boundaries', async () => {
     const headers = {
       origin: appUrl,
       'content-type': 'application/json',
@@ -130,7 +130,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     const sessionResponse = await fetch(`${appUrl}/api/sessions`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ sourceUrl: appUrl, consentVersion: '1.1', consentedAt: new Date().toISOString() })
+      body: JSON.stringify({ sourceUrl: appUrl, consentVersion: '1.2', consentedAt: new Date().toISOString() })
     });
     const session = await sessionResponse.json() as { sessionId: string };
     sessionId = session.sessionId;
@@ -142,35 +142,45 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
       .resolves.toMatchObject({ data: expect.objectContaining({ capability_hash: expect.any(String) }), error: null });
     await expect(fetch(`${appUrl}/api/projects/${sessionId}/consent`, {
       method: 'POST', headers: authorizedHeaders,
-      body: JSON.stringify({ scope: 'producer_transfer', granted: true, noticeVersion: '1.1' })
+      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.2' })
     })).resolves.toHaveProperty('status', 200);
     await expect(fetch(`${appUrl}/api/projects/${sessionId}/consent`, {
       method: 'POST', headers: authorizedHeaders,
-      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.1' })
+      body: JSON.stringify({ scope: 'human_contact', granted: true, noticeVersion: '1.2' })
     })).resolves.toHaveProperty('status', 200);
     const attachment = new FormData();
     attachment.set('sessionId', sessionId);
+    attachment.set('mode', 'analysis');
     attachment.set('file', new Blob(['private analysis'], { type: 'text/plain' }), 'private-analysis.txt');
     await expect(fetch(`${appUrl}/api/telegram/upload`, {
-      method: 'POST', headers: { origin: appUrl, 'x-session-capability': capability }, body: attachment
+      method: 'POST',
+      headers: {
+        origin: appUrl,
+        'x-session-capability': capability,
+        'x-session-id': sessionId,
+        'x-upload-mode': 'analysis'
+      },
+      body: attachment
     })).resolves.toHaveProperty('status', 200);
-    await expect(fetch(`${appUrl}/api/projects/${sessionId}/draft`, {
-      method: 'PUT', headers: authorizedHeaders,
-      body: JSON.stringify({ fields: [
-        { field: 'service', value: 'production', provenance: 'confirmed' },
-        { field: 'projectScope', value: 'Film', provenance: 'confirmed' },
-        { field: 'contactName', value: runId, provenance: 'confirmed' },
-        { field: 'contactEmail', value: `${runId}@example.test`, provenance: 'confirmed' }
-      ] })
-    })).resolves.toHaveProperty('status', 200);
-    const finalized = await fetch(`${appUrl}/api/leads/finalize`, {
-      method: 'POST', headers: authorizedHeaders,
-      body: JSON.stringify({ sessionId, qualificationStatus: 'qualified' })
+    const relayRequestId = crypto.randomUUID();
+    const relay = await fetch(`${appUrl}/api/telegram/relay`, {
+      method: 'POST', headers: { ...authorizedHeaders, 'x-request-id': relayRequestId },
+      body: JSON.stringify({ sessionId, text: 'Synthetic release proof: please confirm relay state.' })
     });
-    expect(finalized.status).toBe(200);
-    await expect(finalized.json()).resolves.toMatchObject({ queued: true, crmQueued: true, crmRevision: 1 });
+    expect(relay.status).toBe(200);
+    await expect(relay.json()).resolves.toMatchObject({ ok: true, persisted: true, queued: true });
     await expect(supabase!.from('handoff_outbox').select('state').eq('session_id', sessionId).single())
       .resolves.toMatchObject({ data: { state: 'pending' }, error: null });
+    const queued = await fetch(`${appUrl}/api/telegram/messages?sessionId=${sessionId}`, { headers: authorizedHeaders });
+    await expect(queued.json()).resolves.toMatchObject({ outgoingStatus: 'queued', messages: [] });
+
+    const retry = await fetch(`${appUrl}/api/telegram/relay`, {
+      method: 'POST', headers: { ...authorizedHeaders, 'x-request-id': relayRequestId },
+      body: JSON.stringify({ sessionId, text: 'Synthetic release proof: please confirm relay state.' })
+    });
+    await expect(retry.json()).resolves.toMatchObject({ ok: true, persisted: true, queued: true });
+    const relayRows = await supabase!.from('handoff_outbox').select('id, state').eq('session_id', sessionId);
+    expect(relayRows).toMatchObject({ data: [expect.objectContaining({ state: 'pending' })], error: null });
 
     const dispatched = await fetch(`${appUrl}/api/internal/handoff-dispatch`, {
       method: 'POST', headers: { authorization: `Bearer ${runId}-cron` }
@@ -178,8 +188,16 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     await expect(dispatched.json()).resolves.toMatchObject({ results: [expect.objectContaining({ status: 'sent' })] });
     expect(telegramRequests).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: `/bot${runId}-bot/createForumTopic`, body: expect.objectContaining({ chat_id: '-100123' }) }),
-      expect.objectContaining({ path: `/bot${runId}-bot/sendMessage`, body: expect.objectContaining({ message_thread_id: 77 }) })
+      expect.objectContaining({ path: `/bot${runId}-bot/sendMessage`, body: expect.objectContaining({ message_thread_id: 77, text: 'Synthetic release proof: please confirm relay state.' }) })
     ]));
+    expect(telegramRequests.filter(({ path }) => path.endsWith('/createForumTopic'))).toHaveLength(1);
+    expect(telegramRequests.filter(({ path }) => path.endsWith('/sendMessage'))).toHaveLength(1);
+    expect(JSON.stringify(telegramRequests)).not.toContain('private analysis');
+    expect(JSON.stringify(telegramRequests)).not.toContain('private-analysis.txt');
+    await expect(supabase!.from('handoff_outbox').select('state').eq('session_id', sessionId).single())
+      .resolves.toMatchObject({ data: { state: 'sent' }, error: null });
+    const delivered = await fetch(`${appUrl}/api/telegram/messages?sessionId=${sessionId}`, { headers: authorizedHeaders });
+    await expect(delivered.json()).resolves.toMatchObject({ outgoingStatus: 'delivered', messages: [] });
     await expect(sendDocument(77, Buffer.from('release proof'), 'Release proof document', 'release-proof.txt'))
       .resolves.toMatchObject({ ok: true });
     expect(telegramRequests).toContainEqual(expect.objectContaining({
@@ -202,6 +220,9 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     });
     expect(webhook.status).toBe(200);
     const polled = await fetch(`${appUrl}/api/telegram/messages?sessionId=${sessionId}`, { headers: authorizedHeaders });
-    await expect(polled.json()).resolves.toMatchObject({ messages: [expect.objectContaining({ text: 'Pat: We will follow up.' })] });
+    await expect(polled.json()).resolves.toMatchObject({
+      outgoingStatus: 'delivered',
+      messages: [expect.objectContaining({ text: 'Pat: We will follow up.' })]
+    });
   });
 });

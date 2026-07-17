@@ -1,5 +1,61 @@
 # Producer Review Runbook
 
+## Trust-Centered Release Gate
+
+Promotion requires the aggregate `release-proof` CI check for the exact immutable
+commit. That check includes lint, TypeScript, the full unit suite, the disposable
+database and real HTTP session journey, production build, Chromium desktop/mobile
+accessibility E2E, dependency audit, and diff validation. The protected production
+workflow separately verifies runtime configuration and exact migration records
+`054` through `059` before it creates an immutable deployment.
+
+Before promotion, record product/UX, engineering, accessibility, conversation,
+and trust/privacy reviews against the same commit. Each record needs reviewer,
+role, reviewed SHA, timestamp, findings by severity, and disposition. Open P0 or
+P1 findings block promotion; after a correction, the affected discipline must
+review the new SHA. Do not reuse approval from an earlier commit.
+
+The release dispatch requires the exact reviewed SHA plus one bounded case
+reference for each discipline. Use closed GitHub issues with the `release-review`
+and `release-approved` labels. Each discipline issue must contain `Reviewed-SHA`,
+`Review-Role`, `Reviewer-GitHub`, `Decision: approved`, `Open-P0: 0`, and
+`Open-P1: 0`. Assign the issue to the named reviewer; all five reviewer accounts
+must be distinct. The named reviewer must add an approval comment repeating the
+SHA, role, decision, and zero-open-P0/P1 fields from an account with owner, member,
+or collaborator association. The workflow authenticates the comment author and
+uses GitHub's comment timestamp. The workflow retrieves and validates those records. Validation also requires the successful aggregate
+`release-proof` check for that SHA. Protect the `production-release-review`
+environment with the authorized release reviewers; its approval occurs after the
+immutable deployment and live trigger verification and before alias promotion.
+An unprotected environment is a release blocker.
+
+Protect `production-consent-cutover` separately. It holds the Vercel promotion
+credentials and direct database credential only long enough to alias the reviewed
+deployment, apply or verify exact migration `060`, and run the promoted smoke.
+Do not dispatch the release without both environment approvals.
+
+Deployment proof must check both AI-first and human-first entry paths on desktop
+and mobile, confirm confidential/NDA material is diverted before any provider
+request, and exercise a synthetic human relay through queued, delivered, and
+replied states. Use unmistakably synthetic content and an approved canary topic;
+never submit customer details, files, or transcripts. A queued handoff is not
+delivered, and a delivered handoff is not a producer reply.
+
+Open the deployment-proof issue before dispatch, then update and close it only
+after checking the immutable deployment. In addition to the common fields, record
+`Review-Role: deployment-proof`, the exact `Deployment-Origin`, and `passed` for
+`Desktop-AI-Entry`, `Mobile-AI-Entry`, `Desktop-Human-Entry`,
+`Mobile-Human-Entry`, `Confidential-Diversion`, `Relay-Queued`,
+`Relay-Delivered`, and `Relay-Replied`. Promotion validates every marker after
+the protected deployment-review approval.
+
+Retain only PII-free release evidence: immutable SHA, deployment identifier,
+timestamps, migration versions, boolean gate outcomes, and review references.
+Never retain cookies, session capabilities, deletion receipts, environment values,
+Telegram identifiers or text, event session IDs, contact data, or probe bodies.
+Production deployment, migrations, Telegram canaries, and provider probes require
+their separate protected approvals; local proof does not authorize them.
+
 ## Monday CRM Release Gate
 
 Do not tell a producer that Monday has received a brief when approval only reports
@@ -25,6 +81,7 @@ producer-transfer consent never authorizes Monday disclosure.
    - `attachment_quarantined`
    - `deletion_requested`
    - `project_reset`
+   - `trust_feedback`
 3. Check `handoff_outbox` state for pending, failed, or escalated rows.
 4. Confirm Telegram webhook configuration:
    - `TELEGRAM_WEBHOOK_SECRET`

@@ -2,12 +2,18 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const diagnosticsDir = '.artifacts/supabase-release-proof';
+const proofRequired = process.env.CI === 'true' || process.env.REQUIRE_SUPABASE_RELEASE_PROOF === '1';
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, { encoding: 'utf8', ...options });
 }
 
 function skip(reason) {
+  if (proofRequired) {
+    console.error(`Supabase release proof is required but unavailable: ${reason}.`);
+    process.exitCode = 1;
+    return;
+  }
   console.log(`Skipping local Supabase release journey: ${reason}. CI owns this check.`);
   process.exitCode = 0;
 }

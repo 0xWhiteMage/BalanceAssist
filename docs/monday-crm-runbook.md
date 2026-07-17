@@ -6,6 +6,32 @@ The Monday projection is disabled. `MONDAY_UPSERT_ENABLED` and
 `MONDAY_CLEANUP_ENABLED` must remain `false` until every release gate below is
 approved.
 
+The protected production release gate reads the deployed Vercel configuration and
+fails unless both values are exactly `false`. Missing values also fail. This check
+is a hold, not authorization to enable either lane. The pending authentication
+approval and revocation drill remain independent blockers, and a successful local
+test, release proof, schema check, or canary cannot substitute for them.
+
+Record Monday release evidence against the same immutable SHA used by the five
+discipline reviews. Evidence may include only the approved case references,
+migration versions, schema fingerprint outcome, canary timestamps, and boolean
+create/update/lookup/scrub/delete outcomes. Never attach item payloads, names,
+emails, tokens, raw provider errors, or board responses. Run the real canary only
+after protected approval; do not run it merely to complete local release proof.
+
+Protected migration `058` is required before application release. It permits
+deletion of a provably unsent local projection while both Monday lanes remain
+disabled. It never treats a send, synced receipt, unknown delivery, conflict,
+failure, or provider item ID as local-only; those states retain the provider
+cleanup and verification path.
+
+Protected migration `059` is the compatibility phase: it lets the old client
+continue using an affirmative `1.1` analysis grant while returning `false` so the
+new client rejects it. Promotion then applies or verifies strict migration `060`
+before promoted smoke; `060` requires `1.2` analysis, human-contact, and
+producer-transfer consent at the database boundary. Neither migration upgrades or
+backfills historical `1.1` grants.
+
 ## Migration Map
 
 The protected CRM migration set is exactly `044` CRM aggregate, `047` atomic
@@ -43,7 +69,7 @@ column replacement and does not recreate status labels.
 
 ## Consent And Data Boundary
 
-`CONSENT_VERSION` is `1.1`. The notice explicitly names Balance team, Telegram,
+`CONSENT_VERSION` is `1.2`. The notice explicitly names Balance team, Telegram,
 and Monday.com before producer transfer. Historical grants on version `1.0` do
 not authorize a Monday projection.
 

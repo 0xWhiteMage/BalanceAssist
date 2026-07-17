@@ -1,0 +1,59 @@
+name: Production consent 1.2 compatibility migration 059
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable commit SHA containing reviewed consent 1.2 compatibility migration 059
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-trust-migrations
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - id: validate
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-consent-1-2-059.yml@refs/heads/main"
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet release
+          cd release
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "$RELEASE_REF^{commit}"
+          git merge-base --is-ancestor "$RELEASE_REF" origin/main
+          echo "sha=$(git rev-parse "$RELEASE_REF^{commit}")" >> "$GITHUB_OUTPUT"
+
+  migrate:
+    needs: validate
+    environment: production-trust-migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          node scripts/apply-production-consent-1-2-059.mjs --dry-run
+          npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes
+          npx --no-install supabase db query --linked --file supabase/production-consent-1-2-compatibility-059.sql

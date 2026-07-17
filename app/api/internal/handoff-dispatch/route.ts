@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
+import { isConsent12CutoverActive } from '@/lib/api/consent-cutover';
 import { claimNextHandoff, deferTelegramReceiptPersistence, markDelivered, markFailed, persistTelegramMessageDelivery, recordTelegramReceipt, renewHandoffSend, reserveHandoffSend } from '@/lib/handoff/outbox';
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { emitEvent } from '@/lib/observability/events';
@@ -24,6 +25,9 @@ export async function POST(request: Request) {
   const supabase = createServerSupabaseClient();
   if (!supabase) {
     return NextResponse.json({ ok: false, error: 'Supabase client failed' }, { status: 503 });
+  }
+  if (!await isConsent12CutoverActive(supabase)) {
+    return NextResponse.json({ ok: false, error: 'Consent cutover pending' }, { status: 503 });
   }
 
   const sla: HandoffSLA = {

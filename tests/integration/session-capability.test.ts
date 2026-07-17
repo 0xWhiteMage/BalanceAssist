@@ -90,7 +90,7 @@ describe.skipIf(!connectionString)('persisted session capabilities', () => {
       headers: { origin: 'https://www.balancestudio.tv', 'x-vercel-forwarded-for': '198.18.0.1' },
       body: JSON.stringify({
         sourceUrl: 'https://www.balancestudio.tv',
-        consentVersion: '1.1',
+        consentVersion: '1.2',
         consentedAt: '2026-07-13T10:00:00.000Z'
       })
     });
