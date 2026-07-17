@@ -2,13 +2,12 @@ import { brandTokens } from '@/lib/brand-tokens';
 
 export function WidgetHeader() {
   return (
-    <header className="border-b px-5 py-4" style={{ borderColor: brandTokens.colors.subtleBorder }}>
+    <header className="block px-5 py-4">
       <p className="text-[11px] font-medium uppercase tracking-[0.32em]" style={{ color: brandTokens.colors.warmGold }}>
         Back
       </p>
       <h1
-        className="mt-3 text-xl font-semibold uppercase tracking-[0.12em]"
-        style={{ color: brandTokens.colors.lightText, fontFamily: brandTokens.typography.ui }}
+        className="mt-3 text-xl"
       >
         {brandTokens.copy.name}
       </h1>

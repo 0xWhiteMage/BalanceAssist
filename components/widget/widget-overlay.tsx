@@ -269,7 +269,8 @@ export function WidgetOverlay({
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      const reducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      messagesEndRef.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'end' });
     });
   }, []);
 
@@ -1281,13 +1282,7 @@ export function WidgetOverlay({
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        bottom: 'max(24px, env(safe-area-inset-bottom))',
-        right: 'max(24px, env(safe-area-inset-right))',
-        zIndex: 2147483647,
-        fontFamily: brandTokens.typography.ui
-      }}
+      className="balance-widget-root"
     >
       {isOpen && (
         <div
@@ -1297,23 +1292,8 @@ export function WidgetOverlay({
           aria-label="Balance Assist"
           aria-labelledby="balance-assist-dialog-title"
           tabIndex={-1}
-          className="balance-widget-wrap balance-widget-motion"
-          style={{
-            position: 'absolute',
-            bottom: '72px',
-            right: '0px',
-            width: isMobile ? 'min(380px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)))' : getWidgetWidth({ isTeamConnected, hasProjectIntent }),
-            height: 'min(580px, calc(100dvh - 120px - env(safe-area-inset-bottom)))',
-            display: 'flex',
-            flexDirection: 'column',
-            borderRadius: '16px',
-            overflow: 'hidden',
-            background: brandTokens.gradients.panel,
-            color: brandTokens.colors.lightText,
-            boxShadow: brandTokens.shadows.panel,
-            border: `1px solid ${brandTokens.colors.border}`,
-            animation: 'balance-assist-fade-in 0.2s ease-out'
-          }}
+          className="balance-widget-dialog balance-widget-wrap balance-widget-motion"
+          data-rail={!isTeamConnected && hasProjectIntent ? 'true' : 'false'}
         >
           {/* Calendly View Overlay */}
           {view === 'calendly' && calendlyUrl && (
@@ -1391,62 +1371,31 @@ export function WidgetOverlay({
             <div
               role="tablist"
               aria-label="Widget sections"
-              style={{
-                display: 'flex',
-                borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`,
-                background: 'rgba(16, 16, 16, 0.4)',
-                flexShrink: 0
-              }}
+              className="balance-widget-tabs"
             >
               <button
                 role="tab"
                 type="button"
-                className="balance-widget-action"
+                className="balance-widget-action balance-widget-tab"
                 aria-selected={tabMode === 'chat'}
                 aria-controls="widget-chat-panel"
                 id="widget-chat-tab"
                 tabIndex={tabMode === 'chat' ? 0 : -1}
                 onClick={() => setTabMode('chat')}
                 onKeyDown={(event) => handleTabKeyDown(event, 'brief')}
-                style={{
-                  flex: 1,
-                  padding: '10px 0',
-                  background: tabMode === 'chat' ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
-                  border: 'none',
-                  borderBottom: tabMode === 'chat' ? `2px solid ${brandTokens.colors.warmGold}` : '2px solid transparent',
-                  color: tabMode === 'chat' ? brandTokens.colors.warmGold : brandTokens.colors.mutedText,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.10em'
-                }}
               >
                 Chat
               </button>
               <button
                 role="tab"
                 type="button"
-                className="balance-widget-action"
+                className="balance-widget-action balance-widget-tab"
                 aria-selected={tabMode === 'brief'}
                 aria-controls="widget-brief-panel"
                 id="widget-brief-tab"
                 tabIndex={tabMode === 'brief' ? 0 : -1}
                 onClick={() => setTabMode('brief')}
                 onKeyDown={(event) => handleTabKeyDown(event, 'chat')}
-                style={{
-                  flex: 1,
-                  padding: '10px 0',
-                  background: tabMode === 'brief' ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
-                  border: 'none',
-                  borderBottom: tabMode === 'brief' ? `2px solid ${brandTokens.colors.warmGold}` : '2px solid transparent',
-                  color: tabMode === 'brief' ? brandTokens.colors.warmGold : brandTokens.colors.mutedText,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.10em'
-                }}
               >
                 Brief
               </button>
@@ -1495,15 +1444,7 @@ export function WidgetOverlay({
             </div>
           )}
 
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              gap: '0',
-              minHeight: 0,
-              position: 'relative'
-            }}
-          >
+          <div className="balance-widget-main">
             {!isTeamConnected && hasProjectIntent && (
               <div
                 data-testid="review-rail"
@@ -1513,13 +1454,7 @@ export function WidgetOverlay({
                 aria-hidden={isMobile && tabMode !== 'brief' ? 'true' : undefined}
                 hidden={isMobile && tabMode !== 'brief'}
                 inert={isMobile && tabMode !== 'brief' ? true : undefined}
-                style={{
-                  width: isMobile ? '100%' : 280,
-                  flexShrink: 0,
-                  borderRight: isMobile ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
-                  overflowY: 'auto',
-                  background: 'rgba(16, 16, 16, 0.35)'
-                }}
+                className="balance-widget-rail"
               >
                 <ReviewPanel
                   draft={draft}
@@ -1557,18 +1492,7 @@ export function WidgetOverlay({
               aria-hidden={isMobile && tabMode !== 'chat' ? 'true' : undefined}
               hidden={isMobile && tabMode !== 'chat'}
               inert={isMobile && tabMode !== 'chat' ? true : undefined}
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                padding: '16px 14px',
-                display: isMobile && tabMode !== 'chat' ? 'none' : 'flex',
-                flexDirection: 'column',
-                gap: '14px',
-                minWidth: 0,
-                maxWidth: '100%',
-                position: 'relative'
-              }}
+              className="balance-widget-chat balance-widget-motion"
             >
                 {showNoticeGate ? (
                   <DataUseNotice onConsent={chooseAi} onHuman={chooseHuman} onLeave={handleClose} />
@@ -1680,15 +1604,7 @@ export function WidgetOverlay({
                   type="button"
                   disabled={isTyping}
                   onClick={() => { void processFlowAnswer(action, action); }}
-                  style={{
-                    minHeight: 44,
-                    padding: '8px 12px',
-                    borderRadius: 999,
-                    border: `1px solid ${brandTokens.colors.border}`,
-                    background: 'transparent',
-                    color: brandTokens.colors.lightText,
-                    cursor: isTyping ? 'default' : 'pointer'
-                  }}
+                  className="balance-widget-action"
                 >
                   {action}
                 </button>
@@ -1754,19 +1670,7 @@ export function WidgetOverlay({
                   </div>
                 </details>
               )}
-              <div
-                style={{
-                  padding: '10px 12px',
-                  borderTop: `1px solid ${brandTokens.colors.subtleBorder}`,
-                  flexShrink: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  background: 'rgba(16, 16, 16, 0.4)',
-                  position: 'relative',
-                  paddingBottom: 'max(10px, env(safe-area-inset-bottom))'
-                }}
-              >
+              <div className="balance-widget-composer">
                 {!isTeamConnected && !deletionFrozen && (
                   <>
                     <button
@@ -1774,18 +1678,7 @@ export function WidgetOverlay({
                       aria-label="Attach references"
                       aria-expanded={attachmentOpen}
                       onClick={() => setAttachmentOpen((o) => !o)}
-                      style={{
-                        width: '44px',
-                        height: '44px',
-                        borderRadius: '50%',
-                        border: `1px solid ${brandTokens.colors.border}`,
-                        background: attachmentOpen ? 'rgba(219, 181, 128, 0.10)' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        flexShrink: 0
-                      }}
+                      className="balance-widget-action balance-widget-icon-action"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1846,19 +1739,7 @@ export function WidgetOverlay({
                       type="button"
                       aria-label="Upload requested files"
                       onClick={() => requestedFileInputRef.current?.click()}
-                      style={{
-                        width: '44px',
-                        height: '44px',
-                        minWidth: '44px',
-                        minHeight: '44px',
-                        borderRadius: '50%',
-                        border: `1px solid ${brandTokens.colors.border}`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        flexShrink: 0
-                      }}
+                      className="balance-widget-action balance-widget-icon-action"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1883,39 +1764,12 @@ export function WidgetOverlay({
                   onKeyDown={handleKeyDown}
                   disabled={humanStatus === 'sending' || deletionFrozen}
                   placeholder={deletionFrozen ? 'This session is frozen' : humanRequested ? 'Message the team request...' : 'Type your message...'}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    padding: '10px 14px',
-                    borderRadius: '20px',
-                    border: `1px solid ${brandTokens.colors.subtleBorder}`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                    color: brandTokens.colors.lightText,
-                    fontFamily: brandTokens.typography.ui,
-                    fontSize: isMobile ? '16px' : '13px',
-                    outline: 'none'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = brandTokens.colors.warmGold)}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = brandTokens.colors.subtleBorder)}
+                  className="balance-widget-input"
                 />
                 <button
                   onClick={handleSubmitText}
                   disabled={deletionFrozen || !inputValue.trim() || isTyping || humanStatus === 'sending'}
-                  style={{
-                    width: '44px',
-                    height: '44px',
-                    borderRadius: '50%',
-                    border: 'none',
-                    background:
-                      inputValue.trim() && !isTyping && humanStatus !== 'sending'
-                        ? `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`
-                        : 'rgba(255, 255, 255, 0.08)',
-                    cursor: inputValue.trim() && !isTyping && humanStatus !== 'sending' ? 'pointer' : 'default',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
+                  className="balance-widget-action balance-widget-icon-action balance-widget-send"
                   aria-label="Send message"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -1936,21 +1790,7 @@ export function WidgetOverlay({
         <button
           onClick={handleClose}
           aria-label="Close Balance Assist"
-          style={{
-            position: 'absolute',
-            bottom: '0px',
-            right: '0px',
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            border: 'none',
-            cursor: 'pointer',
-            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-            boxShadow: '0 8px 32px rgba(219, 181, 128, 0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
+          className="balance-widget-launcher balance-widget-launcher--close balance-widget-motion"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path d="M5 5l10 10M15 5L5 15" stroke="#101010" strokeWidth="2.5" strokeLinecap="round" />
@@ -1960,21 +1800,7 @@ export function WidgetOverlay({
         <button
           onClick={handleOpen}
           aria-label="Open Balance Assist"
-          style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            border: 'none',
-            cursor: 'pointer',
-            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-            boxShadow: '0 8px 32px rgba(219, 181, 128, 0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'transform 0.2s ease'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.08)')}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          className="balance-widget-launcher balance-widget-motion"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
             <path d="M12 2C6.477 2 2 5.97 2 10.5c0 2.3 1.29 4.37 3.5 5.78V20l3.5-2c.97.17 1.97.25 3 .25 5.523 0 10-3.97 10-8.75S17.523 2 12 2z" fill="#101010" />
@@ -1982,6 +1808,7 @@ export function WidgetOverlay({
             <circle cx="12" cy="10.5" r="1.2" fill={brandTokens.colors.warmGold} />
             <circle cx="16" cy="10.5" r="1.2" fill={brandTokens.colors.warmGold} />
           </svg>
+          <span>Balance Assist</span>
         </button>
       )}
     </div>

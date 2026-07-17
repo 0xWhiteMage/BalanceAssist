@@ -3,6 +3,8 @@ import { brandTokens } from '@/lib/brand-tokens';
 export function TypingDots() {
   return (
     <div
+      className="balance-message-bubble"
+      aria-hidden="true"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -16,6 +18,7 @@ export function TypingDots() {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
+          className="balance-typing-dot"
           style={{
             width: '7px',
             height: '7px',
@@ -26,6 +29,7 @@ export function TypingDots() {
           }}
         />
       ))}
+      <span className="balance-typing-status-text">Generating an AI response</span>
       <style>{`
         @keyframes balance-assist-typing {
           0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }

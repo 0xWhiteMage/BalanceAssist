@@ -337,6 +337,19 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(rail.getByText(originalWording, { exact: true })).toBeVisible();
     await expect(rail.getByText('AI-drafted summary', { exact: true })).toBeVisible();
     await expect(rail.getByText(aiSummary, { exact: true })).toBeVisible();
+    const desktopColumns = await page.evaluate(() => {
+      const railBounds = document.querySelector<HTMLElement>('[data-testid="review-rail"]')!.getBoundingClientRect();
+      const chatBounds = document.querySelector<HTMLElement>('#widget-chat-panel')!.getBoundingClientRect();
+      return {
+        railWidth: railBounds.width,
+        railRight: railBounds.right,
+        chatLeft: chatBounds.left,
+        chatWidth: chatBounds.width
+      };
+    });
+    expect(desktopColumns.railWidth).toBeGreaterThanOrEqual(280);
+    expect(desktopColumns.chatWidth).toBeGreaterThan(0);
+    expect(desktopColumns.railRight).toBeLessThanOrEqual(desktopColumns.chatLeft + 1);
     await assertDirectContactRoutes(page);
 
     await page.getByRole('button', { name: 'Edit original wording' }).click();
