@@ -101,6 +101,7 @@ function mockWidgetFetch() {
           contactCompany: 'Acme',
           contactEmail: 'jayden@example.com'
         },
+        outcome: 'draft_persisted',
         canonicalDraft: {
           service: 'production', projectType: 'Video', projectScope: '30s animation for social media',
           timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden',
@@ -346,6 +347,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
         return makeJsonResponse({
           message: 'Ready.',
           draftUpdates: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' },
+          outcome: 'draft_persisted',
           canonicalDraft: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' },
           draftVersion: 1,
           currentStage: 'project',

@@ -39,6 +39,7 @@ export async function OPTIONS() {
 type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 const PROVIDER_TIMEOUT_MS = 15000;
 const CHAT_PROVIDER_UNAVAILABLE = {
+  outcome: 'provider_unavailable',
   error: 'Chat service unavailable',
   detail: 'chat_provider_unavailable'
 } as const;
@@ -48,12 +49,7 @@ const SHARE_WORK_TOOL_NAME = 'share_work';
 function confidentialDiversionResponse(request: Request) {
   return jsonWithCors({
     message: CONFIDENTIAL_INTAKE_RESPONSE,
-    outcome: 'confidential_diversion',
-    draftUpdates: {},
-    briefReady: false,
-    reviewPrompt: null,
-    missingFields: [],
-    truncated: false
+    outcome: 'confidential_diversion'
   }, undefined, request);
 }
 
@@ -500,7 +496,7 @@ export async function POST(request: Request) {
   const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
 
   if (messages.some((message) => isCareersIntent(message.content))) {
-    return jsonWithCors({ message: `Please apply through ${getCareersRedirect()}.`, draftUpdates: {}, briefReady: false, reviewPrompt: null, missingFields: [], truncated: false }, undefined, request);
+    return jsonWithCors({ outcome: 'non_persistence', message: `Please apply through ${getCareersRedirect()}.` }, undefined, request);
   }
 
   try {
@@ -523,13 +519,9 @@ export async function POST(request: Request) {
       : undefined;
 
     return jsonWithCors({
+      outcome: 'non_persistence',
       messages: faqResponse.messages,
-      draftUpdates: {},
-      briefReady: false,
-      reviewPrompt: null,
-      missingFields: [],
-      sharedWork: sharedWork && sharedWork.entries.length > 0 ? sharedWork : undefined,
-      truncated: false
+      sharedWork: sharedWork && sharedWork.entries.length > 0 ? sharedWork : undefined
     });
   }
 
@@ -638,6 +630,7 @@ export async function POST(request: Request) {
     const replyChunks = splitReplyIntoMessages(replyText);
     if (replyChunks.length > 1) {
       return jsonWithCors({
+        outcome: 'draft_persisted',
         messages: replyChunks,
         draftUpdates,
         ...progress,
@@ -650,6 +643,7 @@ export async function POST(request: Request) {
     }
 
     return jsonWithCors({
+      outcome: 'draft_persisted',
       message: replyText,
       draftUpdates,
       ...progress,

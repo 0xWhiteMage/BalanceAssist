@@ -88,6 +88,27 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.referenceLinks).toEqual([...restoredLinks, { kind: 'youtube', url: 'https://youtube.com/watch?v=1' }]);
   });
 
+  test('hydrates reference-only sessions without replacing existing draft state', async () => {
+    const persistedLinks = [{
+      id: 'reference-only', sessionId: 'session-1', kind: 'vimeo' as const, url: 'https://vimeo.com/reference-only'
+    }];
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => ({ draftVersion: 0, fieldCount: 0, draft: {}, referenceLinks: persistedLinks })),
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => {
+      result.current.setDraft({ ...result.current.draft, projectScope: 'Keep this local recovery value' });
+      result.current.setDraftVersion(5);
+    });
+
+    await act(async () => { await result.current.hydrateDraft('session-1'); });
+
+    expect(result.current.referenceLinks).toEqual([{ kind: 'vimeo', url: 'https://vimeo.com/reference-only' }]);
+    expect(result.current.draft.projectScope).toBe('Keep this local recovery value');
+    expect(result.current.draftVersion).toBe(5);
+  });
+
   test('clears the approval lock after a failed approval so it can retry', async () => {
     const { result } = renderHook(() => useWidgetSessionDraft({
       createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),

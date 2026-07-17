@@ -477,39 +477,65 @@ export type ChatRequestPayload = {
   };
 };
 
-export type ChatResponse = {
+type ChatResponseBase = {
   replies: ChatReplyItem[];
-  outcome?: 'confidential_diversion' | 'provider_unavailable' | 'draft_conflict' | 'draft_save_failed';
-  error?: 'Chat service unavailable';
-  detail?: 'chat_provider_unavailable';
   draftUpdates: Record<string, string | boolean>;
-  canonicalDraft?: Record<string, string>;
-  draftVersion?: number;
-  currentStage?: 'project' | 'audience' | 'planning' | 'references-contact';
-  stageRecaps?: string[];
   briefReady: boolean;
   sharedWork: ChatSharedWork | null;
 };
 
-const chatProviderUnavailableSchema = z.object({
-  error: z.literal('Chat service unavailable'),
-  detail: z.literal('chat_provider_unavailable')
-});
+type CanonicalChatResponse = ChatResponseBase & {
+  outcome: 'draft_persisted' | 'draft_conflict';
+  canonicalDraft: Record<string, string>;
+  draftVersion: number;
+  currentStage: 'project' | 'audience' | 'planning' | 'references-contact';
+  stageRecaps: string[];
+};
 
-const chatResponseSchema = z.object({
-  message: z.string().optional(),
-  messages: z.array(z.string()).optional(),
-  outcome: z.enum(['confidential_diversion', 'draft_conflict', 'draft_save_failed']).optional(),
-  draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(),
-  canonicalDraft: z.record(z.string()).optional(),
-  draftVersion: z.number().int().nonnegative().optional(),
-  currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']).optional(),
-  stageRecaps: z.array(z.string()).optional(),
-  briefReady: z.boolean().optional(),
-  sharedWork: z.object({ entries: z.array(z.object({
+export type ChatResponse =
+  | CanonicalChatResponse
+  | (ChatResponseBase & { outcome: 'non_persistence' })
+  | (ChatResponseBase & { outcome: 'confidential_diversion' })
+  | (ChatResponseBase & { outcome: 'draft_save_failed' })
+  | (ChatResponseBase & {
+      outcome: 'provider_unavailable';
+      error: 'Chat service unavailable';
+      detail: 'chat_provider_unavailable';
+    });
+
+const clientReplyFields = {
+  message: z.string().min(1).optional(),
+  messages: z.array(z.string().min(1)).min(1).optional()
+};
+const clientSharedWorkSchema = z.object({ entries: z.array(z.object({
     title: z.string(), url: z.string(), description: z.string().optional(), image_url: z.string().optional(),
     category: z.enum(['reference', 'mood', 'pitch']).optional(), slug: z.string(), clients: z.string().optional(), year: z.number().nullable().optional()
-  })) }).optional()
+  })) });
+const clientCanonicalFields = {
+  canonicalDraft: z.record(z.string()),
+  draftVersion: z.number().int().nonnegative(),
+  currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']),
+  stageRecaps: z.array(z.string()),
+  briefReady: z.boolean()
+};
+const chatResponseSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal('draft_persisted'), ...clientReplyFields, ...clientCanonicalFields,
+    draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(), sharedWork: clientSharedWorkSchema.optional(),
+    reviewPrompt: z.string().nullable().optional(), missingFields: z.array(z.string()).optional(), truncated: z.boolean().optional()
+  }).strict(),
+  z.object({ outcome: z.literal('draft_conflict'), ...clientReplyFields, ...clientCanonicalFields }).strict(),
+  z.object({ outcome: z.literal('non_persistence'), ...clientReplyFields, sharedWork: clientSharedWorkSchema.optional() }).strict(),
+  z.object({ outcome: z.literal('confidential_diversion'), ...clientReplyFields }).strict(),
+  z.object({ outcome: z.literal('draft_save_failed'), ...clientReplyFields }).strict(),
+  z.object({
+    outcome: z.literal('provider_unavailable'), error: z.literal('Chat service unavailable'),
+    detail: z.literal('chat_provider_unavailable')
+  }).strict()
+]).superRefine((value, context) => {
+  if (value.outcome !== 'provider_unavailable' && !value.message && !value.messages) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Either message or messages must be provided' });
+  }
 });
 
 export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResponse | null> {
@@ -534,26 +560,27 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
     return null;
   }
 
-  if (response.status === 503) {
-    const unavailable = chatProviderUnavailableSchema.safeParse(responseBody);
-    if (!unavailable.success) return null;
+  const parsed = chatResponseSchema.safeParse(responseBody);
+  if (!parsed.success) return null;
+  const data = parsed.data;
+  const validStatus =
+    (response.status === 200 && ['draft_persisted', 'non_persistence', 'confidential_diversion'].includes(data.outcome)) ||
+    (response.status === 409 && data.outcome === 'draft_conflict') ||
+    (response.status === 500 && data.outcome === 'draft_save_failed') ||
+    (response.status === 503 && data.outcome === 'provider_unavailable');
+  if (!validStatus) return null;
+
+  if (data.outcome === 'provider_unavailable') {
     return {
       outcome: 'provider_unavailable',
-      error: unavailable.data.error,
-      detail: unavailable.data.detail,
+      error: data.error,
+      detail: data.detail,
       replies: [],
       draftUpdates: {},
       briefReady: false,
       sharedWork: null
     };
   }
-  const parsed = chatResponseSchema.safeParse(responseBody);
-  if (!parsed.success) return null;
-  const data = parsed.data;
-  if (!response.ok && !(
-    (response.status === 409 && data.outcome === 'draft_conflict') ||
-    (response.status === 500 && data.outcome === 'draft_save_failed')
-  )) return null;
 
   const textChunks: string[] = (() => {
     if (Array.isArray(data.messages) && data.messages.length > 0) {
@@ -565,17 +592,24 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
     return [];
   })();
 
-  return {
+  const base = {
     replies: textChunks.map((text) => ({ text })),
-    ...(data.outcome ? { outcome: data.outcome } : {}),
-    draftUpdates: data.draftUpdates ?? {},
-    ...(data.canonicalDraft ? { canonicalDraft: data.canonicalDraft } : {}),
-    ...(data.draftVersion !== undefined ? { draftVersion: data.draftVersion } : {}),
-    ...(data.currentStage ? { currentStage: data.currentStage } : {}),
-    ...(data.stageRecaps ? { stageRecaps: data.stageRecaps } : {}),
-    briefReady: Boolean(data.briefReady),
-    sharedWork: data.sharedWork ?? null
+    outcome: data.outcome,
+    draftUpdates: 'draftUpdates' in data ? data.draftUpdates ?? {} : {},
+    briefReady: data.outcome === 'draft_persisted' || data.outcome === 'draft_conflict' ? data.briefReady : false,
+    sharedWork: 'sharedWork' in data ? data.sharedWork ?? null : null
   };
+  if (data.outcome === 'draft_persisted' || data.outcome === 'draft_conflict') {
+    return {
+      ...base,
+      outcome: data.outcome,
+      canonicalDraft: data.canonicalDraft,
+      draftVersion: data.draftVersion,
+      currentStage: data.currentStage,
+      stageRecaps: data.stageRecaps
+    };
+  }
+  return { ...base, outcome: data.outcome };
 }
 import { z } from 'zod';
 import { CONSENT_VERSION } from '@/lib/privacy/notice';

@@ -262,6 +262,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data).toMatchObject({
+      outcome: 'draft_persisted',
       canonicalDraft: { projectScope: 'A launch film that should Build awareness', projectObjective: 'Build awareness' },
       draftVersion: 4,
       currentStage: 'audience',
@@ -557,12 +558,7 @@ describe('POST /api/chat', () => {
       expect(res.status).toBe(200);
       expect(data).toEqual({
         message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
-        outcome: 'confidential_diversion',
-        draftUpdates: {},
-        briefReady: false,
-        reviewPrompt: null,
-        missingFields: [],
-        truncated: false
+        outcome: 'confidential_diversion'
       });
       expect(JSON.stringify(data)).not.toContain('NIGHTJAR');
       expect(consumeRateLimitMock).not.toHaveBeenCalled();
@@ -710,6 +706,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
+    expect(data.outcome).toBe('non_persistence');
     expect(data.message).toContain('https://balancestudio.tv/careers');
     expect(global.fetch).not.toHaveBeenCalled();
     expect(harness.sessionUpdates).toEqual([]);
@@ -723,6 +720,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
+    expect(data.outcome).toBe('non_persistence');
     expect(data.message).toContain('https://balancestudio.tv/careers');
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -739,6 +737,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
+    expect(data.outcome).toBe('non_persistence');
     expect(data.message).toContain('https://balancestudio.tv/careers');
     expect(consumeRateLimitMock).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
@@ -1264,7 +1263,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(503);
-    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(data).toEqual({ outcome: 'provider_unavailable', error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -1302,7 +1301,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(503);
-    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(data).toEqual({ outcome: 'provider_unavailable', error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -1329,7 +1328,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(503);
-    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(data).toEqual({ outcome: 'provider_unavailable', error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
     expect(JSON.stringify(data)).not.toMatch(/SECRET-42|429|minimax|openai|deepseek-key/i);
     expect(global.fetch).toHaveBeenCalledOnce();
   });
@@ -1354,7 +1353,7 @@ describe('POST /api/chat', () => {
       const { res, data } = await responsePromise;
 
       expect(res.status).toBe(503);
-      expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+      expect(data).toEqual({ outcome: 'provider_unavailable', error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
       expect(JSON.stringify(data)).not.toMatch(/SECRET-43|AbortError|deepseek-key/i);
     } finally {
       vi.useRealTimers();
@@ -1372,6 +1371,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
+    expect(data.outcome).toBe('non_persistence');
     expect(data.message).toBeUndefined();
     expect(data.messages).toHaveLength(2);
     expect(data.messages[0]).toMatch(/production is one of our core service pillars/i);

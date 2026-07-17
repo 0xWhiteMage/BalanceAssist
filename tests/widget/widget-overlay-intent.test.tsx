@@ -204,6 +204,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
         return new Response(JSON.stringify({
           message: 'Updating the brief.',
           draftUpdates: { service: 'production' },
+          outcome: 'draft_persisted',
           canonicalDraft: { service: 'production' },
           draftVersion: 1,
           currentStage: 'project',
@@ -240,9 +241,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
       if (url.includes('/api/chat') && init?.method === 'POST') {
         return new Response(JSON.stringify({
           message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
-          outcome: 'confidential_diversion',
-          draftUpdates: {},
-          briefReady: false
+          outcome: 'confidential_diversion'
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url.includes('/consent')) {
@@ -364,6 +363,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
               contactName: 'Jayden',
               contactEmail: 'jayden@example.com'
             },
+            outcome: 'draft_persisted',
             canonicalDraft: {
               service: 'production', projectType: 'Animation', projectScope: '30s animation', scopePolished: '30s animation',
               timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactEmail: 'jayden@example.com'
@@ -414,15 +414,7 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
         return new Response(
           JSON.stringify({
             message: 'Got it. What is your timeline?',
-            draftUpdates: {
-              service: 'production',
-              projectType: 'Video',
-              projectScope: '30s animation',
-              scopePolished: '30s animation'
-            },
-            briefReady: false,
-            reviewPrompt: null,
-            missingFields: ['timelineBand', 'budgetBand', 'contactName', 'contactEmail', 'contactCompany']
+            outcome: 'non_persistence'
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
@@ -482,6 +474,7 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
                 projectScope: '30s animation',
                 scopePolished: '30s animation'
               },
+              outcome: 'draft_persisted',
               canonicalDraft: { service: 'production', projectType: 'Video', projectScope: '30s animation', scopePolished: '30s animation' },
               draftVersion: 1,
               currentStage: 'project',
@@ -496,10 +489,7 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
         return new Response(
           JSON.stringify({
             message: 'Got it. What is your budget?',
-            draftUpdates: {},
-            briefReady: false,
-            reviewPrompt: null,
-            missingFields: ['timelineBand', 'budgetBand', 'contactName', 'contactEmail', 'contactCompany']
+            outcome: 'non_persistence'
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
@@ -566,10 +556,7 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
         return new Response(
           JSON.stringify({
             message: 'Got it. Tell me more.',
-            draftUpdates: {},
-            briefReady: false,
-            reviewPrompt: null,
-            missingFields: []
+            outcome: 'non_persistence'
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
@@ -629,6 +616,7 @@ describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
               scopePolished:
                 "Brand film for Heineken — making them look premium for a new launch"
             },
+            outcome: 'draft_persisted',
             canonicalDraft: {
               projectScope: "It's a brand film for Heineken — making them look premium for a new launch",
               scopePolished: "Brand film for Heineken — making them look premium for a new launch"
@@ -697,6 +685,7 @@ describe('canonical chat response ownership', () => {
         return new Response(JSON.stringify({
           message: 'Who is this for?',
           draftUpdates: { projectScope: 'OPTIMISTIC TOOL VALUE' },
+          outcome: 'draft_persisted',
           canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
           draftVersion: 4,
           currentStage: 'audience',
@@ -733,9 +722,9 @@ describe('canonical chat response ownership', () => {
       }
       if (url.includes('/api/projects/restored-session/draft') && init?.method !== 'PUT') {
         return new Response(JSON.stringify({
-          draft: { referencesStatus: { value: 'added', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' } },
-          draftVersion: 3,
-          fieldCount: 1,
+          draft: {},
+          draftVersion: 0,
+          fieldCount: 0,
           referenceLinks: [{ kind: 'vimeo', url: 'https://vimeo.com/123' }]
         }), { status: 200 });
       }
@@ -769,6 +758,7 @@ describe('thesis-aligned optional intake actions', () => {
             ? 'What should this project achieve?'
             : 'Who is this for?',
           draftUpdates: chatBodies.length === 1 ? { projectScope: 'Launch film' } : { projectObjective: 'Not sure yet' },
+          outcome: 'draft_persisted',
           canonicalDraft: chatBodies.length === 1
             ? { projectScope: 'Launch film' }
             : { projectScope: 'Launch film', projectObjective: 'Not sure yet' },
@@ -820,6 +810,7 @@ describe('thesis-aligned optional intake actions', () => {
             timelineBand: 'Not sure yet',
             budgetBand: 'Prefer not to share'
           },
+          outcome: 'draft_persisted',
           canonicalDraft: {
             projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults',
             intendedOutputs: 'Hero film', timelineBand: 'Not sure yet', budgetBand: 'Prefer not to share'
@@ -899,6 +890,7 @@ describe('thesis-aligned optional intake actions', () => {
             timelineBand: 'Not sure yet',
             budgetBand: 'Prefer not to share'
           },
+          outcome: 'draft_persisted',
           canonicalDraft: {
             projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults',
             intendedOutputs: 'Hero film', timelineBand: 'Not sure yet', budgetBand: 'Prefer not to share'
@@ -961,6 +953,15 @@ describe('intake short replies stay on the LLM path', () => {
                 projectObjective: 'Build launch awareness',
                 scopePolished: '30s animation for social media'
               },
+              outcome: 'draft_persisted',
+              canonicalDraft: {
+                projectScope: '30s animation for social media',
+                projectObjective: 'Build launch awareness',
+                scopePolished: '30s animation for social media'
+              },
+              draftVersion: 1,
+              currentStage: 'project',
+              stageRecaps: [],
               briefReady: false,
               reviewPrompt: null,
               missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
@@ -972,10 +973,7 @@ describe('intake short replies stay on the LLM path', () => {
         return new Response(
           JSON.stringify({
             message: 'No problem. Tell me the kind of support you are exploring and I will shape it with you.',
-            draftUpdates: {},
-            briefReady: false,
-            reviewPrompt: null,
-            missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
+            outcome: 'non_persistence'
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
@@ -1041,6 +1039,15 @@ describe('intake short replies stay on the LLM path', () => {
                 projectObjective: 'Build launch awareness',
                 scopePolished: '30s animation for social media'
               },
+              outcome: 'draft_persisted',
+              canonicalDraft: {
+                projectScope: '30s animation for social media',
+                projectObjective: 'Build launch awareness',
+                scopePolished: '30s animation for social media'
+              },
+              draftVersion: 1,
+              currentStage: 'project',
+              stageRecaps: [],
               briefReady: false,
               reviewPrompt: null,
               missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
@@ -1055,10 +1062,7 @@ describe('intake short replies stay on the LLM path', () => {
               'Balance Studio is a Singapore-based, full-service video and creative production house with 10+ years of experience, 100+ clients, and 110+ projects delivered worldwide.',
               'We handle the whole pipeline in-house - concept, production, post-production, motion graphics, VFX, design, and generative-AI workflows, with work for clients like Rolls-Royce, Canon, Netflix, Chanel, HSBC, and Nestle.'
             ],
-            draftUpdates: {},
-            briefReady: false,
-            reviewPrompt: null,
-            missingFields: []
+            outcome: 'non_persistence'
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );

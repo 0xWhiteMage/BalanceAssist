@@ -573,7 +573,7 @@ export function WidgetOverlay({
           }
         : null;
 
-      if (data.canonicalDraft && data.draftVersion !== undefined) {
+      if (data.outcome === 'draft_persisted') {
         applyCanonicalDraftState(data.canonicalDraft, data.draftVersion);
         const nextStep = getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft);
         if (nextStep !== stepRef.current) {
@@ -588,9 +588,11 @@ export function WidgetOverlay({
         await botSay(chunk, isFirst && sharedWork ? { sharedWork } : undefined);
         if (!isCurrent()) return;
       }
-      for (const recap of data.stageRecaps ?? []) {
-        await botSay(recap);
-        if (!isCurrent()) return;
+      if (data.outcome === 'draft_persisted') {
+        for (const recap of data.stageRecaps) {
+          await botSay(recap);
+          if (!isCurrent()) return;
+        }
       }
     } catch {
       if (!isCurrent()) return;

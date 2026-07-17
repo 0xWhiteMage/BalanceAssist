@@ -100,11 +100,13 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (!operationIsValid()) return;
     const canonical = await dependencies.fetchProjectDraft(id);
     if (!operationIsValid()) return;
-    if (canonical && (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0)) {
+    if (canonical) {
       if (!operationIsValid()) return;
       setReferenceLinks((canonical.referenceLinks ?? []).map(({ kind, url }) => ({ kind, url })));
-      if (!operationIsValid()) return;
-      applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
+      if (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0) {
+        if (!operationIsValid()) return;
+        applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
+      }
     }
   }, [applyCanonicalDraft, dependencies]);
 

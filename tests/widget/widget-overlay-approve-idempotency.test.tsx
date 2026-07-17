@@ -72,6 +72,7 @@ function mockWidgetFetch() {
           contactCompany: 'Acme',
           contactEmail: 'jayden@example.com'
         },
+        outcome: 'draft_persisted',
         canonicalDraft: {
           service: 'production', projectType: 'Video', projectScope: '30s animation for social media',
           timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden',

@@ -14,7 +14,7 @@ describe('chatRequest client', () => {
 
   test('collapses a single message into one reply', async () => {
     global.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ message: 'Hello there.', draftUpdates: {}, briefReady: false }), {
+      new Response(JSON.stringify({ outcome: 'non_persistence', message: 'Hello there.' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       })
@@ -34,8 +34,13 @@ describe('chatRequest client', () => {
     global.fetch = vi.fn(async () =>
       new Response(
         JSON.stringify({
+          outcome: 'draft_persisted',
           messages: ['First.', 'Second.', 'Third.'],
           draftUpdates: { service: 'production' },
+          canonicalDraft: { service: 'production' },
+          draftVersion: 1,
+          currentStage: 'project',
+          stageRecaps: [],
           briefReady: true
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -55,6 +60,7 @@ describe('chatRequest client', () => {
 
   test('returns validated canonical saved progress', async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      outcome: 'draft_persisted',
       message: 'Who is this for?',
       canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
       draftVersion: 6,
@@ -66,6 +72,7 @@ describe('chatRequest client', () => {
     const { chatRequest } = await import('@/lib/api/client');
     await expect(chatRequest({ messages: [{ role: 'user', content: 'launch film' }] })).resolves.toEqual({
       replies: [{ text: 'Who is this for?' }],
+      outcome: 'draft_persisted',
       canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
       draftVersion: 6,
       currentStage: 'audience',
@@ -89,9 +96,21 @@ describe('chatRequest client', () => {
 
     const { chatRequest } = await import('@/lib/api/client');
     const result = await chatRequest({ messages: [{ role: 'user', content: 'my change' }] });
-    expect(result?.outcome).toBe('draft_conflict');
-    expect(result?.canonicalDraft).toEqual({ projectScope: 'Winning draft' });
-    expect(result?.draftVersion).toBe(8);
+    if (result?.outcome !== 'draft_conflict') throw new Error('Expected a draft conflict');
+    expect(result.canonicalDraft).toEqual({ projectScope: 'Winning draft' });
+    expect(result.draftVersion).toBe(8);
+  });
+
+  test.each([
+    ['persisted success', 200, { outcome: 'draft_persisted', message: 'Saved.', canonicalDraft: {}, draftVersion: 1, currentStage: 'project', stageRecaps: [] }],
+    ['conflict', 409, { outcome: 'draft_conflict', message: 'Reloaded.', canonicalDraft: {}, draftVersion: 2, currentStage: 'project', stageRecaps: [] }]
+  ])('rejects a malformed %s canonical tuple', async (_label, status, body) => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify(body), {
+      status: status as number,
+      headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+    const { chatRequest } = await import('@/lib/api/client');
+    await expect(chatRequest({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeNull();
   });
 
   test('returns a stable typed save failure', async () => {
@@ -104,9 +123,9 @@ describe('chatRequest client', () => {
     expect((await chatRequest({ messages: [{ role: 'user', content: 'my change' }] }))?.outcome).toBe('draft_save_failed');
   });
 
-  test('falls back to a single fallback bubble when both shapes are empty', async () => {
+  test('rejects a non-persistence response without a displayable reply', async () => {
     global.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ message: '', messages: [], briefReady: false }), {
+      new Response(JSON.stringify({ outcome: 'non_persistence', message: '', messages: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       })
@@ -117,8 +136,7 @@ describe('chatRequest client', () => {
       messages: [{ role: 'user', content: 'no clue' }]
     });
 
-    expect(result).not.toBeNull();
-    expect(result!.replies).toEqual([]);
+    expect(result).toBeNull();
   });
 
   test('returns null on transport failure', async () => {
@@ -137,6 +155,7 @@ describe('chatRequest client', () => {
   test('preserves the exact provider-unavailable 503 as a typed chat response', async () => {
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify({
+        outcome: 'provider_unavailable',
         error: 'Chat service unavailable',
         detail: 'chat_provider_unavailable'
       }), {
@@ -173,9 +192,7 @@ describe('chatRequest client', () => {
   test('returns the validated confidential diversion outcome', async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({
       message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
-      outcome: 'confidential_diversion',
-      draftUpdates: {},
-      briefReady: false
+      outcome: 'confidential_diversion'
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
@@ -205,7 +222,7 @@ describe('chatRequest client', () => {
 
     global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       requestBodies.push(JSON.parse(String(init?.body)));
-      return new Response(JSON.stringify({ message: 'Hello there.', draftUpdates: {}, briefReady: false }), {
+      return new Response(JSON.stringify({ outcome: 'non_persistence', message: 'Hello there.' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });

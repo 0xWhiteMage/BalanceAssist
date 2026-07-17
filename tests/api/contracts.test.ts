@@ -25,17 +25,18 @@ test('session create payload rejects when notice consent is missing', () => {
 });
 
 test('chat response payload accepts a single message', () => {
-  const result = chatResponsePayloadSchema.safeParse({ message: 'hello' });
+  const result = chatResponsePayloadSchema.safeParse({ outcome: 'non_persistence', message: 'hello' });
   expect(result.success).toBe(true);
 });
 
 test('chat response payload accepts a multi-bubble messages array', () => {
-  const result = chatResponsePayloadSchema.safeParse({ messages: ['one', 'two', 'three'] });
+  const result = chatResponsePayloadSchema.safeParse({ outcome: 'non_persistence', messages: ['one', 'two', 'three'] });
   expect(result.success).toBe(true);
 });
 
 test('chat response payload validates canonical saved progress', () => {
   const result = chatResponsePayloadSchema.safeParse({
+    outcome: 'draft_persisted',
     message: 'What comes next?',
     canonicalDraft: { projectScope: 'A launch film', projectObjective: 'Build awareness' },
     draftVersion: 4,
@@ -45,7 +46,41 @@ test('chat response payload validates canonical saved progress', () => {
   });
   expect(result.success).toBe(true);
   expect(chatResponsePayloadSchema.safeParse({
-    message: 'Invalid stage', canonicalDraft: {}, draftVersion: 1, currentStage: 'qualification', stageRecaps: []
+    outcome: 'draft_persisted', message: 'Invalid stage', canonicalDraft: {}, draftVersion: 1,
+    currentStage: 'qualification', stageRecaps: [], briefReady: false
+  }).success).toBe(false);
+});
+
+test.each(['canonicalDraft', 'draftVersion', 'currentStage', 'stageRecaps', 'briefReady'] as const)(
+  'chat response payload rejects persisted success without %s',
+  (missingKey) => {
+    const payload = {
+      outcome: 'draft_persisted', message: 'Saved.', canonicalDraft: { projectScope: 'A launch film' },
+      draftVersion: 2, currentStage: 'project', stageRecaps: [], briefReady: false
+    };
+    expect(chatResponsePayloadSchema.safeParse({ ...payload, [missingKey]: undefined }).success).toBe(false);
+  }
+);
+
+test.each(['canonicalDraft', 'draftVersion', 'currentStage', 'stageRecaps', 'briefReady'] as const)(
+  'chat response payload rejects conflict without %s',
+  (missingKey) => {
+    const payload = {
+      outcome: 'draft_conflict', message: 'Reloaded.', canonicalDraft: { projectScope: 'Winning draft' },
+      draftVersion: 8, currentStage: 'project', stageRecaps: [], briefReady: false
+    };
+    expect(chatResponsePayloadSchema.safeParse({ ...payload, [missingKey]: undefined }).success).toBe(false);
+  }
+);
+
+test('chat response payload separates non-persistence and provider failure from canonical state', () => {
+  expect(chatResponsePayloadSchema.safeParse({ outcome: 'non_persistence', message: 'FAQ answer' }).success).toBe(true);
+  expect(chatResponsePayloadSchema.safeParse({
+    outcome: 'provider_unavailable', error: 'Chat service unavailable', detail: 'chat_provider_unavailable'
+  }).success).toBe(true);
+  expect(chatResponsePayloadSchema.safeParse({
+    outcome: 'non_persistence', message: 'Malformed', canonicalDraft: {}, draftVersion: 0,
+    currentStage: 'project', stageRecaps: [], briefReady: false
   }).success).toBe(false);
 });
 
@@ -73,12 +108,12 @@ test('chat response payload validates the confidential diversion outcome', () =>
 });
 
 test('chat response payload rejects when neither message nor messages is present', () => {
-  const result = chatResponsePayloadSchema.safeParse({ draftUpdates: {} });
+  const result = chatResponsePayloadSchema.safeParse({ outcome: 'non_persistence', draftUpdates: {} });
   expect(result.success).toBe(false);
 });
 
 test('chat response payload rejects an empty messages array', () => {
-  const result = chatResponsePayloadSchema.safeParse({ messages: [] });
+  const result = chatResponsePayloadSchema.safeParse({ outcome: 'non_persistence', messages: [] });
   expect(result.success).toBe(false);
 });
 
