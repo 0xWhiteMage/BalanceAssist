@@ -356,6 +356,42 @@ export type ProjectDraftResponse = {
   crmRevision?: number;
 };
 
+const versionedDraftFieldSchema = z.object({
+  value: z.string(),
+  provenance: z.enum(['user-stated', 'inferred', 'confirmed', 'cleared']),
+  updatedAt: z.string()
+}).strict();
+const versionedDraftSchema = z.record(versionedDraftFieldSchema);
+const projectReferenceLinkSchema = z.object({
+  id: z.string(),
+  sessionId: z.string().optional(),
+  url: z.string(),
+  kind: z.enum(['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other'])
+}).strict();
+const projectDraftBaseFields = {
+  draft: versionedDraftSchema,
+  draftVersion: z.number().int().nonnegative(),
+  fieldCount: z.number().int().nonnegative()
+};
+const projectDraftGetResponseSchema = z.object({
+  sessionId: z.string(),
+  ...projectDraftBaseFields,
+  referenceLinks: z.array(projectReferenceLinkSchema).optional(),
+  approvedDraftVersion: z.number().int().nonnegative().optional(),
+  approvalInputHash: z.string().optional(),
+  canonicalReferenceSetHash: z.string().optional(),
+  approvedReferenceSetHash: z.string().optional(),
+  crmRevision: z.number().int().nonnegative().optional()
+}).strict();
+const projectDraftUpdateResponseSchema = z.object({
+  sessionId: z.string(),
+  ...projectDraftBaseFields
+}).strict();
+const projectDraftConflictResponseSchema = z.object({
+  error: z.string(),
+  ...projectDraftBaseFields
+}).strict();
+
 function flattenDraftValues(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object') {
     return {};
@@ -383,12 +419,14 @@ export async function fetchProjectDraft(sessionId: string): Promise<ProjectDraft
       return null;
     }
 
-    const data = (await response.json()) as ProjectDraftResponse & { draft?: unknown; draftVersion?: number; fieldCount?: number };
+    const parsed = projectDraftGetResponseSchema.safeParse(await response.json());
+    if (!parsed.success || parsed.data.sessionId !== sessionId) return null;
+    const data = parsed.data;
     return {
       draft: flattenDraftValues(data.draft),
-      draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
-      referenceLinks: Array.isArray(data.referenceLinks) ? data.referenceLinks : [],
+      draftVersion: data.draftVersion,
+      fieldCount: data.fieldCount,
+      referenceLinks: (data.referenceLinks ?? []).map((link) => ({ ...link, sessionId: link.sessionId ?? sessionId })),
       approvedDraftVersion: data.approvedDraftVersion,
       approvalInputHash: data.approvalInputHash,
       canonicalReferenceSetHash: data.canonicalReferenceSetHash,
@@ -416,17 +454,17 @@ export async function updateProjectDraft(
       body: JSON.stringify({ expectedDraftVersion, fields })
     });
 
-    const data = (await response.json().catch(() => null)) as
-      | { draft?: unknown; draftVersion?: number; fieldCount?: number }
-      | null;
+    const data = await response.json().catch(() => null);
 
     if (response.status === 409 && data) {
+      const parsed = projectDraftConflictResponseSchema.safeParse(data);
+      if (!parsed.success) return { ok: false, conflict: false };
       return {
         ok: false,
         conflict: true,
-        draft: flattenDraftValues(data.draft),
-        draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-        fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
+        draft: flattenDraftValues(parsed.data.draft),
+        draftVersion: parsed.data.draftVersion,
+        fieldCount: parsed.data.fieldCount,
         referenceLinks: []
       };
     }
@@ -434,12 +472,14 @@ export async function updateProjectDraft(
     if (!response.ok || !data) {
       return { ok: false, conflict: false };
     }
+    const parsed = projectDraftUpdateResponseSchema.safeParse(data);
+    if (!parsed.success || parsed.data.sessionId !== sessionId) return { ok: false, conflict: false };
 
     return {
       ok: true,
-      draft: flattenDraftValues(data.draft),
-      draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
+      draft: flattenDraftValues(parsed.data.draft),
+      draftVersion: parsed.data.draftVersion,
+      fieldCount: parsed.data.fieldCount,
       referenceLinks: []
     };
   } catch {

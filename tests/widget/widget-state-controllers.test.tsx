@@ -74,6 +74,123 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.draftVersion).toBe(9);
   });
 
+  test('preserves approval for an identical same-version chat canonical response', () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null),
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    const canonical = { projectScope: 'Approved launch film' };
+
+    act(() => result.current.applyCanonicalDraft(canonical, 4, {
+      draft: canonical,
+      draftVersion: 4,
+      fieldCount: 1,
+      approvedDraftVersion: 4,
+      canonicalReferenceSetHash: 'same-hash',
+      approvedReferenceSetHash: 'same-hash'
+    }));
+    expect(result.current.briefApproved).toBe(true);
+
+    act(() => result.current.applyCanonicalDraft(canonical, 4));
+
+    expect(result.current.briefApproved).toBe(true);
+    expect(result.current.draftVersion).toBe(4);
+  });
+
+  test('ignores a deferred chat draft result after reset', async () => {
+    const pendingUpdate = deferred<{
+      ok: true; draftVersion: number; fieldCount: number; draft: Record<string, string>;
+    }>();
+    const updateProjectDraft = vi.fn(() => pendingUpdate.promise);
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),
+      getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null), updateProjectDraft,
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+
+    let mutation!: Promise<unknown>;
+    act(() => { mutation = result.current.applyChatDraft({ projectScope: 'Stale chat scope' }); });
+    await waitFor(() => expect(updateProjectDraft).toHaveBeenCalledOnce());
+    act(() => result.current.reset());
+    await act(async () => {
+      pendingUpdate.resolve({ ok: true, draftVersion: 1, fieldCount: 1, draft: { projectScope: 'Stale chat scope' } });
+      await mutation;
+    });
+
+    expect(result.current.draft.projectScope).toBe('');
+    expect(result.current.draftVersion).toBe(0);
+  });
+
+  test('ignores a deferred edit result after replacing its session', async () => {
+    const pendingUpdate = deferred<{
+      ok: true; draftVersion: number; fieldCount: number; draft: Record<string, string>;
+    }>();
+    const createSession = vi.fn()
+      .mockResolvedValueOnce({ sessionId: 'expired-session', status: 'new', sourceUrl: '', persisted: true, expiresAt: '2026-07-13T00:00:00.000Z' })
+      .mockResolvedValueOnce({ sessionId: 'fresh-session', status: 'new', sourceUrl: '', persisted: true });
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession, getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null),
+      updateProjectDraft: vi.fn(() => pendingUpdate.promise), resetProject: vi.fn(async () => true),
+      requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+
+    let mutation!: Promise<unknown>;
+    act(() => { mutation = result.current.updateDraft('projectScope', 'Stale edit'); });
+    await act(async () => { await result.current.loadOrCreateSession(); });
+    await act(async () => {
+      pendingUpdate.resolve({ ok: true, draftVersion: 1, fieldCount: 1, draft: { projectScope: 'Stale edit' } });
+      await mutation;
+    });
+
+    expect(result.current.sessionId).toBe('fresh-session');
+    expect(result.current.draft.projectScope).toBe('');
+    expect(result.current.draftVersion).toBe(0);
+  });
+
+  test('returns no deferred edit result after unmount', async () => {
+    const pendingUpdate = deferred<{
+      ok: true; draftVersion: number; fieldCount: number; draft: Record<string, string>;
+    }>();
+    const { result, unmount } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),
+      getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null),
+      updateProjectDraft: vi.fn(() => pendingUpdate.promise), resetProject: vi.fn(async () => true),
+      requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+
+    let mutation!: Promise<unknown>;
+    act(() => { mutation = result.current.updateDraft('projectScope', 'Late edit'); });
+    unmount();
+    pendingUpdate.resolve({ ok: true, draftVersion: 1, fieldCount: 1, draft: { projectScope: 'Late edit' } });
+
+    await expect(mutation).resolves.toBeNull();
+  });
+
+  test('ignores an edit result older than the current canonical version', async () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),
+      getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null),
+      updateProjectDraft: vi.fn(async () => ({ ok: true as const, draftVersion: 4, fieldCount: 1, draft: { projectScope: 'Older edit' } })),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+    act(() => result.current.applyCanonicalDraft({ projectScope: 'Current scope' }, 5));
+
+    let mutation;
+    await act(async () => { mutation = await result.current.updateDraft('projectScope', 'Older edit'); });
+
+    expect(mutation).toBeNull();
+    expect(result.current.draft.projectScope).toBe('Current scope');
+    expect(result.current.draftVersion).toBe(5);
+  });
+
   test('hydrates restored reference links into the shared visible state', async () => {
     const restoredLinks = [{ kind: 'vimeo' as const, url: 'https://vimeo.com/123' }];
     const persistedLinks = [{ ...restoredLinks[0], id: 'reference-1', sessionId: 'session-1' }];

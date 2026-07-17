@@ -246,6 +246,33 @@ describe('chatRequest client', () => {
     ]);
   });
 
+  test.each([
+    { draft: {}, draftVersion: '3', fieldCount: 0 },
+    { draft: { projectScope: { value: 42, provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' } }, draftVersion: 3, fieldCount: 1 },
+    { draft: {}, draftVersion: 3, fieldCount: 0, unexpected: true }
+  ])('rejects a malformed project draft GET response %#', async (body) => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify(body), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+    const { fetchProjectDraft } = await import('@/lib/api/client');
+
+    await expect(fetchProjectDraft('session-123')).resolves.toBeNull();
+  });
+
+  test.each([
+    [200, { sessionId: 'session-123', draft: {}, fieldCount: 0 }],
+    [409, { error: 'Draft version conflict.', draft: { projectScope: 'not-versioned' }, draftVersion: 4, fieldCount: 1 }]
+  ])('rejects a malformed project draft update response with status %i', async (status, body) => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify(body), {
+      status: status as number, headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+    const { updateProjectDraft } = await import('@/lib/api/client');
+
+    await expect(updateProjectDraft('session-123', [
+      { field: 'projectScope', value: 'Launch film', provenance: 'confirmed' }
+    ], 3)).resolves.toEqual({ ok: false, conflict: false });
+  });
+
   test('uploadRequestedFiles sends session scope in the header without producer-transfer consent data', async () => {
 
     global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

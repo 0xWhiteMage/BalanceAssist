@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   formatIntakeStageRecap,
+  getCompletedIntakeStageCount,
   getCurrentIntakeStage,
   INTAKE_STAGES
 } from '@/lib/conversation/intake-stage';
@@ -100,6 +101,34 @@ describe('intake stage model', () => {
 
     expect(getCurrentIntakeStage(draft).id).toBe('references-contact');
     expect(draft.referencesStatus).toBe('');
+  });
+
+  test.each([
+    [0, {}],
+    [1, { projectScope: 'Launch film', projectObjective: 'Build awareness' }],
+    [2, {
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults', intendedOutputs: 'Hero film'
+    }],
+    [3, {
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults', intendedOutputs: 'Hero film',
+      timelineBand: '1-2-months', budgetBand: '20k-50k'
+    }],
+    [4, {
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults', intendedOutputs: 'Hero film',
+      timelineBand: '1-2-months', budgetBand: '20k-50k', referencesStatus: 'skipped' as const, contactEmail: 'hello@example.com'
+    }]
+  ])('derives %i completed intake stages from canonical values', (expected, values) => {
+    expect(getCompletedIntakeStageCount({ ...createDefaultLeadDraft(), ...values })).toBe(expected);
+  });
+
+  test('does not complete references-contact without both a reference decision and contact route', () => {
+    const prior = {
+      ...createDefaultLeadDraft(),
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults', intendedOutputs: 'Hero film',
+      timelineBand: '1-2-months', budgetBand: '20k-50k'
+    };
+    expect(getCompletedIntakeStageCount({ ...prior, referencesStatus: 'skipped' })).toBe(3);
+    expect(getCompletedIntakeStageCount({ ...prior, contactName: 'Jayden' })).toBe(3);
   });
 });
 

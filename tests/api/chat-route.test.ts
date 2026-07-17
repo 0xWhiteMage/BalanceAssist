@@ -165,6 +165,7 @@ describe('POST /api/chat', () => {
   }) {
     const state = { ...session };
     const sessionUpdates: Array<Record<string, unknown>> = [];
+    let sessionReads = 0;
 
     const supabase = {
       rpc(name: string, args: { p_session_id: string; p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) {
@@ -194,7 +195,10 @@ describe('POST /api/chat', () => {
                 expect(column).toBe('id');
                 expect(value).toBe(state.id);
                 return {
-                  maybeSingle: async () => ({ data: structuredClone(state), error: null })
+                  maybeSingle: async () => {
+                    sessionReads += 1;
+                    return { data: structuredClone(state), error: null };
+                  }
                 };
               }
             };
@@ -214,7 +218,7 @@ describe('POST /api/chat', () => {
       }
     };
 
-    return { supabase, state, sessionUpdates };
+    return { supabase, state, sessionUpdates, get sessionReads() { return sessionReads; } };
   }
 
   async function postChat(body: unknown, options?: { headers?: HeadersInit; includeSessionId?: boolean }) {
@@ -270,6 +274,103 @@ describe('POST /api/chat', () => {
       briefReady: false
     });
     expect(harness.sessionUpdates).toHaveLength(1);
+  });
+
+  test('emits the references-contact recap exactly when the final stage completes', async () => {
+    const savedAt = '2026-07-17T00:00:00.000Z';
+    const values = {
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults', intendedOutputs: 'Hero film',
+      timelineBand: '1-2-months', budgetBand: '20k-50k', referencesStatus: 'skipped'
+    };
+    const draft = Object.fromEntries(Object.entries(values).map(([field, value]) => [field, {
+      value, provenance: 'confirmed', updatedAt: savedAt
+    }]));
+    const harness = createChatSupabase({ id: 'test-session', draft, draft_version: 7 });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Your brief is ready.', 'record_brief_updates', JSON.stringify({
+      ...values,
+      service: '', projectType: '', scopePolished: '', contactName: '', contactCompany: '', contactEmail: 'hello@example.com'
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'Use hello@example.com' }]
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.stageRecaps).toEqual([
+      'So far: references: Skipped; contact email: hello@example.com.'
+    ]);
+  });
+
+  test('does not duplicate a completed references-contact recap on a no-op turn', async () => {
+    const savedAt = '2026-07-17T00:00:00.000Z';
+    const values = {
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults', intendedOutputs: 'Hero film',
+      timelineBand: '1-2-months', budgetBand: '20k-50k', referencesStatus: 'skipped', contactEmail: 'hello@example.com'
+    };
+    const draft = Object.fromEntries(Object.entries(values).map(([field, value]) => [field, {
+      value, provenance: 'confirmed', updatedAt: savedAt
+    }]));
+    const harness = createChatSupabase({ id: 'test-session', draft, draft_version: 8 });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Anything else?', 'some_other_tool', '{}')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { data } = await postChat({ messages: [{ role: 'user', content: 'Anything else?' }] });
+
+    expect(data.stageRecaps).toEqual([]);
+  });
+
+  test('reloads authenticated canonical state after a provider no-op before responding', async () => {
+    const harness = createChatSupabase({
+      id: 'test-session',
+      draft: { projectScope: { value: 'Saved film', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' } },
+      draft_version: 3
+    });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Tell me more.', 'some_other_tool', '{}')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'Keep going' }] });
+
+    expect(res.status).toBe(200);
+    expect(data.canonicalDraft).toEqual({ projectScope: 'Saved film' });
+    expect(data.draftVersion).toBe(3);
+    expect(harness.sessionReads).toBe(2);
+  });
+
+  test('returns latest canonical conflict when the draft changes during a provider no-op', async () => {
+    const harness = createChatSupabase({
+      id: 'test-session',
+      draft: { projectScope: { value: 'Original film', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' } },
+      draft_version: 3
+    });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => {
+      harness.state.draft = { projectScope: { value: 'Concurrent film', provenance: 'confirmed', updatedAt: '2026-07-17T00:01:00.000Z' } };
+      harness.state.draft_version = 4;
+      return makeToolCallResponse('Tell me more.', 'some_other_tool', '{}');
+    }) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'Keep going' }] });
+
+    expect(res.status).toBe(409);
+    expect(data).toEqual(expect.objectContaining({
+      outcome: 'draft_conflict',
+      canonicalDraft: { projectScope: 'Concurrent film' },
+      draftVersion: 4,
+      stageRecaps: []
+    }));
   });
 
   test('returns the winning canonical draft on a persistence conflict without an optimistic recap', async () => {

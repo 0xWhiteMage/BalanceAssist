@@ -486,9 +486,11 @@ export function WidgetOverlay({
 
   async function handleLLMResponse(history: ChatMessage[]) {
     if (confidentialDiversionRef.current) return;
+    const draftOperation = sessionDraft.beginDraftOperation();
     const aiProcessingGeneration = aiProcessingGenerationRef.current;
     const isCurrent = () =>
       aiProcessingGeneration === aiProcessingGenerationRef.current &&
+      sessionDraft.isDraftOperationCurrent(draftOperation) &&
       !cancelRef.current &&
       !confidentialDiversionRef.current;
     try {
@@ -519,7 +521,7 @@ export function WidgetOverlay({
       }
 
       if (data.outcome === 'provider_unavailable') {
-        await botSay(CHAT_UNAVAILABLE_MESSAGE);
+        await botSay(CHAT_UNAVAILABLE_MESSAGE, { isValid: isCurrent });
         if (!isCurrent()) return;
         return;
       }
@@ -528,12 +530,16 @@ export function WidgetOverlay({
         confidentialDiversionRef.current = true;
         aiProcessingGenerationRef.current += 1;
         const diversionGeneration = aiProcessingGenerationRef.current;
+        const diversionIsCurrent = () =>
+          diversionGeneration === aiProcessingGenerationRef.current &&
+          sessionDraft.isDraftOperationCurrent(draftOperation) &&
+          !cancelRef.current;
         if (advanceTimerRef.current) {
           clearTimeout(advanceTimerRef.current);
           advanceTimerRef.current = null;
         }
         for (const reply of data.replies) {
-          await botSay(reply.text);
+          await botSay(reply.text, { isValid: diversionIsCurrent });
           if (
             diversionGeneration !== aiProcessingGenerationRef.current ||
             cancelRef.current
@@ -545,16 +551,14 @@ export function WidgetOverlay({
       }
 
       if (data.outcome === 'draft_save_failed') {
-        for (const reply of data.replies) await botSay(reply.text);
+        for (const reply of data.replies) await botSay(reply.text, { isValid: isCurrent });
         return;
       }
 
       if (data.outcome === 'draft_conflict') {
-        if (data.canonicalDraft && data.draftVersion !== undefined) {
-          applyCanonicalDraftState(data.canonicalDraft, data.draftVersion);
-          setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft));
-        }
-        for (const reply of data.replies) await botSay(reply.text);
+        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation)) return;
+        setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft));
+        for (const reply of data.replies) await botSay(reply.text, { isValid: isCurrent });
         return;
       }
 
@@ -574,7 +578,7 @@ export function WidgetOverlay({
         : null;
 
       if (data.outcome === 'draft_persisted') {
-        applyCanonicalDraftState(data.canonicalDraft, data.draftVersion);
+        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation)) return;
         const nextStep = getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft);
         if (nextStep !== stepRef.current) {
           if (!isCurrent()) return;
@@ -585,18 +589,21 @@ export function WidgetOverlay({
       for (let i = 0; i < replyChunks.length; i++) {
         const isFirst = i === 0;
         const chunk = replyChunks[i];
-        await botSay(chunk, isFirst && sharedWork ? { sharedWork } : undefined);
+        await botSay(chunk, {
+          ...(isFirst && sharedWork ? { sharedWork } : {}),
+          isValid: isCurrent
+        });
         if (!isCurrent()) return;
       }
       if (data.outcome === 'draft_persisted') {
         for (const recap of data.stageRecaps) {
-          await botSay(recap);
+          await botSay(recap, { isValid: isCurrent });
           if (!isCurrent()) return;
         }
       }
     } catch {
       if (!isCurrent()) return;
-      await botSay(CHAT_UNAVAILABLE_MESSAGE);
+      await botSay(CHAT_UNAVAILABLE_MESSAGE, { isValid: isCurrent });
       if (!isCurrent()) return;
     }
   }
@@ -671,29 +678,24 @@ export function WidgetOverlay({
       return;
     }
 
-    const provenance = value.trim().length > 0 ? 'confirmed' : 'cleared';
-    void updateProjectDraft(
-      activeSessionId,
-      [{ field: key, value, provenance }],
-      draftVersionRef.current
-    ).then(async (result) => {
+    const operation = sessionDraft.beginDraftOperation();
+    const operationIsCurrent = () => sessionDraft.isDraftOperationCurrent(operation) && !cancelRef.current;
+    void sessionDraft.updateDraft(key, value, operation).then(async (result) => {
       if (!result) {
         return;
       }
 
       if (result.ok) {
-        applyCanonicalDraftState(result.draft, result.draftVersion);
         setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...result.draft } as LeadDraft));
         return;
       }
 
       if (result.conflict) {
-        applyCanonicalDraftState(result.draft, result.draftVersion);
-        await botSay('This brief changed elsewhere, so I reloaded the latest saved version before applying more edits.');
+        await botSay('This brief changed elsewhere, so I reloaded the latest saved version before applying more edits.', { isValid: operationIsCurrent });
         return;
       }
 
-      await botSay('Sorry — I could not save that brief edit. Please try again.');
+      await botSay('Sorry — I could not save that brief edit. Please try again.', { isValid: operationIsCurrent });
     });
   }
 

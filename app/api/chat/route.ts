@@ -1,7 +1,7 @@
 import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
-import { formatIntakeStageRecap, getCurrentIntakeStage, getIntakeStageIndex, INTAKE_STAGES } from '@/lib/conversation/intake-stage';
+import { formatIntakeStageRecap, getCompletedIntakeStageCount, getCurrentIntakeStage, INTAKE_STAGES } from '@/lib/conversation/intake-stage';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-responses';
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
@@ -425,7 +425,18 @@ async function persistAuthenticatedDraftState(
       .update({ last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
       .eq('id', state.sessionId);
     if (error) return { ok: false, conflict: false };
-    return { ok: true, draft: state.versionedDraft, draftVersion: state.draftVersion };
+    const { data: latest, error: reloadError } = await state.supabase
+      .from('sessions')
+      .select('draft, draft_version')
+      .eq('id', state.sessionId)
+      .maybeSingle();
+    if (reloadError || !latest || typeof latest.draft_version !== 'number') {
+      return { ok: false, conflict: false };
+    }
+    const latestDraft = normalizeVersionedDraft(latest.draft);
+    return latest.draft_version === state.draftVersion
+      ? { ok: true, draft: latestDraft, draftVersion: latest.draft_version }
+      : { ok: false, conflict: true, draft: latestDraft, draftVersion: latest.draft_version };
   }
 }
 
@@ -615,10 +626,10 @@ export async function POST(request: Request) {
 
     const progress = canonicalProgress(persisted.draft, persisted.draftVersion);
     const savedValues = toLeadDraftState(progress.canonicalDraft);
-    const previousStageIndex = getIntakeStageIndex(llmContext.priorDraft);
-    const currentStageIndex = getIntakeStageIndex(savedValues);
+    const previousCompletedStageCount = getCompletedIntakeStageCount(llmContext.priorDraft);
+    const currentCompletedStageCount = getCompletedIntakeStageCount(savedValues);
     const stageRecaps = INTAKE_STAGES
-      .slice(previousStageIndex, currentStageIndex)
+      .slice(previousCompletedStageCount, currentCompletedStageCount)
       .flatMap((stage) => {
         const recap = formatIntakeStageRecap(stage.id, savedValues);
         return recap ? [recap] : [];

@@ -722,10 +722,11 @@ describe('canonical chat response ownership', () => {
       }
       if (url.includes('/api/projects/restored-session/draft') && init?.method !== 'PUT') {
         return new Response(JSON.stringify({
+          sessionId: 'restored-session',
           draft: {},
           draftVersion: 0,
           fieldCount: 0,
-          referenceLinks: [{ kind: 'vimeo', url: 'https://vimeo.com/123' }]
+          referenceLinks: [{ id: 'reference-1', kind: 'vimeo', url: 'https://vimeo.com/123' }]
         }), { status: 200 });
       }
       if (url.includes('/api/telegram/upload')) {
@@ -741,6 +742,57 @@ describe('canonical chat response ownership', () => {
 
     expect(await screen.findByRole('link', { name: 'https://vimeo.com/123' })).toBeVisible();
     expect(screen.getAllByText('https://vimeo.com/123')).toHaveLength(1);
+  }, 20_000);
+
+  test('ignores a deferred manual edit result and message after operation invalidation', async () => {
+    const pendingEdit = deferred<Response>();
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          outcome: 'draft_persisted',
+          message: 'I saved the project scope.',
+          draftUpdates: { projectScope: 'Original launch film' },
+          canonicalDraft: { projectScope: 'Original launch film' },
+          draftVersion: 1,
+          currentStage: 'project',
+          stageRecaps: [],
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/projects/mock-session/draft') && init?.method === 'PUT') return pendingEdit.promise;
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'We need an original launch film' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByText('Original launch film', {}, { timeout: 7000 });
+
+    fireEvent.click(screen.getByText('Project scope'));
+    const scopeInput = screen.getByRole('textbox', { name: 'Project scope' });
+    fireEvent.change(scopeInput, { target: { value: 'Late stale edit' } });
+    fireEvent.keyDown(scopeInput, { key: 'Enter' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close chat' }));
+
+    await act(async () => {
+      pendingEdit.resolve(new Response(JSON.stringify({
+        error: 'Draft version conflict.',
+        draft: { projectScope: { value: 'Late stale edit', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' } },
+        draftVersion: 2,
+        fieldCount: 1
+      }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+
+    expect(screen.queryByText('Late stale edit')).toBeNull();
+    expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
   }, 20_000);
 });
 

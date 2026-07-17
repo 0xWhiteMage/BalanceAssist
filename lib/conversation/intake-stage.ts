@@ -36,6 +36,23 @@ export function getIntakeStageIndex(draft: Partial<LeadDraft>): number {
   return INTAKE_STAGES.findIndex((stage) => stage.id === getCurrentIntakeStage(draft).id);
 }
 
+export function getCompletedIntakeStageCount(draft: Partial<LeadDraft>): number {
+  const projectComplete = (
+    hasValue(draft.projectScope) || hasValue(draft.projectType) || hasValue(draft.service)
+  ) && hasValue(draft.projectObjective);
+  if (!projectComplete) return 0;
+
+  const audienceComplete = hasValue(draft.audience) && hasValue(draft.intendedOutputs);
+  if (!audienceComplete) return 1;
+
+  const planningComplete = hasValue(draft.timelineBand) && hasValue(draft.budgetBand);
+  if (!planningComplete) return 2;
+
+  const referencesComplete = draft.referencesStatus === 'added' || draft.referencesStatus === 'skipped';
+  const contactComplete = hasValue(draft.contactName) || hasValue(draft.contactEmail);
+  return referencesComplete && contactComplete ? 4 : 3;
+}
+
 function recapValue(value: string | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed.slice(0, MAX_RECAP_VALUE_LENGTH) : null;

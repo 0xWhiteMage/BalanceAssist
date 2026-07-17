@@ -11,6 +11,7 @@ type DraftUpdate = { field: string; value: string; provenance: 'user-stated' | '
 type DraftUpdateResult = ({ ok: true } & ProjectDraftResponse) | ({ ok: false; conflict: true } & ProjectDraftResponse) | { ok: false; conflict: false };
 type BootstrapValidity = () => boolean;
 type VisibleReferenceLink = Pick<NonNullable<ProjectDraftResponse['referenceLinks']>[number], 'kind' | 'url'>;
+export type DraftOperation = { generation: number; sessionId: string | null };
 
 const alwaysValid: BootstrapValidity = () => true;
 
@@ -42,23 +43,51 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   }>({});
   const sessionIdRef = useRef<string | null>(null);
   const expiresAtRef = useRef<string | null>(null);
+  const draftRef = useRef(draft);
   const draftVersionRef = useRef(0);
   const bootstrapRef = useRef<Promise<string | null> | null>(null);
   const bootstrapGenerationRef = useRef(0);
+  const operationGenerationRef = useRef(0);
   const approveInFlightRef = useRef(false);
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
 
+  draftRef.current = draft;
+  draftVersionRef.current = draftVersion;
+
   const invalidateBootstrap = useCallback(() => {
     bootstrapGenerationRef.current += 1;
+    operationGenerationRef.current += 1;
     bootstrapRef.current = null;
   }, []);
 
   useEffect(() => invalidateBootstrap, [invalidateBootstrap]);
 
-  const applyCanonicalDraft = useCallback((values: Record<string, string>, version: number, canonical?: ProjectDraftResponse) => {
+  const beginDraftOperation = useCallback((): DraftOperation => ({
+    generation: ++operationGenerationRef.current,
+    sessionId: sessionIdRef.current
+  }), []);
+
+  const isDraftOperationCurrent = useCallback((operation: DraftOperation) =>
+    operation.generation === operationGenerationRef.current && operation.sessionId === sessionIdRef.current, []);
+
+  const applyCanonicalDraft = useCallback((
+    values: Record<string, string>,
+    version: number,
+    canonical?: ProjectDraftResponse,
+    operation?: DraftOperation
+  ) => {
+    if (operation && !isDraftOperationCurrent(operation)) return false;
+    if (version < draftVersionRef.current) return false;
     const nextDraft = { ...createDefaultLeadDraft(), ...values } as LeadDraft;
+    const sameVersion = version === draftVersionRef.current;
+    const sameDraft = Object.keys(nextDraft).every(
+      (key) => nextDraft[key as keyof LeadDraft] === draftRef.current[key as keyof LeadDraft]
+    );
+    if (sameVersion && sameDraft && !canonical) return true;
+
     setDraft(nextDraft);
+    draftRef.current = nextDraft;
     setDraftVersion(version);
     draftVersionRef.current = version;
     setHasProjectIntent(detectProjectIntent(nextDraft));
@@ -78,7 +107,8 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     } else {
       setBriefApproved(false);
     }
-  }, []);
+    return true;
+  }, [isDraftOperationCurrent]);
 
   const appendReferenceLink = useCallback((link: VisibleReferenceLink) => {
     setReferenceLinks((current) => current.some((item) => item.url === link.url) ? current : [...current, link]);
@@ -86,6 +116,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
 
   const setActiveSession = useCallback((session: SessionResponse, isValid: BootstrapValidity = alwaysValid) => {
     if (!isValid()) return false;
+    if (sessionIdRef.current !== session.sessionId) operationGenerationRef.current += 1;
     sessionIdRef.current = session.sessionId;
     expiresAtRef.current = session.expiresAt ?? null;
     setSessionId(session.sessionId);
@@ -116,6 +147,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (!operationIsValid()) return null;
     if (sessionIdRef.current && !isExpired(expiresAtRef.current)) return sessionIdRef.current;
     if (sessionIdRef.current) {
+      operationGenerationRef.current += 1;
       sessionIdRef.current = null;
       expiresAtRef.current = null;
       setSessionId(null);
@@ -162,13 +194,18 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     return bootstrap;
   }, [dependencies, ensureSession, hydrateDraft, noticeConsent, setActiveSession]);
 
-  const persistDraft = useCallback(async (updates: DraftUpdate[]) => {
+  const persistDraft = useCallback(async (updates: DraftUpdate[], activeOperation?: DraftOperation) => {
     const id = sessionIdRef.current;
     if (!id || updates.length === 0) return null;
+    const operation = activeOperation ?? beginDraftOperation();
+    if (!isDraftOperationCurrent(operation)) return null;
     const result = await dependencies.updateProjectDraft(id, updates, draftVersionRef.current);
-    if ('draft' in result && result.draft) applyCanonicalDraft(result.draft, result.draftVersion);
+    if (!isDraftOperationCurrent(operation)) return null;
+    if ('draft' in result && result.draft) {
+      if (!applyCanonicalDraft(result.draft, result.draftVersion, undefined, operation)) return null;
+    }
     return result;
-  }, [applyCanonicalDraft, dependencies]);
+  }, [applyCanonicalDraft, beginDraftOperation, dependencies, isDraftOperationCurrent]);
 
   const applyChatDraft = useCallback(async (updates: Record<string, string>) => {
     await persistDraft(Object.entries(updates)
@@ -176,8 +213,8 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
       .map(([field, value]) => ({ field, value, provenance: 'inferred' as const })));
   }, [persistDraft]);
 
-  const updateDraft = useCallback(async (field: string, value: string) => {
-    return persistDraft([{ field, value, provenance: value.trim() ? 'confirmed' : 'cleared' }]);
+  const updateDraft = useCallback(async (field: string, value: string, operation?: DraftOperation) => {
+    return persistDraft([{ field, value, provenance: value.trim() ? 'confirmed' : 'cleared' }], operation);
   }, [persistDraft]);
 
   const approve = useCallback(async (operation: () => Promise<boolean>) => {
@@ -232,7 +269,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, draftVersion,
     hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession, invalidateBootstrap,
-    applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, reset,
+    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),
     requestProjectDeletion: () => sessionIdRef.current ? dependencies.requestProjectDeletion(sessionIdRef.current) : Promise.resolve({ ok: false })
