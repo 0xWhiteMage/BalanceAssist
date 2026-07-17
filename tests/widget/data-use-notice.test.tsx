@@ -161,4 +161,14 @@ describe('DataUseNotice', () => {
     renderNotice();
     expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/job application|cv|resume/i);
   });
+
+  test('names DeepSeek as the sole AI-mode processor and preserves the human-only route', () => {
+    renderNotice();
+    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
+    const notice = screen.getByTestId('data-use-notice');
+    expect(notice).toHaveTextContent(/DeepSeek processes AI-mode messages/i);
+    expect(notice).toHaveTextContent(/non-confidential, high-level project information only/i);
+    expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
+    expect(notice.textContent).not.toMatch(/MiniMax|OpenAI|fallback provider/i);
+  });
 });

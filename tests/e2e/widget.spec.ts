@@ -229,5 +229,5 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const chooser = await chooserPromise;
   await chooser.setFiles(path.join(__dirname, 'fixtures', 'private-upload.txt'));
 
-  await expect(page.getByText('Stored privately')).toBeVisible();
+  await expect(page.getByText('Stored privately', { exact: true })).toBeVisible();
 });

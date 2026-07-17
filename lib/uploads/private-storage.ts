@@ -1,7 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
 import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
-import { validateFile } from '@/lib/uploads/quarantine';
-import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
 export type PrivateStorageClient = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: boolean | string | null; error: unknown }>;
@@ -49,19 +47,19 @@ export async function privateStorageAvailable(client: PrivateStorageClient, buck
   return !attestation.error && attestation.data === true;
 }
 
-export async function storePrivateUpload(input: { client: PrivateStorageClient; bucket: string; sessionId: string; file: File }) {
+export async function storePrivateUpload(input: {
+  client: PrivateStorageClient;
+  bucket: string;
+  sessionId: string;
+  buffer: ArrayBuffer;
+  verifiedMime: string;
+  extractedText: string;
+}) {
   if (!await privateStorageAvailable(input.client, input.bucket)) {
     throw new PrivateStorageError('private_storage_unavailable');
   }
 
-  const source = typeof input.file.arrayBuffer === 'function'
-    ? await input.file.arrayBuffer()
-    : await new Response(input.file).arrayBuffer();
-  const bytes = new Uint8Array(source);
-  const validation = validateFile(input.file, bytes.buffer);
-  if (!validation.ok) {
-    throw new PrivateStorageError('private_storage_upload_failed');
-  }
+  const bytes = new Uint8Array(input.buffer);
 
   const objectKey = randomUUID();
   const checksum = createHash('sha256').update(bytes).digest('hex');
@@ -78,7 +76,7 @@ export async function storePrivateUpload(input: { client: PrivateStorageClient; 
     throw new PrivateStorageError('private_storage_recovery_unavailable');
   }
   const storage = input.client.storage.from(input.bucket);
-  const uploaded = await storage.upload(objectKey, bytes, { contentType: validation.mime, upsert: false });
+  const uploaded = await storage.upload(objectKey, bytes, { contentType: input.verifiedMime, upsert: false });
   if (uploaded.error) {
     await input.client.from('private_attachment_cleanup').delete().eq('object_key', objectKey);
     throw new PrivateStorageError('private_storage_upload_failed');
@@ -91,7 +89,7 @@ export async function storePrivateUpload(input: { client: PrivateStorageClient; 
     retention_expires_at: retentionExpiresAt,
     status: 'stored',
     idempotency_key: randomUUID(),
-    mime_type: validation.mime,
+    mime_type: input.verifiedMime,
     size_bytes: bytes.byteLength
   });
   if (metadata.error) {
@@ -104,7 +102,13 @@ export async function storePrivateUpload(input: { client: PrivateStorageClient; 
 
   await input.client.from('private_attachment_cleanup').delete().eq('object_key', objectKey);
 
-  return { status: 'stored' as const, objectKey, mimeType: validation.mime, extractedText: extractTextFromBuffer(Buffer.from(bytes), input.file.name), retentionExpiresAt };
+  return {
+    status: 'stored' as const,
+    objectKey,
+    mimeType: input.verifiedMime,
+    extractedText: input.extractedText,
+    retentionExpiresAt
+  };
 }
 
 export async function deletePrivateUpload(input: { client: PrivateStorageClient; bucket: string; objectKey: string }): Promise<boolean> {

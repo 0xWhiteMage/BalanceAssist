@@ -141,7 +141,7 @@ describe('POST /api/internal/monday-dispatch', () => {
     const response = await dispatch();
     expect(response.status).toBe(200);
     expect(mocks.reserve).not.toHaveBeenCalled();
-    expect(mocks.event).toHaveBeenCalledWith('monday_schema_drift', expect.any(Object), 'rid-1');
+    expect(mocks.event).toHaveBeenCalledWith('monday_schema_drift', expect.any(Object), expect.stringMatching(/^[a-z0-9-]{8}$/i));
   });
 
   test('continues an independently attested cleanup lane after full schema drift', async () => {
@@ -214,7 +214,7 @@ describe('POST /api/internal/monday-dispatch', () => {
     await dispatch();
     expect(mocks.unknown).toHaveBeenCalledWith(expect.anything(), 'sync-1', token, 'monday_delivery_unknown', undefined);
     expect(mocks.retry).not.toHaveBeenCalled();
-    expect(mocks.event).toHaveBeenCalledWith('monday_sync_unknown', expect.objectContaining({ syncId: 'sync-1', reason: 'monday_delivery_unknown' }), 'rid-1');
+    expect(mocks.event).toHaveBeenCalledWith('monday_sync_unknown', expect.objectContaining({ syncId: 'sync-1', reason: 'monday_delivery_unknown' }), expect.stringMatching(/^[a-z0-9-]{8}$/i));
   });
 
   test('scrubs to an opaque CRM key and refetches PII-free state before completion', async () => {
@@ -247,7 +247,7 @@ describe('POST /api/internal/monday-dispatch', () => {
     mocks.update.mockRejectedValue({ code: 'monday_permission_denied', metadata: { requestId: 'monday:req-1' } });
     await dispatch();
     expect(mocks.retry).toHaveBeenCalledWith(expect.anything(), 'sync-1', token, 'monday_permission_denied', expect.any(Number), 'monday:req-1');
-    expect(mocks.event).toHaveBeenCalledWith('monday_sync_failed', expect.objectContaining({ reason: 'monday_permission_denied' }), 'rid-1');
+    expect(mocks.event).toHaveBeenCalledWith('monday_sync_failed', expect.objectContaining({ reason: 'monday_permission_denied' }), expect.stringMatching(/^[a-z0-9-]{8}$/i));
   });
 
   test('keeps a credential-blocked deletion outstanding for the manual DSR path', async () => {

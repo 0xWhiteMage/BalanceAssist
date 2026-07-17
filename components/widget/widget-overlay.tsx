@@ -6,6 +6,7 @@ import { MessageBubble } from '@/components/chat/message-bubble';
 import { CalendlyEmbed } from '@/components/chat/calendly-embed';
 import {
   BotAvatarSmall,
+  ConfidentialDiversionRecovery,
   FileRequestBanner,
   FileRequestInputHint,
   HumanFallbacks,
@@ -22,7 +23,6 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
-import { getFallbackResponse, getLocalResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
 import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
@@ -31,6 +31,8 @@ import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversa
 import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
+
+const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
 
 let messageCounter = 0;
 function nextId() {
@@ -163,6 +165,7 @@ export function WidgetOverlay({
   const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [entryPath, setEntryPath] = useState<'ai' | 'human' | null>(null);
+  const [confidentialRecoveryOpen, setConfidentialRecoveryOpen] = useState(false);
   const teamRelay = useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage });
   const {
     isTeamConnected, requested: humanRequested, status: humanStatus, waitingForReply: teamWaitingForReply,
@@ -187,8 +190,11 @@ export function WidgetOverlay({
   const humanBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
+  const confidentialDiversionRef = useRef(false);
+  const aiProcessingGenerationRef = useRef(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const requestedFileInputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
   const messagesRef = useRef<ChatMessage[]>(messages);
   const draftRef = useRef(draft);
@@ -301,6 +307,7 @@ export function WidgetOverlay({
   useEffect(() => {
     return () => {
       bootstrapGenerationRef.current += 1;
+      aiProcessingGenerationRef.current += 1;
       cancelRef.current = true;
       if (advanceTimerRef.current) {
         clearTimeout(advanceTimerRef.current);
@@ -325,20 +332,27 @@ export function WidgetOverlay({
         isValid?: () => boolean;
       }
     ): Promise<void> => {
+      const aiProcessingGeneration = aiProcessingGenerationRef.current;
       const isValid = options?.isValid ?? (() => true);
-      if (cancelRef.current || !isValid()) return;
+      const isCurrent = () =>
+        aiProcessingGeneration === aiProcessingGenerationRef.current &&
+        !cancelRef.current &&
+        isValid();
+      if (!isCurrent()) return;
 
       const botSayGeneration = botSayGenerationRef.current + 1;
       botSayGenerationRef.current = botSayGeneration;
+      if (!isCurrent()) return;
       setIsTyping(true);
       const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
       await sleep(delay);
 
-      if (cancelRef.current || !isValid()) {
+      if (!isCurrent()) {
         if (botSayGenerationRef.current === botSayGeneration) setIsTyping(false);
         return;
       }
 
+      if (!isCurrent()) return;
       setIsTyping(false);
       const botMessage: ChatMessage = {
         id: nextId(),
@@ -350,7 +364,7 @@ export function WidgetOverlay({
         isDisclaimer: options?.isDisclaimer
       };
       const nextMessages = [...messagesRef.current, botMessage];
-      if (cancelRef.current || !isValid()) return;
+      if (!isCurrent()) return;
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
     },
@@ -359,7 +373,12 @@ export function WidgetOverlay({
 
   const advanceStep = useCallback(
     async (stepId: ConversationStepId, draftForMessages: LeadDraft, isValid: () => boolean = () => true) => {
-      if (cancelRef.current || !isValid()) return;
+      const aiProcessingGeneration = aiProcessingGenerationRef.current;
+      const isCurrent = () =>
+        aiProcessingGeneration === aiProcessingGenerationRef.current &&
+        !cancelRef.current &&
+        isValid();
+      if (!isCurrent()) return;
 
       setCurrentStep(stepId);
       const step = conversationSteps[stepId];
@@ -373,14 +392,16 @@ export function WidgetOverlay({
           inlineCards: isLast ? step.inlineCards : undefined,
           isValid
         });
+        if (!isCurrent()) return;
       }
 
       if (texts.length === 0 && step.inlineCards) {
-        if (cancelRef.current || !isValid()) return;
+        if (!isCurrent()) return;
         await botSay('', { inlineCards: step.inlineCards, isValid });
+        if (!isCurrent()) return;
       }
 
-      if (!isValid()) return;
+      if (!isCurrent()) return;
       setAllowAttachment(Boolean(step.allowAttachment));
     },
     [botSay]
@@ -392,11 +413,14 @@ export function WidgetOverlay({
   const startConversation = useCallback(async () => {
     if (aiBootstrapCompletedRef.current || isTeamConnected || !noticeConsent) return;
     const bootstrapGeneration = bootstrapGenerationRef.current;
+    const aiProcessingGeneration = aiProcessingGenerationRef.current;
     if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
     aiBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     cancelRef.current = false;
     const bootstrapIsCurrent = () =>
-      bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
+      bootstrapGeneration === bootstrapGenerationRef.current &&
+      aiProcessingGeneration === aiProcessingGenerationRef.current &&
+      !cancelRef.current;
 
     try {
       const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
@@ -418,6 +442,7 @@ export function WidgetOverlay({
 
   function handleClose() {
     bootstrapGenerationRef.current += 1;
+    aiProcessingGenerationRef.current += 1;
     sessionDraft.invalidateBootstrap();
     if (!aiBootstrapCompletedRef.current) setHasStarted(false);
     if (sessionId) {
@@ -450,6 +475,7 @@ export function WidgetOverlay({
 
   function handleReset() {
     bootstrapGenerationRef.current += 1;
+    aiProcessingGenerationRef.current += 1;
     aiBootstrapCompletedRef.current = false;
     sessionDraft.reset();
     teamRelay.reset();
@@ -475,10 +501,18 @@ export function WidgetOverlay({
     setView('chat');
     setCalendlyUrl(null);
     setAllowAttachment(false);
+    setConfidentialRecoveryOpen(false);
+    confidentialDiversionRef.current = false;
     cancelRef.current = false;
   }
 
   async function handleLLMResponse(history: ChatMessage[]) {
+    if (confidentialDiversionRef.current) return;
+    const aiProcessingGeneration = aiProcessingGenerationRef.current;
+    const isCurrent = () =>
+      aiProcessingGeneration === aiProcessingGenerationRef.current &&
+      !cancelRef.current &&
+      !confidentialDiversionRef.current;
     const latestUserText = [...history].reverse().find((message) => message.sender === 'user')?.text ?? '';
 
     try {
@@ -501,20 +535,42 @@ export function WidgetOverlay({
           capturedFields
         }
       });
-      if (cancelRef.current) return;
+      if (!isCurrent()) return;
       if (!data) {
-        const localFallback = getLocalResponse(latestUserText, {
-          draft: draftRef.current,
-          step: stepRef.current,
-          isTeamConnected: teamRef.current
-        });
-        await botSay(localFallback ?? getFallbackResponse());
+        await botSay(CHAT_UNAVAILABLE_MESSAGE);
+        if (!isCurrent()) return;
+        return;
+      }
+
+      if (data.outcome === 'provider_unavailable') {
+        await botSay(CHAT_UNAVAILABLE_MESSAGE);
+        if (!isCurrent()) return;
+        return;
+      }
+
+      if (data.outcome === 'confidential_diversion') {
+        confidentialDiversionRef.current = true;
+        aiProcessingGenerationRef.current += 1;
+        const diversionGeneration = aiProcessingGenerationRef.current;
+        if (advanceTimerRef.current) {
+          clearTimeout(advanceTimerRef.current);
+          advanceTimerRef.current = null;
+        }
+        for (const reply of data.replies) {
+          await botSay(reply.text);
+          if (
+            diversionGeneration !== aiProcessingGenerationRef.current ||
+            cancelRef.current
+          ) return;
+        }
+        if (diversionGeneration !== aiProcessingGenerationRef.current || cancelRef.current) return;
+        setConfidentialRecoveryOpen(true);
         return;
       }
 
       const replyChunks: string[] = (() => {
         if (data.replies.length > 0) return data.replies.map((reply) => reply.text);
-        return [getNextMissingFieldPrompt(draftRef.current)];
+        return [CHAT_UNAVAILABLE_MESSAGE];
       })();
       const draftUpdates: Record<string, string | boolean> = data.draftUpdates ?? {};
       const sharedWork = data.sharedWork
@@ -537,17 +593,22 @@ export function WidgetOverlay({
             (merged as Record<string, unknown>)[key] = value;
           }
         }
+        if (!isCurrent()) return;
         setDraft(merged);
+        if (!isCurrent()) return;
         setHasProjectIntent(detectProjectIntent(merged));
+        if (!isCurrent()) return;
         setBriefApproved(false);
 
         const nextStep = getNextConversationStep(merged);
         if (nextStep !== stepRef.current) {
+          if (!isCurrent()) return;
           setCurrentStep(nextStep);
         }
         // The chat route persists authenticated updates. Replace optimistic values with its canonical version.
         if (sessionId) {
-          await hydrateCanonicalDraft(sessionId);
+          await hydrateCanonicalDraft(sessionId, isCurrent);
+          if (!isCurrent()) return;
         }
       }
 
@@ -555,18 +616,12 @@ export function WidgetOverlay({
         const isFirst = i === 0;
         const chunk = replyChunks[i];
         await botSay(chunk, isFirst && sharedWork ? { sharedWork } : undefined);
+        if (!isCurrent()) return;
       }
     } catch {
-      try {
-        const localFallback = getLocalResponse(latestUserText, {
-          draft: draftRef.current,
-          step: stepRef.current,
-          isTeamConnected: teamRef.current
-        });
-        await botSay(localFallback ?? getFallbackResponse());
-      } catch {
-        await botSay(getFallbackResponse());
-      }
+      if (!isCurrent()) return;
+      await botSay(CHAT_UNAVAILABLE_MESSAGE);
+      if (!isCurrent()) return;
     }
   }
 
@@ -574,6 +629,11 @@ export function WidgetOverlay({
     if (humanRequested || !noticeConsent) return;
     const bootstrapGeneration = bootstrapGenerationRef.current;
     if (humanBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
+    aiProcessingGenerationRef.current += 1;
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
     humanBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     const bootstrapIsCurrent = () =>
       bootstrapGeneration === bootstrapGenerationRef.current && !cancelRef.current;
@@ -815,8 +875,14 @@ export function WidgetOverlay({
 
     if (nextStepId) {
       if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+      const aiProcessingGeneration = aiProcessingGenerationRef.current;
       advanceTimerRef.current = setTimeout(() => {
         advanceTimerRef.current = null;
+        if (
+          aiProcessingGeneration !== aiProcessingGenerationRef.current ||
+          confidentialDiversionRef.current ||
+          cancelRef.current
+        ) return;
         advanceStep(nextStepId!, updatedDraft).catch(() => undefined);
       }, 300);
     }
@@ -913,54 +979,13 @@ export function WidgetOverlay({
       if (currentStep === 'free-chat') {
         await ensureSession();
         appendUserMessage(trimmed);
-
-        const localResponse = getLocalResponse(trimmed, {
-          draft,
-          step: currentStep,
-          isTeamConnected
-        });
-
-        if (localResponse) {
-          await botSay(localResponse);
-          return;
-        }
-
         await handleLLMResponse(messagesRef.current);
         return;
       }
-
-      const memoryRecallPattern = /what.*do.*you.*remember|what.*have.*i.*shared|what.*do.*you.*know.*about.*my.*project/i;
-      const aiDisclosurePattern = /are.*you.*(?:bot|ai|robot|machine)|is.*this.*(?:bot|ai|automated)|are.*you.*real|are.*you.*human|am.*i.*talking.*to.*(?:bot|ai|human|person)/i;
 
       if (!isTeamConnected && isIntakeStep && trimmed.length > 0) {
-        if (memoryRecallPattern.test(trimmed) || aiDisclosurePattern.test(trimmed)) {
-          const localResponse = getLocalResponse(trimmed, {
-            draft,
-            step: currentStep,
-            isTeamConnected
-          });
-
-          if (localResponse) {
-            appendUserMessage(trimmed);
-            await botSay(localResponse);
-            return;
-          }
-        }
-
         appendUserMessage(trimmed);
         await handleLLMResponse(messagesRef.current);
-        return;
-      }
-
-      const localResponse = getLocalResponse(trimmed, {
-        draft,
-        step: currentStep,
-        isTeamConnected
-      });
-
-      if (localResponse) {
-        appendUserMessage(trimmed);
-        await botSay(localResponse);
         return;
       }
 
@@ -974,7 +999,7 @@ export function WidgetOverlay({
       try {
         await handleLLMResponse(messagesRef.current);
       } catch {
-        await botSay(getFallbackResponse());
+        await botSay(CHAT_UNAVAILABLE_MESSAGE);
       }
     } finally {
       if (!cancelRef.current) {
@@ -1110,11 +1135,11 @@ export function WidgetOverlay({
     setNoticeConsent({ consentVersion: 'human-relay-1.1', consentedAt: new Date().toISOString() });
   }
 
-  const canInteract = !isSessionExpired && (hasStarted || humanRequested);
+  const canInteract = !confidentialRecoveryOpen && !isSessionExpired && (hasStarted || humanRequested);
   const showNoticeGate = entryPath === null;
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
-  const showAttachmentButton = false;
+  const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
 
   return (
     <div
@@ -1374,6 +1399,15 @@ export function WidgetOverlay({
                       Talk to a human
                     </button>
                   </div>
+                ) : confidentialRecoveryOpen ? (
+                  <ConfidentialDiversionRecovery
+                    calendlyUrl={configuredCalendlyUrl}
+                    onHuman={() => {
+                      setConfidentialRecoveryOpen(false);
+                      setEntryPath('human');
+                    }}
+                    onLeave={handleClose}
+                  />
                 ) : showHumanFallback ? (
                   <HumanFallbacks calendlyUrl={configuredCalendlyUrl} unavailable={sessionUnavailable} />
                 ) : (
@@ -1495,30 +1529,46 @@ export function WidgetOverlay({
                           onAddFile={appendReferenceFile}
                           onFileAnalyzed={handleFileAnalyzed}
                           sessionId={sessionId}
+                          messageContext={inputValue}
                         />
                       </div>
                     )}
                   </>
                 )}
                 {showAttachmentButton && (
-                  <label
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '50%',
-                      border: `1px solid ${brandTokens.colors.border}`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      flexShrink: 0
-                    }}
-                  >
-                    <input type="file" multiple accept={UPLOAD_ACCEPT_ATTRIBUTE} onChange={handleFileSelect} style={{ display: 'none' }} />
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </label>
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Upload requested files"
+                      onClick={() => requestedFileInputRef.current?.click()}
+                      style={{
+                        width: '44px',
+                        height: '44px',
+                        minWidth: '44px',
+                        minHeight: '44px',
+                        borderRadius: '50%',
+                        border: `1px solid ${brandTokens.colors.border}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        flexShrink: 0
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                    <input
+                      ref={requestedFileInputRef}
+                      type="file"
+                      multiple
+                      accept={UPLOAD_ACCEPT_ATTRIBUTE}
+                      aria-label="Choose requested files"
+                      onChange={handleFileSelect}
+                      style={{ display: 'none' }}
+                    />
+                  </>
                 )}
                 <input
                   type="text"

@@ -5,14 +5,24 @@ const {
   hasSupabaseServerConfigMock,
   requireSessionMock,
   emitEventMock,
-  consumeRateLimitMock
+  consumeRateLimitMock,
+  classifyConfidentialIntentMock
 } = vi.hoisted(() => ({
   createServerSupabaseClientMock: vi.fn(),
   hasSupabaseServerConfigMock: vi.fn(() => false),
   requireSessionMock: vi.fn(),
   emitEventMock: vi.fn(),
-  consumeRateLimitMock: vi.fn()
+  consumeRateLimitMock: vi.fn(),
+  classifyConfidentialIntentMock: vi.fn()
 }));
+
+vi.mock('@/lib/privacy/confidential-intent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/privacy/confidential-intent')>();
+  return {
+    ...actual,
+    classifyConfidentialIntent: classifyConfidentialIntentMock
+  };
+});
 
 vi.mock('@/lib/supabase/server', () => ({
   createServerSupabaseClient: createServerSupabaseClientMock,
@@ -35,13 +45,22 @@ describe('POST /api/chat', () => {
   let originalFetch: typeof fetch;
   let originalDeepseekKey: string | undefined;
   let originalDeepseekModel: string | undefined;
+  let originalMinimaxKey: string | undefined;
+  let originalOpenAiKey: string | undefined;
+  let originalOpenAiEndpoint: string | undefined;
 
   beforeEach(() => {
     originalFetch = global.fetch;
     originalDeepseekKey = process.env.DEEPSEEK_API_KEY;
     originalDeepseekModel = process.env.DEEPSEEK_MODEL;
+    originalMinimaxKey = process.env.MINIMAX_API_KEY;
+    originalOpenAiKey = process.env.OPENAI_API_KEY;
+    originalOpenAiEndpoint = process.env.OPENAI_API_ENDPOINT;
     delete process.env.DEEPSEEK_API_KEY;
     delete process.env.DEEPSEEK_MODEL;
+    delete process.env.MINIMAX_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_ENDPOINT;
     hasSupabaseServerConfigMock.mockReset();
     hasSupabaseServerConfigMock.mockReturnValue(false);
     createServerSupabaseClientMock.mockReset();
@@ -64,11 +83,24 @@ describe('POST /api/chat', () => {
     });
     consumeRateLimitMock.mockReset();
     consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
+    classifyConfidentialIntentMock.mockReset();
+    classifyConfidentialIntentMock.mockImplementation((value: string) =>
+      /under nda/i.test(value) ? 'nda' : 'allow'
+    );
+    emitEventMock.mockReset();
   });
 
   afterEach(() => {
-    process.env.DEEPSEEK_API_KEY = originalDeepseekKey;
-    process.env.DEEPSEEK_MODEL = originalDeepseekModel;
+    if (originalDeepseekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalDeepseekKey;
+    if (originalDeepseekModel === undefined) delete process.env.DEEPSEEK_MODEL;
+    else process.env.DEEPSEEK_MODEL = originalDeepseekModel;
+    if (originalMinimaxKey === undefined) delete process.env.MINIMAX_API_KEY;
+    else process.env.MINIMAX_API_KEY = originalMinimaxKey;
+    if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalOpenAiKey;
+    if (originalOpenAiEndpoint === undefined) delete process.env.OPENAI_API_ENDPOINT;
+    else process.env.OPENAI_API_ENDPOINT = originalOpenAiEndpoint;
     global.fetch = originalFetch;
   });
 
@@ -196,6 +228,21 @@ describe('POST /api/chat', () => {
     });
     const res = await POST(req);
     return { res, data: await res.json() };
+  }
+
+  function safelySerializeLogCalls(calls: unknown[][]): string {
+    const seen = new WeakSet<object>();
+    return JSON.stringify(calls, (_key, value: unknown) => {
+      if (typeof value === 'bigint') return String(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: value.message, stack: value.stack };
+      }
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) return '[Circular]';
+        seen.add(value);
+      }
+      return value;
+    }) ?? '';
   }
 
   test('rejects an omitted session capability before calling the provider', async () => {
@@ -368,6 +415,167 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(413);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('diverts the current confidential message before rate limiting, draft access, provider calls, events, or logs', async () => {
+    const secret = 'Project NIGHTJAR is under NDA';
+    const fromMock = vi.fn(() => {
+      throw new Error('draft access must not occur');
+    });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'test-session', capability: 'test-session.secret' },
+      supabase: { from: fromMock, rpc: vi.fn() }
+    });
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const { res, data } = await postChat({
+        messages: [{ role: 'user', content: secret }]
+      });
+
+      expect(res.status).toBe(200);
+      expect(data).toEqual({
+        message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
+        outcome: 'confidential_diversion',
+        draftUpdates: {},
+        briefReady: false,
+        reviewPrompt: null,
+        missingFields: [],
+        truncated: false
+      });
+      expect(JSON.stringify(data)).not.toContain('NIGHTJAR');
+      expect(consumeRateLimitMock).not.toHaveBeenCalled();
+      expect(fromMock).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(emitEventMock).not.toHaveBeenCalled();
+      expect(safelySerializeLogCalls([
+        ...logSpy.mock.calls,
+        ...warnSpy.mock.calls,
+        ...errorSpy.mock.calls
+      ])).not.toContain(secret);
+    } finally {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  test('classifies and sends only the current user message, excluding prior confidential browser history', async () => {
+    const priorSecret = 'An earlier message was under NDA.';
+    const currentMessage = 'Tell me about an unusual production approach';
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Provider reply', 'stop')) as unknown as typeof fetch;
+
+    const { res } = await postChat({
+      messages: [
+        { role: 'user', content: priorSecret },
+        { role: 'user', content: currentMessage }
+      ],
+      context: { isTeamConnected: true }
+    });
+
+    expect(res.status).toBe(200);
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledOnce();
+    expect(classifyConfidentialIntentMock).toHaveBeenCalledWith(currentMessage);
+    const providerBody = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0]?.[1]?.body));
+    expect(providerBody.messages).toEqual([
+      expect.objectContaining({ role: 'system' }),
+      { role: 'user', content: currentMessage }
+    ]);
+    expect(JSON.stringify(providerBody)).not.toContain(priorSecret);
+  });
+
+  test('does not combine split phrases across separate requests or send prior request history', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/privacy/confidential-intent')>(
+      '@/lib/privacy/confidential-intent'
+    );
+    classifyConfidentialIntentMock.mockImplementation(actual.classifyConfidentialIntent);
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn(async () => makeTruncatedResponse('Provider reply', 'stop')) as unknown as typeof fetch;
+
+    const first = await postChat({
+      messages: [{ role: 'user', content: 'This project is under' }],
+      context: { isTeamConnected: true }
+    });
+    const second = await postChat({
+      messages: [
+        { role: 'user', content: 'This project is under' },
+        { role: 'user', content: 'NDA. Continue with an unusual production approach.' }
+      ],
+      context: { isTeamConnected: true }
+    });
+
+    expect(first.res.status).toBe(200);
+    expect(second.res.status).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const secondProviderBody = JSON.parse(String(vi.mocked(global.fetch).mock.calls[1]?.[1]?.body));
+    expect(secondProviderBody.messages).toEqual([
+      expect.objectContaining({ role: 'system' }),
+      { role: 'user', content: 'NDA. Continue with an unusual production approach.' }
+    ]);
+    expect(JSON.stringify(secondProviderBody)).not.toContain('This project is under');
+  });
+
+  test('rejects blank current user content before classification or provider activity', async () => {
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [
+        { role: 'user', content: 'Earlier project context' },
+        { role: 'user', content: '  \n\t ' }
+      ]
+    });
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe('Invalid request payload');
+    expect(classifyConfidentialIntentMock).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('checks authenticated session mismatch before confidential classification', async () => {
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'This project is under NDA.' }],
+      context: { sessionId: 'another-session' }
+    });
+
+    expect(res.status).toBe(403);
+    expect(data.error).toBe('Session mismatch');
+    expect(classifyConfidentialIntentMock).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('validates the shared request schema before confidential classification', async () => {
+    const { res } = await postChat({
+      messages: [{ role: 'assistant', content: 'This project is under NDA.' }]
+    });
+
+    expect(res.status).toBe(400);
+    expect(classifyConfidentialIntentMock).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('fails closed with the same diversion if classification throws', async () => {
+    classifyConfidentialIntentMock.mockImplementationOnce(() => {
+      throw new Error('classifier failure');
+    });
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'ordinary project text' }]
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toMatch(/cannot process confidential or sensitive material/i);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(emitEventMock).not.toHaveBeenCalled();
   });
 
   test('redirects careers intent before provider calls or draft persistence', async () => {
@@ -556,7 +764,7 @@ describe('POST /api/chat', () => {
     expect(emitEventMock).toHaveBeenCalledWith(
       'llm_request',
       expect.objectContaining({ sessionId: 'session-metrics', category: 'reply', hasDraft: false }),
-      undefined
+      expect.stringMatching(/^[a-z0-9-]{8}$/i)
     );
   });
 
@@ -921,7 +1129,7 @@ describe('POST /api/chat', () => {
     expect(data.reviewPrompt).toBeNull();
   });
 
-  test('returns local fallback response when no API key is set', async () => {
+  test('returns unavailable when no API key is set and no deterministic answer applies', async () => {
     global.fetch = vi.fn();
 
     const { res, data } = await postChat({
@@ -929,13 +1137,102 @@ describe('POST /api/chat', () => {
       context: { step: 'intro', draft: '{}' }
     });
 
+    expect(res.status).toBe(503);
+    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('calls only the fixed DeepSeek endpoint and configured DeepSeek model', async () => {
+    process.env.DEEPSEEK_API_KEY = 'deepseek-key';
+    process.env.DEEPSEEK_MODEL = 'approved-deepseek-model';
+    process.env.MINIMAX_API_KEY = 'minimax-key';
+    process.env.OPENAI_API_KEY = 'openai-key';
+    process.env.OPENAI_API_ENDPOINT = 'not-a-url-and-must-be-ignored';
+    global.fetch = vi.fn(async () => makeTruncatedResponse('DeepSeek reply', 'stop')) as unknown as typeof fetch;
+
+    const { res } = await postChat({
+      messages: [{ role: 'user', content: 'Tell me about an unusual production approach' }]
+    });
+
+    expect(res.status).toBe(200);
+    expect(global.fetch).toHaveBeenCalledOnce();
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.deepseek.com/v1/chat/completions',
+      expect.objectContaining({
+        body: expect.stringContaining('"model":"approved-deepseek-model"')
+      })
+    );
+    expect(String(vi.mocked(global.fetch).mock.calls[0][0])).not.toMatch(/minimax|openai|attacker/i);
+  });
+
+  test('does not select an alternate provider when DeepSeek is unconfigured', async () => {
+    process.env.MINIMAX_API_KEY = 'minimax-key';
+    process.env.OPENAI_API_KEY = 'openai-key';
+    process.env.OPENAI_API_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'Invent a highly unusual production answer not covered locally' }]
+    });
+
+    expect(res.status).toBe(503);
+    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('keeps an applicable deterministic answer when DeepSeek is unconfigured', async () => {
+    global.fetch = vi.fn();
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+
     expect(res.status).toBe(200);
     expect(data.message).toBeTypeOf('string');
-    expect(data.message.length).toBeGreaterThan(0);
-    expect(data.draftUpdates).toEqual({});
-    expect(data.briefReady).toBe(false);
-    expect(data.reviewPrompt).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('returns one redacted unavailable error when DeepSeek rejects the request', async () => {
+    process.env.DEEPSEEK_API_KEY = 'deepseek-key';
+    process.env.MINIMAX_API_KEY = 'minimax-key';
+    process.env.OPENAI_API_KEY = 'openai-key';
+    global.fetch = vi.fn(async () => new Response('provider body SECRET-42', { status: 429 })) as unknown as typeof fetch;
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'ordinary provider-dependent question' }]
+    });
+
+    expect(res.status).toBe(503);
+    expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(JSON.stringify(data)).not.toMatch(/SECRET-42|429|minimax|openai|deepseek-key/i);
+    expect(global.fetch).toHaveBeenCalledOnce();
+  });
+
+  test('returns the same redacted unavailable error when DeepSeek times out', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.DEEPSEEK_API_KEY = 'deepseek-key';
+      global.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('timeout body SECRET-43', 'AbortError'));
+          }, { once: true });
+        })
+      ) as unknown as typeof fetch;
+
+      const responsePromise = postChat({
+        messages: [{ role: 'user', content: 'ordinary provider-dependent timeout question' }]
+      });
+      await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(15_000);
+      const { res, data } = await responsePromise;
+
+      expect(res.status).toBe(503);
+      expect(data).toEqual({ error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+      expect(JSON.stringify(data)).not.toMatch(/SECRET-43|AbortError|deepseek-key/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('answers filming FAQs deterministically with messages[] and sharedWork without calling the LLM', async () => {
@@ -966,10 +1263,11 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_API_KEY = 'test-key';
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
+    const attackerRequestId = 'request_token-123.abc';
     const { res, data } = await postChat({
       messages: [{ role: 'user', content: 'Tell me everything about Balance Studio' }],
       context: { step: 'intro', draft: '{}' }
-    });
+    }, { headers: { 'x-request-id': attackerRequestId } });
 
     expect(res.status).toBe(200);
     expect(data.truncated).toBe(true);
@@ -981,6 +1279,7 @@ describe('POST /api/chat', () => {
       'response truncated: finish_reason=length',
       expect.objectContaining({ rid: expect.any(String), ts: expect.any(String) })
     );
+    expect(safelySerializeLogCalls(warnSpy.mock.calls)).not.toContain(attackerRequestId);
 
     warnSpy.mockRestore();
   });

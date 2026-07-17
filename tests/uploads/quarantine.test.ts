@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, test } from 'vitest';
-import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
+import {
+  PRIVATE_ANALYSIS_UPLOAD_POLICY,
+  validateFile,
+  validateFileBatch
+} from '@/lib/uploads/quarantine';
 import { createAttachmentConsent, hasRequiredConsent } from '@/lib/uploads/consent';
 
 function makeFileWithBytes(name: string, bytes: number[], type: string): File {
@@ -61,6 +65,17 @@ function makeWebpBuffer(): ArrayBuffer {
 function makeTextBuffer(content: string): ArrayBuffer {
   return new TextEncoder().encode(content).buffer;
 }
+
+test('exports the exact private AI analysis formats and limits', () => {
+  expect(PRIVATE_ANALYSIS_UPLOAD_POLICY).toEqual({
+    acceptedFormats: ['PNG', 'JPEG', 'GIF', 'WebP', 'PDF', 'TXT', 'CSV'],
+    accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,.txt,.csv',
+    maxFiles: 5,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxTotalSizeBytes: 25 * 1024 * 1024,
+    maxExtractedCharacters: 4000
+  });
+});
 
 describe('validateFile', () => {
   test('rejects empty files', () => {
@@ -139,6 +154,57 @@ describe('validateFile', () => {
     const file = makeFileWithBytes('data.csv', [], 'text/csv');
     Object.defineProperty(file, 'size', { value: buf.byteLength });
     expect(validateFile(file, buf)).toEqual({ ok: true, mime: 'text/csv' });
+  });
+
+  test.each([
+    ['notes.txt', ''],
+    ['notes.txt', 'application/octet-stream'],
+    ['data.csv', ''],
+    ['data.csv', 'application/vnd.ms-excel']
+  ])('accepts cross-browser text file %s declared as %j', (name, type) => {
+    const buf = makeTextBuffer('project,launch film');
+    const file = makeFileWithBytes(name, [], type);
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf)).toEqual({
+      ok: true,
+      mime: name.endsWith('.csv') ? 'text/csv' : 'text/plain'
+    });
+  });
+
+  test('rejects binary bytes spoofed as a cross-browser text file', () => {
+    const buf = new Uint8Array([0x00, 0x4d, 0x5a]).buffer;
+    const file = makeFileWithBytes('brief.txt', [], 'application/octet-stream');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(false);
+  });
+
+  test.each(['brief.txt', 'brief.csv'])('accepts strict UTF-8 Unicode and BOM throughout %s', (name) => {
+    const buf = new TextEncoder().encode('\uFEFFClient says “launch in 東京”\nBudget,5000').buffer;
+    const file = makeFileWithBytes(name, [], '');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(true);
+  });
+
+  test('rejects invalid UTF-8 in text files', () => {
+    const buf = new Uint8Array([0x66, 0x6f, 0x80]).buffer;
+    const file = makeFileWithBytes('brief.txt', [], 'text/plain');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(false);
+  });
+
+  test.each([
+    new Uint8Array([...new Uint8Array(600).fill(0x61), 0x00]).buffer,
+    new Uint8Array([...new Uint8Array(600).fill(0x61), 0xff]).buffer,
+    new TextEncoder().encode(`${'a'.repeat(600)}\u0085tail`).buffer
+  ])('rejects disallowed binary or control data after the old 512-byte prefix', (buf) => {
+    const file = makeFileWithBytes('brief.txt', [], 'application/octet-stream');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(false);
   });
 
   test('rejects unknown file type', () => {

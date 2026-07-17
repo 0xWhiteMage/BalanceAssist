@@ -2,10 +2,26 @@ import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
+import { classifyConfidentialFilename, classifyConfidentialIntent } from '@/lib/privacy/confidential-intent';
+import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
+import { PRIVATE_ANALYSIS_UPLOAD_POLICY, validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
+import {
+  HUMAN_UPLOAD_POLICY,
+  hasBlockedHumanUploadContent,
+  safeHumanUploadMime,
+  validateHumanUploadBatch
+} from '@/lib/uploads/file-policy';
 
-const MAX_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
+const ANALYSIS_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
+const HUMAN_MULTIPART_BODY_BYTES = HUMAN_UPLOAD_POLICY.maxTotalSizeBytes + 1024 * 1024;
 
 class MultipartBodyTooLargeError extends Error {}
+
+async function readFileBuffer(file: File): Promise<ArrayBuffer> {
+  return typeof file.arrayBuffer === 'function'
+    ? file.arrayBuffer()
+    : new Response(file).arrayBuffer();
+}
 
 function boundedBodyStream(body: ReadableStream<Uint8Array>, maxBytes: number) {
   const reader = body.getReader();
@@ -58,15 +74,26 @@ export async function POST(request: Request) {
     return authResult.response;
   }
 
+  const modeHeader = request.headers.get('x-upload-mode')?.trim();
+  if (!modeHeader) {
+    return jsonWithCors({ ok: false, code: 'upload_mode_required' }, { status: 400 }, request);
+  }
+  if (modeHeader !== 'analysis' && modeHeader !== 'human') {
+    return jsonWithCors({ ok: false, code: 'invalid_upload_mode' }, { status: 400 }, request);
+  }
+  const maxMultipartBodyBytes = modeHeader === 'analysis'
+    ? ANALYSIS_MULTIPART_BODY_BYTES
+    : HUMAN_MULTIPART_BODY_BYTES;
+
   const contentLength = request.headers.get('content-length');
-  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_MULTIPART_BODY_BYTES) {
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxMultipartBodyBytes) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
   }
 
   let form: FormData;
   try {
     const multipartRequest = request.body
-      ? new Request(request, { body: boundedBodyStream(request.body, MAX_MULTIPART_BODY_BYTES), duplex: 'half' } as RequestInit)
+      ? new Request(request, { body: boundedBodyStream(request.body, maxMultipartBodyBytes), duplex: 'half' } as RequestInit)
       : request;
     form = await multipartRequest.formData();
   } catch (error) {
@@ -76,6 +103,12 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'Invalid form data' }, { status: 400 }, request);
   }
 
+  const modeValue = form.get('mode');
+  if (modeValue !== modeHeader) {
+    return jsonWithCors({ ok: false, code: 'upload_mode_mismatch' }, { status: 400 }, request);
+  }
+  const mode = modeHeader;
+
   const files = form
     .getAll('files')
     .concat(form.getAll('file'))
@@ -84,8 +117,22 @@ export async function POST(request: Request) {
   if (files.length === 0) {
     return jsonWithCors({ ok: false, error: 'Missing files' }, { status: 400 }, request);
   }
-  if (files.length > 5 || files.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {
+  const activePolicy = mode === 'analysis' ? PRIVATE_ANALYSIS_UPLOAD_POLICY : HUMAN_UPLOAD_POLICY;
+  if (
+    files.length > activePolicy.maxFiles ||
+    files.reduce((total, file) => total + file.size, 0) > activePolicy.maxTotalSizeBytes
+  ) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
+  }
+
+  if (mode === 'analysis') {
+    try {
+      if (files.some((file) => classifyConfidentialFilename(file.name) !== 'allow')) {
+        return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+      }
+    } catch {
+      return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+    }
   }
 
   const sessionId = authResult.auth.sessionId;
@@ -103,17 +150,69 @@ export async function POST(request: Request) {
   if (consentError) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 503 }, request);
   }
-  const analysisConsent = (consents ?? []).find((entry: { scope?: unknown }) => entry.scope === 'analysis') as { granted?: unknown } | undefined;
-  if (analysisConsent?.granted !== true) {
-    return jsonWithCors({ ok: false, code: 'analysis_consent_required' }, { status: 403 }, request);
+  const requiredScope = mode === 'analysis' ? 'analysis' : 'producer_transfer';
+  const requiredConsent = (consents ?? []).find(
+    (entry: { scope?: unknown }) => entry.scope === requiredScope
+  ) as { granted?: unknown } | undefined;
+  if (requiredConsent?.granted !== true) {
+    const code = mode === 'analysis' ? 'analysis_consent_required' : 'producer_transfer_consent_required';
+    return jsonWithCors({ ok: false, code }, { status: 403 }, request);
+  }
+
+  let preflight: Array<{ buffer: ArrayBuffer; verifiedMime: string; extractedText: string }>;
+  try {
+    const buffers = await Promise.all(files.map(readFileBuffer));
+    if (mode === 'analysis') {
+      const batchValidation = validateFileBatch(files.map((file, index) => ({ file, buffer: buffers[index] })));
+      if (!batchValidation.ok) throw new Error('file_validation_failed');
+      preflight = files.map((file, index) => {
+        const validation = validateFile(file, buffers[index]);
+        if (!validation.ok) throw new Error('file_validation_failed');
+        return {
+          buffer: buffers[index],
+          verifiedMime: validation.mime,
+          extractedText: extractTextFromBuffer(Buffer.from(buffers[index]), validation.mime)
+        };
+      });
+    } else {
+      if (!validateHumanUploadBatch(files).ok) throw new Error('file_validation_failed');
+      if (files.some((file, index) => hasBlockedHumanUploadContent(file.type, buffers[index]))) {
+        throw new Error('file_validation_failed');
+      }
+      preflight = files.map((file, index) => ({
+        buffer: buffers[index],
+        verifiedMime: safeHumanUploadMime(file.type),
+        extractedText: ''
+      }));
+    }
+  } catch {
+    return jsonWithCors({ ok: false, code: 'file_validation_failed' }, { status: 422 }, request);
+  }
+
+  if (mode === 'analysis') {
+    try {
+      if (preflight.some(({ extractedText }) => extractedText.trim() && classifyConfidentialIntent(extractedText) !== 'allow')) {
+        return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+      }
+    } catch {
+      return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+    }
   }
 
   const stored: Array<{ objectKey: string; mimeType: string; extractedText: string }> = [];
   try {
-    for (const file of files) {
-      stored.push(await storePrivateUpload({ client: authResult.supabase as unknown as PrivateStorageClient, bucket, sessionId, file }));
+    for (const file of preflight) {
+      stored.push(await storePrivateUpload({
+        client: authResult.supabase as unknown as PrivateStorageClient,
+        bucket,
+        sessionId,
+        ...file
+      }));
     }
-    return jsonWithCors({ ok: true, status: 'stored', analyses: stored.map(({ mimeType, extractedText }) => ({ mimeType, extractedText })) }, undefined, request);
+    const response = mode === 'analysis'
+      ? { ok: true, status: 'stored', analyses: stored.map(({ mimeType, extractedText }) => ({ mimeType, extractedText })) }
+      : { ok: true, status: 'stored' };
+    return jsonWithCors(response, undefined, request);
   } catch (error) {
     const compensated = await Promise.all(stored.map(({ objectKey }) => deletePrivateUpload({
       client: authResult.supabase as unknown as PrivateStorageClient,

@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { createLogger } from '@/lib/logger';
+import { createLogger, extractClientRequestId, extractRequestId } from '@/lib/logger';
 
 describe('createLogger', () => {
   test('includes a stable request id in log entries', () => {
@@ -87,4 +87,68 @@ describe('createLogger', () => {
     });
     spy.mockRestore();
   });
+});
+
+describe('extractRequestId', () => {
+  test('accepts a canonical UUID request id', () => {
+    const requestId = '550e8400-e29b-41d4-a716-446655440000';
+    const request = new Request('https://example.com', {
+      headers: { 'x-request-id': requestId }
+    });
+
+    expect(extractRequestId(request)).toBe(requestId);
+  });
+
+  test.each([
+    ['valid-looking arbitrary token', 'request_token-123.abc'],
+    ['secret-bearing', 'Bearer secret-route-token'],
+    ['CRLF-bearing', 'safe-id\r\nX-Secret: leaked'],
+    ['oversized', 'a'.repeat(65)],
+    ['invalid-character', 'attacker@example.com']
+  ])('replaces a %s request id with a generated server id', (_case, requestId) => {
+    const request = {
+      headers: { get: () => requestId }
+    } as unknown as Request;
+
+    const extracted = extractRequestId(request);
+    expect(extracted).toMatch(/^[a-z0-9-]{8}$/i);
+    expect(extracted).not.toContain(requestId);
+  });
+
+  test('never writes a rejected request-id header to logs', () => {
+    const attackerValue = 'Bearer secret-log-token';
+    const request = {
+      headers: { get: () => attackerValue }
+    } as unknown as Request;
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    createLogger('test', extractRequestId(request)).warn('safe warning');
+
+    expect(JSON.stringify(spy.mock.calls)).not.toContain(attackerValue);
+    const entry = spy.mock.calls[0][2] as Record<string, unknown>;
+    expect(entry.rid).toMatch(/^[a-z0-9-]{8}$/i);
+    spy.mockRestore();
+  });
+});
+
+describe('extractClientRequestId', () => {
+  test('returns a canonical UUID for relay idempotency', () => {
+    const requestId = '8d1f684d-090c-4f67-80d4-317a88ad9cbe';
+    const request = new Request('https://example.com', {
+      headers: { 'x-request-id': requestId }
+    });
+
+    expect(extractClientRequestId(request)).toBe(requestId);
+  });
+
+  test.each([null, 'retry-key', 'a'.repeat(65)])(
+    'returns null for a missing or invalid relay idempotency key: %s',
+    (requestId) => {
+      const request = {
+        headers: { get: () => requestId }
+      } as unknown as Request;
+
+      expect(extractClientRequestId(request)).toBeNull();
+    }
+  );
 });

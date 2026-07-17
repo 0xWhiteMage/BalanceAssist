@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WidgetOverlay } from '@/components/widget/widget-overlay';
 
 const originalFetch = global.fetch;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 beforeAll(() => {
   if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
@@ -63,6 +71,254 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay brief rail gating (Fix 4)', () => {
+  test('shows factual unavailability without local fallback or retry when DeepSeek rejects', async () => {
+    let chatCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatCalls += 1;
+        return new Response(JSON.stringify({
+          error: 'Chat service unavailable',
+          detail: 'chat_provider_unavailable'
+        }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Invent an unusual production approach' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText(/AI chat is temporarily unavailable.*Talk to a human/i, {}, { timeout: 5000 })).toBeVisible();
+    expect(chatCalls).toBe(1);
+    expect(screen.queryByText(/could you tell me a bit more about the project|could you rephrase that|what else can you tell me/i)).toBeNull();
+  }, 10_000);
+
+  test('shows the same factual unavailability without local fallback or retry when chat times out', async () => {
+    let chatCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatCalls += 1;
+        throw new DOMException('timed out', 'AbortError');
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Invent an unusual production approach' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText(/AI chat is temporarily unavailable.*Talk to a human/i, {}, { timeout: 5000 })).toBeVisible();
+    expect(chatCalls).toBe(1);
+    expect(screen.queryByText(/could you tell me a bit more about the project|could you rephrase that|what else can you tell me/i)).toBeNull();
+  }, 10_000);
+
+  test('ignores a deferred normal response after AI processing moves to human-only contact', async () => {
+    const pendingChat = deferred<Response>();
+    const requests: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes('/api/chat') && init?.method === 'POST') return pendingChat.promise;
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Tell me about a launch film' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(requests.filter((url) => url.includes('/api/chat'))).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    await screen.findByPlaceholderText(/message the team request/i);
+
+    await act(async () => {
+      pendingChat.resolve(new Response(JSON.stringify({
+        message: 'STALE NORMAL RESPONSE',
+        draftUpdates: { service: 'production', projectScope: 'Stale scope' },
+        briefReady: false
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      await pendingChat.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('STALE NORMAL RESPONSE')).toBeNull();
+    expect(screen.queryByTestId('review-rail')).toBeNull();
+  }, 15_000);
+
+  test('cancels a delayed AI bot message when processing moves to human-only contact', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'STALE DELAYED AI REPLY',
+          draftUpdates: {},
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'Tell me something ordinary' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByRole('status', { name: /balance assist is typing/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    await screen.findByPlaceholderText(/message the team request/i);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    });
+
+    expect(screen.queryByText('STALE DELAYED AI REPLY')).toBeNull();
+  }, 15_000);
+
+  test('does not apply deferred canonical hydration after AI generation invalidation', async () => {
+    const pendingHydration = deferred<Response>();
+    const requests: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'Updating the brief.',
+          draftUpdates: { service: 'production' },
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/projects/mock-session/draft') && !init?.method) return pendingHydration.promise;
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'An ordinary production project' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(requests.some((url) => url.includes('/api/projects/mock-session/draft'))).toBe(true));
+
+    fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
+    await screen.findByPlaceholderText(/message the team request/i);
+    await act(async () => {
+      pendingHydration.resolve(new Response(JSON.stringify({
+        sessionId: 'mock-session',
+        draftVersion: 9,
+        fieldCount: 2,
+        draft: {
+          service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' },
+          projectScope: { value: 'STALE HYDRATED SCOPE', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      await pendingHydration.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('STALE HYDRATED SCOPE')).toBeNull();
+  }, 15_000);
+
+  test('requires explicit human-only consent after diversion and never retries or relays blocked history', async () => {
+    const secret = 'Project NIGHTJAR is under NDA';
+    const requests: Array<{ url: string; body: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, body: String(init?.body ?? '') });
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
+          outcome: 'confidential_diversion',
+          draftUpdates: {},
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/consent')) {
+        return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (url.includes('/api/telegram/relay')) {
+        return new Response(JSON.stringify({ ok: true, persisted: true, queued: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (url.includes('/api/telegram/messages')) {
+        return new Response(JSON.stringify({
+          outgoingStatus: null,
+          messages: [],
+          fileRequestOpen: false,
+          fileRequestNote: null,
+          scheduleRequestOpen: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/recovery" />);
+
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: secret } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText(/this channel cannot process confidential or sensitive material/i, {}, { timeout: 5000 })).toBeVisible();
+    const chatRequests = () => requests.filter((request) => request.url.includes('/api/chat'));
+    const consentRequests = () => requests.filter((request) => request.url.includes('/consent'));
+    const relayRequests = () => requests.filter((request) => request.url.includes('/api/telegram/relay'));
+    expect(chatRequests()).toHaveLength(1);
+    expect(consentRequests()).toHaveLength(0);
+    expect(relayRequests()).toHaveLength(0);
+    expect(screen.queryByPlaceholderText(/message the team request/i)).toBeNull();
+    expect(screen.getByRole('link', { name: /email the team/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(screen.getByRole('link', { name: /book a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/recovery');
+    expect(screen.getByRole('button', { name: /leave/i })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+
+    const humanInput = await screen.findByPlaceholderText(/message the team request/i, {}, { timeout: 5000 });
+    expect(consentRequests()).toHaveLength(1);
+    expect(relayRequests()).toHaveLength(0);
+
+    fireEvent.change(humanInput, { target: { value: 'Please ask a producer to contact me.' } });
+    fireEvent.keyDown(humanInput, { key: 'Enter' });
+
+    await waitFor(() => expect(relayRequests()).toHaveLength(1));
+    expect(chatRequests()).toHaveLength(1);
+    expect(relayRequests()[0].body).toContain('Please ask a producer to contact me.');
+    expect(relayRequests()[0].body).not.toContain(secret);
+  }, 15_000);
+
   test('makes direct human contact usable while the request is pending without claiming the team is connected', async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

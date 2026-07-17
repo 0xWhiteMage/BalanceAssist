@@ -16,6 +16,134 @@ function enableProducerShareConsent() {
   fireEvent.click(screen.getByLabelText(/balance team may review links/i));
 }
 
+function mockPrivateStorageAvailable() {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/api/telegram/upload') && !init?.method) {
+      return new Response(JSON.stringify({ available: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    throw new Error(`Unexpected processing request: ${String(input)}`);
+  });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  return fetchMock;
+}
+
+test('discloses the exact AI formats, limits, extraction behavior, and DeepSeek flow before selection', async () => {
+  mockPrivateStorageAvailable();
+  const { container } = render(
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />
+  );
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+
+  const disclosure = screen.getByTestId('private-analysis-upload-disclosure');
+  expect(disclosure).toHaveTextContent(/PNG, JPEG, GIF, WebP, PDF, TXT, and CSV/i);
+  expect(disclosure).toHaveTextContent(/up to 5 files/i);
+  expect(disclosure).toHaveTextContent(/10 MB each/i);
+  expect(disclosure).toHaveTextContent(/25 MB total/i);
+  expect(disclosure).toHaveTextContent(/TXT and PDF.*up to 4,000 characters/i);
+  expect(disclosure).toHaveTextContent(/images and CSV may yield no extracted text/i);
+  expect(disclosure).toHaveTextContent(/extracted text.*DeepSeek/i);
+  expect(disclosure).toHaveTextContent(/do not prove.*non-confidential/i);
+  expect(container.querySelector('input[type="file"]')).toHaveAttribute(
+    'accept',
+    'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,.txt,.csv'
+  );
+});
+
+test('does not open the selector when current message context is confidential', async () => {
+  mockPrivateStorageAvailable();
+  const { container } = render(
+    <AttachmentDropzone
+      onAddLink={vi.fn()}
+      onAddFile={vi.fn()}
+      messageContext="The attached brief contains confidential information"
+    />
+  );
+  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+  await waitFor(() => expect(fileInput).not.toBeDisabled());
+  const clickSpy = vi.spyOn(fileInput, 'click');
+
+  fireEvent.click(screen.getByRole('button', { name: /store file privately/i }));
+
+  expect(clickSpy).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent(/cannot process confidential or sensitive material/i);
+  expect(screen.getByRole('alert').textContent).not.toContain('attached brief');
+});
+
+test('blocks a confidential filename before consent persistence, byte reads, upload, or callbacks', async () => {
+  const fetchMock = mockPrivateStorageAvailable();
+  const onAddFile = vi.fn();
+  const onFileAnalyzed = vi.fn();
+  const { container } = render(
+    <AttachmentDropzone
+      onAddLink={vi.fn()}
+      onAddFile={onAddFile}
+      onFileAnalyzed={onFileAnalyzed}
+      sessionId="sess-guard"
+    />
+  );
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  enableAnalysisConsent();
+
+  const file = new File(['do not read'], 'confidential-client-brief.txt', { type: 'text/plain' });
+  const arrayBufferSpy = vi.fn(async () => new ArrayBuffer(0));
+  Object.defineProperty(file, 'arrayBuffer', { value: arrayBufferSpy });
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [file] } });
+
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/cannot process confidential/i));
+  expect(input.value).toBe('');
+  expect(arrayBufferSpy).not.toHaveBeenCalled();
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toEqual([]);
+  expect(onAddFile).not.toHaveBeenCalled();
+  expect(onFileAnalyzed).not.toHaveBeenCalled();
+});
+
+test('allows a benign filename containing a near-match', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
+    if (String(input).includes('/consent')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, analyses: [{ extractedText: 'ordinary text' }] }), { status: 200 });
+  });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  const { container } = render(
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-safe" />
+  );
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  enableAnalysisConsent();
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, {
+    target: { files: [new File(['hello'], 'personal-project.txt', { type: 'text/plain' })] }
+  });
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
+});
+
+test('shows the stable non-echoing diversion when the server rejects a filename', async () => {
+  const filename = 'ordinary-client-brief.txt';
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
+    if (String(input).includes('/consent')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    return new Response(JSON.stringify({ ok: false, code: 'confidential_file_not_allowed' }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }) as unknown as typeof fetch;
+  const { container } = render(
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-server-guard" />
+  );
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  enableAnalysisConsent();
+  fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+    target: { files: [new File(['ordinary'], filename, { type: 'text/plain' })] }
+  });
+
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/cannot process confidential/i));
+  expect(screen.getByRole('alert').textContent).not.toContain(filename);
+});
+
 test('classifies a pasted YouTube URL and adds a chip', async () => {
   const onAdd = vi.fn();
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -233,4 +361,7 @@ test('forwards only the server-derived analysis payload to the draft callback', 
   fireEvent.change(input, { target: { files: [new File(['client text'], 'brief.txt', { type: 'text/plain' })] } });
 
   await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Server-verified brief text'));
+  const uploadCall = vi.mocked(global.fetch).mock.calls.find(([, init]) => init?.method === 'POST' && init.body instanceof FormData);
+  expect((uploadCall?.[1]?.body as FormData).get('mode')).toBe('analysis');
+  expect(new Headers(uploadCall?.[1]?.headers).get('x-upload-mode')).toBe('analysis');
 });

@@ -1,6 +1,6 @@
 import zlib from 'node:zlib';
+import { PRIVATE_ANALYSIS_UPLOAD_POLICY } from '@/lib/uploads/quarantine';
 
-const MAX_EXTRACTED_CHARS = 4000;
 const MAX_PDF_COMPRESSED_STREAM_BYTES = 256 * 1024;
 const MAX_PDF_INFLATED_BYTES = 512 * 1024;
 const MAX_PDF_TOTAL_INFLATED_BYTES = 1024 * 1024;
@@ -12,13 +12,6 @@ type ZipEntry = {
   compressedSize: number;
   dataOffset: number;
 };
-
-function getExtension(filename: string): string {
-  const trimmed = filename.trim();
-  const lastDot = trimmed.lastIndexOf('.');
-  if (lastDot < 0 || lastDot === trimmed.length - 1) return '';
-  return trimmed.slice(lastDot + 1).toLowerCase();
-}
 
 // Minimal central-directory-based ZIP reader. OOXML files (.pptx/.docx) are ZIP
 // archives of XML parts; we walk the End-of-Central-Directory record to find each
@@ -214,17 +207,12 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
-export function extractTextFromBuffer(buffer: Buffer, filename: string): string {
-  const ext = getExtension(filename);
+export function extractTextFromBuffer(buffer: Buffer, verifiedMime: string): string {
   let text = '';
-  if (ext === 'txt') {
+  if (verifiedMime === 'text/plain') {
     text = buffer.toString('utf8');
-  } else if (ext === 'pdf') {
+  } else if (verifiedMime === 'application/pdf') {
     text = extractFromPdf(buffer);
-  } else if (ext === 'pptx') {
-    text = extractFromPptx(buffer);
-  } else if (ext === 'docx') {
-    text = extractFromDocx(buffer);
   }
-  return normalizeWhitespace(text).slice(0, MAX_EXTRACTED_CHARS);
+  return normalizeWhitespace(text).slice(0, PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters);
 }

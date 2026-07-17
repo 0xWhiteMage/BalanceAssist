@@ -83,9 +83,66 @@ describe('chatRequest client', () => {
     expect(result).toBeNull();
   });
 
+  test('preserves the exact provider-unavailable 503 as a typed chat response', async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        error: 'Chat service unavailable',
+        detail: 'chat_provider_unavailable'
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    const result = await chatRequest({
+      messages: [{ role: 'user', content: 'provider-dependent request' }]
+    });
+
+    expect(result).toEqual({
+      outcome: 'provider_unavailable',
+      error: 'Chat service unavailable',
+      detail: 'chat_provider_unavailable',
+      replies: [],
+      draftUpdates: {},
+      briefReady: false,
+      sharedWork: null
+    });
+  });
+
   test('rejects malformed reply text before it reaches the widget', async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ messages: ['valid', 42], draftUpdates: {}, briefReady: false }), {
       status: 200, headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    await expect(chatRequest({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeNull();
+  });
+
+  test('returns the validated confidential diversion outcome', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: 'This channel cannot process confidential or sensitive material. Please use the human-only path to talk to the Balance team.',
+      outcome: 'confidential_diversion',
+      draftUpdates: {},
+      briefReady: false
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    const result = await chatRequest({ messages: [{ role: 'user', content: 'protected text' }] });
+
+    expect(result?.outcome).toBe('confidential_diversion');
+  });
+
+  test('rejects an unknown chat outcome', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: 'Unexpected response',
+      outcome: 'retry_with_history'
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
     })) as unknown as typeof fetch;
 
     const { chatRequest } = await import('@/lib/api/client');
@@ -138,9 +195,13 @@ describe('chatRequest client', () => {
 
     expect(result).toEqual({ ok: true });
     const form = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('mode')).toBe('human');
     expect(form.get('consent')).toBeNull();
     expect(form.get('sessionId')).toBeNull();
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.headers).toEqual({ 'x-session-id': 'session-123' });
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.headers).toEqual({
+      'x-session-id': 'session-123',
+      'x-upload-mode': 'human'
+    });
   });
 
   test('records producer-transfer consent before a producer action', async () => {

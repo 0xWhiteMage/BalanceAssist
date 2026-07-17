@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanupExpiredStoredUploads, privateStorageAvailable, storePrivateUpload } from '@/lib/uploads/private-storage';
+import { validateFile } from '@/lib/uploads/quarantine';
+import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
 const sessionId = '11111111-2222-3333-4444-555555555555';
 
@@ -45,13 +47,27 @@ function makeClient(options?: { bucket?: { id: string; public: boolean } | null;
   };
 }
 
+async function storeFile(client: ReturnType<typeof makeClient>, file: File, extractText = true) {
+  const buffer = await file.arrayBuffer();
+  const validation = validateFile(file, buffer);
+  if (!validation.ok) throw new Error('invalid test file');
+  return storePrivateUpload({
+    client: client as never,
+    bucket: 'temporary-attachments',
+    sessionId,
+    buffer,
+    verifiedMime: validation.mime,
+    extractedText: extractText ? extractTextFromBuffer(Buffer.from(buffer), validation.mime) : ''
+  });
+}
+
 afterEach(() => vi.restoreAllMocks());
 
 describe('private attachment storage', () => {
   test('rejects when the configured bucket is unavailable', async () => {
     const client = makeClient({ bucket: null });
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+    await expect(storeFile(client, makeFile()))
       .rejects.toMatchObject({ code: 'private_storage_unavailable' });
     expect(client.upload).not.toHaveBeenCalled();
     expect(client.insert).not.toHaveBeenCalled();
@@ -61,7 +77,7 @@ describe('private attachment storage', () => {
     const client = makeClient({ readiness: 'unavailable', attested: false });
 
     await expect(privateStorageAvailable(client as never, 'temporary-attachments')).resolves.toBe(false);
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+    await expect(storeFile(client, makeFile()))
       .rejects.toMatchObject({ code: 'private_storage_unavailable' });
     expect(client.upload).not.toHaveBeenCalled();
   });
@@ -76,7 +92,7 @@ describe('private attachment storage', () => {
 
   test('stores validated bytes under an opaque key with durable metadata', async () => {
     const client = makeClient();
-    const result = await storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() });
+    const result = await storeFile(client, makeFile());
 
     expect(result).toMatchObject({ status: 'stored', mimeType: 'application/pdf' });
     expect(result.objectKey).toMatch(/^[0-9a-f-]{36}$/);
@@ -93,20 +109,61 @@ describe('private attachment storage', () => {
     }));
   });
 
-  test('returns bounded text extracted from validated server-side bytes', async () => {
+  test('returns precomputed text without changing it during storage', async () => {
     const client = makeClient();
     const bytes = new Uint8Array(Buffer.from('Project scope: launch film'));
     const file = new File([bytes], 'brief.txt', { type: 'text/plain' });
     Object.assign(file, { arrayBuffer: async () => bytes.buffer });
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file }))
-      .resolves.toMatchObject({ extractedText: 'Project scope: launch film' });
+    await expect(storePrivateUpload({
+      client: client as never,
+      bucket: 'temporary-attachments',
+      sessionId,
+      buffer: bytes.buffer,
+      verifiedMime: 'text/plain',
+      extractedText: 'precomputed project scope'
+    }))
+      .resolves.toMatchObject({ extractedText: 'precomputed project scope' });
+  });
+
+  test('does not extract PNG bytes whose attacker-controlled filename ends in txt', async () => {
+    const client = makeClient();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, ...Buffer.from('SECRET IMAGE TEXT')]);
+    const file = new File([bytes], 'attacker.txt', { type: 'text/plain' });
+    Object.assign(file, { arrayBuffer: async () => bytes.buffer });
+
+    await expect(storeFile(client, file))
+      .resolves.toMatchObject({ mimeType: 'image/png', extractedText: '' });
+  });
+
+  test('extracts PDF bytes using verified MIME even when filename has another extension', async () => {
+    const client = makeClient();
+    const bytes = new Uint8Array(Buffer.from('%PDF-1.4\nstream\nBT (Verified PDF Text) Tj ET\nendstream\n%%EOF'));
+    const file = new File([bytes], 'attacker.png', { type: 'image/png' });
+    Object.assign(file, { arrayBuffer: async () => bytes.buffer });
+
+    await expect(storeFile(client, file))
+      .resolves.toMatchObject({ mimeType: 'application/pdf', extractedText: expect.stringContaining('Verified PDF Text') });
+  });
+
+  test('does not extract prevalidated text when extraction is disabled for human mode', async () => {
+    const client = makeClient();
+    const bytes = new Uint8Array(Buffer.from('Protected human-only text'));
+
+    await expect(storePrivateUpload({
+      client: client as never,
+      bucket: 'temporary-attachments',
+      sessionId,
+      buffer: bytes.buffer,
+      verifiedMime: 'text/plain',
+      extractedText: ''
+    } as never)).resolves.toMatchObject({ extractedText: '' });
   });
 
   test('removes the uploaded object when metadata persistence fails', async () => {
     const client = makeClient({ insertError: true });
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+    await expect(storeFile(client, makeFile()))
       .rejects.toMatchObject({ code: 'private_storage_metadata_failed' });
     expect(client.remove).toHaveBeenCalledWith([expect.stringMatching(/^[0-9a-f-]{36}$/)]);
   });
@@ -114,7 +171,7 @@ describe('private attachment storage', () => {
   test('retains a pre-reserved opaque cleanup record when metadata rollback deletion fails', async () => {
     const client = makeClient({ insertError: true, removeError: true });
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile('private-budget.pdf') }))
+    await expect(storeFile(client, makeFile('private-budget.pdf')))
       .rejects.toMatchObject({ code: 'private_storage_metadata_failed' });
 
     expect(client.rpc).toHaveBeenCalledWith('reserve_private_attachment_cleanup', expect.objectContaining({
@@ -129,7 +186,7 @@ describe('private attachment storage', () => {
   test('reserves recovery cleanup atomically with the current session state', async () => {
     const client = makeClient({ insertError: true, removeError: true });
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+    await expect(storeFile(client, makeFile()))
       .rejects.toMatchObject({ code: 'private_storage_metadata_failed' });
 
     expect(client.rpc).toHaveBeenCalledWith('reserve_private_attachment_cleanup', expect.objectContaining({ p_session_id: sessionId }));
@@ -139,7 +196,7 @@ describe('private attachment storage', () => {
   test('does not upload an object when durable cleanup recovery cannot be reserved', async () => {
     const client = makeClient({ cleanupInsertError: true });
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+    await expect(storeFile(client, makeFile()))
       .rejects.toMatchObject({ code: 'private_storage_recovery_unavailable' });
 
     expect(client.upload).not.toHaveBeenCalled();
@@ -148,7 +205,7 @@ describe('private attachment storage', () => {
   test('does not upload an object when deletion has claimed the session', async () => {
     const client = makeClient({ reservationError: true });
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile() }))
+    await expect(storeFile(client, makeFile()))
       .rejects.toMatchObject({ code: 'private_storage_recovery_unavailable' });
 
     expect(client.rpc).toHaveBeenCalledWith('reserve_private_attachment_cleanup', expect.objectContaining({ p_session_id: sessionId }));
@@ -159,7 +216,7 @@ describe('private attachment storage', () => {
     const client = makeClient({ insertError: true });
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    await expect(storePrivateUpload({ client: client as never, bucket: 'temporary-attachments', sessionId, file: makeFile('private-budget.pdf') })).rejects.toBeDefined();
+    await expect(storeFile(client, makeFile('private-budget.pdf'))).rejects.toBeDefined();
     expect(JSON.stringify(spy.mock.calls)).not.toContain('private-budget.pdf');
   });
 

@@ -263,13 +263,14 @@ export async function uploadRequestedFiles(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const form = new FormData();
+    form.set('mode', 'human');
     for (const file of files) {
       form.append('files', file, file.name);
     }
 
     const response = await fetchWithTimeout('/api/telegram/upload', {
       method: 'POST',
-      headers: { 'x-session-id': sessionId },
+      headers: { 'x-session-id': sessionId, 'x-upload-mode': 'human' },
       body: form
     });
 
@@ -478,14 +479,23 @@ export type ChatRequestPayload = {
 
 export type ChatResponse = {
   replies: ChatReplyItem[];
+  outcome?: 'confidential_diversion' | 'provider_unavailable';
+  error?: 'Chat service unavailable';
+  detail?: 'chat_provider_unavailable';
   draftUpdates: Record<string, string | boolean>;
   briefReady: boolean;
   sharedWork: ChatSharedWork | null;
 };
 
+const chatProviderUnavailableSchema = z.object({
+  error: z.literal('Chat service unavailable'),
+  detail: z.literal('chat_provider_unavailable')
+});
+
 const chatResponseSchema = z.object({
   message: z.string().optional(),
   messages: z.array(z.string()).optional(),
+  outcome: z.literal('confidential_diversion').optional(),
   draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(),
   briefReady: z.boolean().optional(),
   sharedWork: z.object({ entries: z.array(z.object({
@@ -502,8 +512,36 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
     )
   };
 
-  const response = await postJson<unknown>('/api/chat', sanitizedPayload);
-  const parsed = chatResponseSchema.safeParse(response);
+  let response: Response;
+  let responseBody: unknown;
+  try {
+    response = await fetchWithTimeout('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sanitizedPayload),
+      keepalive: true
+    });
+    responseBody = await response.json();
+  } catch {
+    return null;
+  }
+
+  if (response.status === 503) {
+    const unavailable = chatProviderUnavailableSchema.safeParse(responseBody);
+    if (!unavailable.success) return null;
+    return {
+      outcome: 'provider_unavailable',
+      error: unavailable.data.error,
+      detail: unavailable.data.detail,
+      replies: [],
+      draftUpdates: {},
+      briefReady: false,
+      sharedWork: null
+    };
+  }
+  if (!response.ok) return null;
+
+  const parsed = chatResponseSchema.safeParse(responseBody);
   if (!parsed.success) return null;
   const data = parsed.data;
 
@@ -519,6 +557,7 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
 
   return {
     replies: textChunks.map((text) => ({ text })),
+    outcome: data.outcome,
     draftUpdates: data.draftUpdates ?? {},
     briefReady: Boolean(data.briefReady),
     sharedWork: data.sharedWork ?? null

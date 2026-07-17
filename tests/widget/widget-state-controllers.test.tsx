@@ -206,6 +206,43 @@ describe('useWidgetSessionDraft', () => {
     expect(createSession).toHaveBeenCalledOnce();
     expect(result.current.sessionId).toBe('fresh-restored-session');
   });
+
+  test('does not apply a deferred canonical hydration after hook invalidation', async () => {
+    const pendingDraft = deferred<{
+      sessionId: string;
+      draftVersion: number;
+      fieldCount: number;
+      draft: Record<string, string>;
+    } | null>();
+    const fetchProjectDraft = vi.fn(() => pendingDraft.promise);
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null),
+      getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft,
+      updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true),
+      requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    let hydration!: Promise<void>;
+
+    act(() => {
+      hydration = result.current.hydrateDraft('session-1', () => true);
+    });
+    await waitFor(() => expect(fetchProjectDraft).toHaveBeenCalledOnce());
+    act(() => result.current.invalidateBootstrap());
+    await act(async () => {
+      pendingDraft.resolve({
+        sessionId: 'session-1',
+        draftVersion: 4,
+        fieldCount: 1,
+        draft: { projectScope: 'STALE HYDRATED SCOPE' }
+      });
+      await hydration;
+    });
+
+    expect(result.current.draft.projectScope).toBe('');
+    expect(result.current.draftVersion).toBe(0);
+  });
 });
 
 describe('useTeamRelay', () => {
@@ -647,7 +684,7 @@ describe('useTeamRelay', () => {
 
     expect(result.current.status).toBe('requested');
     expect(result.current.waitingForReply).toBe(false);
-    expect(relay.mock.calls[0]?.[2]).toEqual(expect.any(String));
+    expect(relay.mock.calls[0]?.[2]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(relay.mock.calls[1]?.[2]).toBe(relay.mock.calls[0]?.[2]);
   });
 

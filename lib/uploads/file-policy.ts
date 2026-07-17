@@ -82,10 +82,53 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
 
 export const UPLOAD_ACCEPT_ATTRIBUTE = ALLOWED_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
-export const HUMAN_UPLOAD_GUIDANCE =
-  'Accepted: documents, presentations, images, video, audio, design/project files, and archives up to 50 MB. Executables and scripts are blocked.';
+export const HUMAN_UPLOAD_POLICY = {
+  allowedExtensions: ALLOWED_UPLOAD_EXTENSIONS,
+  maxFiles: 5,
+  maxFileSizeBytes: MAX_UPLOAD_SIZE_BYTES,
+  maxTotalSizeBytes: 50 * 1024 * 1024,
+  accept: UPLOAD_ACCEPT_ATTRIBUTE
+} as const;
 
-export const HUMAN_UPLOAD_SUMMARY = 'Accepted: docs, decks, images, video, audio, design files, archives · max 50 MB · no executables or scripts.';
+export const HUMAN_UPLOAD_GUIDANCE =
+  'Accepted: documents, presentations, images, video, audio, design/project files, and archives; up to 5 files, 50 MB each, and 50 MB total. Known executable and script file types and signatures are blocked. Archives are not malware-scanned; send only trusted files.';
+
+export const HUMAN_UPLOAD_SUMMARY = 'Accepted: docs, decks, images, video, audio, design files, archives · 5 files max · 50 MB each · 50 MB total · known executable/script types and signatures blocked · archives not malware-scanned; send only trusted files.';
+
+const HUMAN_PREFLIGHT_PREFIX_BYTES = 4096;
+const BLOCKED_HUMAN_UPLOAD_MIMES = new Set([
+  'application/java-vm',
+  'application/javascript',
+  'application/vnd.microsoft.portable-executable',
+  'application/x-dosexec',
+  'application/x-elf',
+  'application/x-executable',
+  'application/x-java-applet',
+  'application/x-mach-binary',
+  'application/x-msdownload',
+  'application/x-pie-executable',
+  'application/x-powershell',
+  'application/x-sh',
+  'application/x-sharedlib',
+  'application/x-shellscript',
+  'application/x-python',
+  'text/javascript',
+  'text/x-python',
+  'text/x-shellscript'
+]);
+
+const BLOCKED_HUMAN_UPLOAD_MAGICS = [
+  [0x4d, 0x5a],
+  [0x7f, 0x45, 0x4c, 0x46],
+  [0xfe, 0xed, 0xfa, 0xce],
+  [0xfe, 0xed, 0xfa, 0xcf],
+  [0xce, 0xfa, 0xed, 0xfe],
+  [0xcf, 0xfa, 0xed, 0xfe],
+  [0xca, 0xfe, 0xba, 0xbe],
+  [0xbe, 0xba, 0xfe, 0xca],
+  [0xca, 0xfe, 0xba, 0xbf],
+  [0xbf, 0xba, 0xfe, 0xca]
+] as const;
 
 function getExtension(filename: string): string {
   const trimmed = filename.trim();
@@ -118,4 +161,42 @@ export function validateUploadFile(file: { name: string; size: number }): {
   }
 
   return { ok: true };
+}
+
+export function validateHumanUploadBatch(files: Array<{ name: string; size: number }>): {
+  ok: boolean;
+  reason?: string;
+} {
+  if (files.length === 0 || files.length > HUMAN_UPLOAD_POLICY.maxFiles) {
+    return { ok: false, reason: `Please upload between 1 and ${HUMAN_UPLOAD_POLICY.maxFiles} files.` };
+  }
+  if (files.some((file) => !validateUploadFile(file).ok)) {
+    return { ok: false, reason: 'One or more files are not supported.' };
+  }
+  if (files.reduce((total, file) => total + file.size, 0) > HUMAN_UPLOAD_POLICY.maxTotalSizeBytes) {
+    return { ok: false, reason: 'Total file size exceeds the 50 MB limit.' };
+  }
+  return { ok: true };
+}
+
+export function safeHumanUploadMime(value: string): string {
+  if (
+    value.length <= 127 &&
+    /^(?:application|audio|image|text|video)\/[a-z0-9][a-z0-9.+-]{0,99}$/i.test(value)
+  ) {
+    return value.toLowerCase();
+  }
+  return 'application/octet-stream';
+}
+
+export function hasBlockedHumanUploadContent(declaredMime: string, buffer: ArrayBuffer): boolean {
+  const mime = declaredMime.split(';', 1)[0].trim().toLowerCase();
+  if (BLOCKED_HUMAN_UPLOAD_MIMES.has(mime)) return true;
+
+  const prefix = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, HUMAN_PREFLIGHT_PREFIX_BYTES));
+  const startsWith = (magic: readonly number[]) =>
+    magic.length <= prefix.length && magic.every((byte, index) => prefix[index] === byte);
+
+  if (BLOCKED_HUMAN_UPLOAD_MAGICS.some(startsWith)) return true;
+  return startsWith([0x23, 0x21]) || startsWith([0xef, 0xbb, 0xbf, 0x23, 0x21]);
 }

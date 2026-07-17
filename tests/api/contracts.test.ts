@@ -34,6 +34,17 @@ test('chat response payload accepts a multi-bubble messages array', () => {
   expect(result.success).toBe(true);
 });
 
+test('chat response payload validates the confidential diversion outcome', () => {
+  expect(chatResponsePayloadSchema.safeParse({
+    message: 'Use the human-only path.',
+    outcome: 'confidential_diversion'
+  }).success).toBe(true);
+  expect(chatResponsePayloadSchema.safeParse({
+    message: 'Use the human-only path.',
+    outcome: 'unknown_outcome'
+  }).success).toBe(false);
+});
+
 test('chat response payload rejects when neither message nor messages is present', () => {
   const result = chatResponsePayloadSchema.safeParse({ draftUpdates: {} });
   expect(result.success).toBe(false);
@@ -68,6 +79,16 @@ test('chat request payload rejects system messages from the browser', () => {
 
 test('chat request payload rejects when messages is empty', () => {
   const result = chatRequestPayloadSchema.safeParse({ messages: [] });
+  expect(result.success).toBe(false);
+});
+
+test('chat request payload rejects blank current user content', () => {
+  const result = chatRequestPayloadSchema.safeParse({
+    messages: [
+      { role: 'user', content: 'Earlier project context' },
+      { role: 'user', content: '  \n\t ' }
+    ]
+  });
   expect(result.success).toBe(false);
 });
 

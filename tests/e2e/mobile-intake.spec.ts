@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import path from 'node:path';
 
 async function enterAiIntake(page: Page) {
   await page.getByRole('button', { name: 'Build a brief with AI' }).click();
@@ -12,6 +13,66 @@ async function enterAiIntake(page: Page) {
 }
 
 test.describe('mobile intake', () => {
+  test('gives the producer-requested human upload a 44px keyboard target', async ({ page }) => {
+    let uploadMode: string | null = null;
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.route('**/api/sessions/inspect', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, exists: false })
+    }));
+    await page.route('**/api/sessions', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ sessionId: 'mobile-human-upload-session', persisted: true })
+    }));
+    await page.route('**/api/projects/mobile-human-upload-session/consent', async (route) => {
+      const body = route.request().postDataJSON() as { scope?: string };
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          consent: body.scope === 'producer_transfer'
+            ? { producerTransfer: true }
+            : { humanContact: true }
+        })
+      });
+    });
+    await page.route('**/api/telegram/messages**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        outgoingStatus: 'delivered',
+        messages: [{ id: 1, sender: 'team', text: 'Please upload the treatment.', createdAt: '2026-07-17T10:00:00.000Z' }],
+        fileRequestOpen: true,
+        fileRequestNote: 'Please upload the treatment.',
+        scheduleRequestOpen: false
+      })
+    }));
+    await page.route('**/api/telegram/upload', async (route) => {
+      uploadMode = route.request().headers()['x-upload-mode'] ?? null;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    await page.goto('/preview');
+    await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
+
+    const upload = page.getByRole('button', { name: 'Upload requested files' });
+    await expect(upload).toBeVisible({ timeout: 5_000 });
+    const bounds = await upload.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.width).toBeGreaterThanOrEqual(44);
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+
+    await upload.focus();
+    await expect(upload).toBeFocused();
+    const chooserPromise = page.waitForEvent('filechooser');
+    await upload.press('Enter');
+    const chooser = await chooserPromise;
+    await chooser.setFiles(path.join(__dirname, 'fixtures', 'private-upload.txt'));
+    await expect.poll(() => uploadMode).toBe('human');
+  });
+
   test('keeps the narrow widget inside the viewport with 44px actions', async ({ page }) => {
     await page.route('**/api/sessions/inspect', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, exists: false }) });

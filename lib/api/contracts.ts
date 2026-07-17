@@ -33,6 +33,7 @@ export const chatResponsePayloadSchema = z
   .object({
     message: z.string().optional(),
     messages: z.array(z.string()).min(1).optional(),
+    outcome: z.literal('confidential_diversion').optional(),
     draftUpdates: z.record(z.string()).optional(),
     briefReady: z.boolean().optional(),
     reviewPrompt: z.string().nullable().optional(),
@@ -82,6 +83,15 @@ export const chatRequestPayloadSchema = z.object({
     .optional()
   })
   .superRefine((value, context) => {
+    const currentMessage = value.messages[value.messages.length - 1];
+    if (!currentMessage || currentMessage.content.trim().length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['messages', value.messages.length - 1, 'content'],
+        message: 'Current user message cannot be blank'
+      });
+    }
+
     const total = value.messages.reduce((sum, message) => sum + message.content.length, 0);
     if (total > MAX_CHAT_TOTAL_CHARACTERS) {
       context.addIssue({ code: z.ZodIssueCode.too_big, maximum: MAX_CHAT_TOTAL_CHARACTERS, type: 'string', inclusive: true, message: 'Total message content is too large' });

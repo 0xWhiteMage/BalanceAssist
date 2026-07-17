@@ -302,3 +302,13 @@ test('system prompt share_work tool section tells the AI to confirm context befo
   // The follow-up line must echo the project context.
   expect(prompt).toMatch(/Based on your project \([^)]*\), here are a few references/i);
 });
+
+test('system prompt forbids legal advice and producer commitments', () => {
+  const prompt = buildSystemPrompt();
+  expect(prompt).toMatch(/never provide legal advice/i);
+  expect(prompt).toMatch(/contract terms/i);
+  expect(prompt).toMatch(/specific pricing/i);
+  expect(prompt).toMatch(/guaranteed timelines/i);
+  expect(prompt).toMatch(/availability/i);
+  expect(prompt).toMatch(/producer review/i);
+});

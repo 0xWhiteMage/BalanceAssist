@@ -94,12 +94,12 @@ function buildMinimalZip(files: Record<string, string>): Buffer {
 describe('extractTextFromBuffer', () => {
   test('extracts plain text from a .txt file', () => {
     const buffer = Buffer.from('Project: 30s animation\nBudget: $5,000 SGD');
-    const text = extractTextFromBuffer(buffer, 'brief.txt');
+    const text = extractTextFromBuffer(buffer, 'text/plain');
     expect(text).toContain('30s animation');
     expect(text).toContain('$5,000 SGD');
   });
 
-  test('extracts text from <a:t> tags in a .pptx slide', () => {
+  test('does not dispatch dormant presentation extraction by MIME', () => {
     const pptx = buildMinimalZip({
       '[Content_Types].xml': '<?xml version="1.0"?><Types></Types>',
       'ppt/slides/slide1.xml':
@@ -109,21 +109,16 @@ describe('extractTextFromBuffer', () => {
       'ppt/slides/slide2.xml':
         '<?xml version="1.0"?><sld><a:t>Second slide note</a:t></sld>'
     });
-    const text = extractTextFromBuffer(pptx, 'deck.pptx');
-    expect(text).toContain('Slide Title');
-    expect(text).toContain('Key deliverable');
-    expect(text).toContain('Second slide note');
+    expect(extractTextFromBuffer(pptx, 'application/vnd.openxmlformats-officedocument.presentationml.presentation')).toBe('');
   });
 
-  test('extracts text from <w:t> tags in a .docx document', () => {
+  test('does not dispatch dormant document extraction by MIME', () => {
     const docx = buildMinimalZip({
       '[Content_Types].xml': '<?xml version="1.0"?><Types></Types>',
       'word/document.xml':
         '<?xml version="1.0"?><document><body><p><r><w:t>Project brief: launch film</w:t></r><r><w:t>Budget $50,000 SGD</w:t></r></p></body></document>'
     });
-    const text = extractTextFromBuffer(docx, 'brief.docx');
-    expect(text).toContain('Project brief: launch film');
-    expect(text).toContain('Budget $50,000 SGD');
+    expect(extractTextFromBuffer(docx, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')).toBe('');
   });
 
   test('extracts text from (…) Tj operators in a .pdf content stream', () => {
@@ -144,20 +139,20 @@ describe('extractTextFromBuffer', () => {
         '%%EOF'
       ].join('\n')
     );
-    const text = extractTextFromBuffer(pdf, 'doc.pdf');
+    const text = extractTextFromBuffer(pdf, 'application/pdf');
     expect(text).toContain('Hello PDF Brief');
     expect(text).toContain('Project');
   });
 
   test('returns empty string for unsupported extensions', () => {
     const buffer = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-    const text = extractTextFromBuffer(buffer, 'image.png');
+    const text = extractTextFromBuffer(buffer, 'image/png');
     expect(text).toBe('');
   });
 
   test('caps extracted output to a bounded length', () => {
     const longBody = 'x'.repeat(8000);
-    const text = extractTextFromBuffer(Buffer.from(longBody), 'big.txt');
+    const text = extractTextFromBuffer(Buffer.from(longBody), 'text/plain');
     expect(text.length).toBeLessThanOrEqual(4000);
   });
 
@@ -165,6 +160,6 @@ describe('extractTextFromBuffer', () => {
     const bomb = zlib.deflateSync(Buffer.alloc(2 * 1024 * 1024, 0x41));
     const pdf = Buffer.concat([Buffer.from('%PDF-1.4\nstream\n', 'latin1'), bomb, Buffer.from('\nendstream\n%%EOF', 'latin1')]);
 
-    expect(extractTextFromBuffer(pdf, 'bomb.pdf')).toBe('');
+    expect(extractTextFromBuffer(pdf, 'application/pdf')).toBe('');
   });
 });
