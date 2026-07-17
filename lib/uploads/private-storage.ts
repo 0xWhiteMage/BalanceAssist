@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
 import { temporaryDraftExpiry } from '@/lib/privacy/session-retention';
-import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
 export type PrivateStorageClient = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: boolean | string | null; error: unknown }>;
@@ -54,7 +53,7 @@ export async function storePrivateUpload(input: {
   sessionId: string;
   buffer: ArrayBuffer;
   verifiedMime: string;
-  extractText: boolean;
+  extractedText: string;
 }) {
   if (!await privateStorageAvailable(input.client, input.bucket)) {
     throw new PrivateStorageError('private_storage_unavailable');
@@ -107,7 +106,7 @@ export async function storePrivateUpload(input: {
     status: 'stored' as const,
     objectKey,
     mimeType: input.verifiedMime,
-    extractedText: input.extractText ? extractTextFromBuffer(Buffer.from(bytes), input.verifiedMime) : '',
+    extractedText: input.extractedText,
     retentionExpiresAt
   };
 }

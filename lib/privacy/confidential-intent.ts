@@ -16,7 +16,7 @@ const NEGATED_PHRASES = [
   /\b(?:does not|doesn't|do not|don't) contain personal data\b/g,
   /\b(?:is|are|was|were) not (?:highly )?sensitive\b/g,
   /\b(?:is|are|was|were) (?:highly )?sensitive to (?:light|heat|temperature|moisture|pressure|touch|sound)\b/g,
-  /\b(?:is|are|was|were) (?:not|no longer) (?:under|covered by|subject to|bound by|protected by) (?:an? )?(?:nda|non disclosure agreement)\b/g,
+  /\b(?:is|are|was|were) (?:not|no longer) (?:under|covered by|subject to|bound by|protected by) (?:an? |the |our )?(?:nda|non disclosure agreement)\b/g,
   /\b(?:this|that|it) (?:is|was) (?:not|no longer) (?:an? )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/g,
   /\b(?:am|is|are|was|were) (?:not|no longer) (?:sharing|sending|uploading|providing|processing) (?:an? |the |our |my |client )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/g,
   /\b(?:do not|don't|does not|doesn't) (?:have|possess) (?:any )?(?:unreleased|pre release|unannounced) (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/g,
@@ -34,7 +34,7 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
   {
     category: 'nda',
     patterns: [
-      /\b(?:under|covered by|subject to|bound by|protected by) (?:an? )?(?:nda|non disclosure agreement)\b/,
+      /\b(?:under|covered by|subject to|bound by|protected by) (?:an? |the |our )?(?:nda|non disclosure agreement)\b/,
       /\b(?:nda|non disclosure agreement) protected (?:information|data|documents?|materials?|content|details|files?)\b/,
       /\b(?:share|send|upload|provide|process) (?:an? )?(?:nda|non disclosure agreement) (?:protected |restricted )?(?:information|data|documents?|materials?|content|details|files?)\b/
     ]

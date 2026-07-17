@@ -194,6 +194,7 @@ export function WidgetOverlay({
   const aiProcessingGenerationRef = useRef(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const requestedFileInputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
   const messagesRef = useRef<ChatMessage[]>(messages);
   const draftRef = useRef(draft);
@@ -1138,7 +1139,7 @@ export function WidgetOverlay({
   const showNoticeGate = entryPath === null;
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
-  const showAttachmentButton = false;
+  const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
 
   return (
     <div
@@ -1535,24 +1536,37 @@ export function WidgetOverlay({
                   </>
                 )}
                 {showAttachmentButton && (
-                  <label
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '50%',
-                      border: `1px solid ${brandTokens.colors.border}`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      flexShrink: 0
-                    }}
-                  >
-                    <input type="file" multiple accept={UPLOAD_ACCEPT_ATTRIBUTE} onChange={handleFileSelect} style={{ display: 'none' }} />
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </label>
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Upload requested files"
+                      onClick={() => requestedFileInputRef.current?.click()}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        border: `1px solid ${brandTokens.colors.border}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        flexShrink: 0
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                    <input
+                      ref={requestedFileInputRef}
+                      type="file"
+                      multiple
+                      accept={UPLOAD_ACCEPT_ATTRIBUTE}
+                      aria-label="Choose requested files"
+                      onChange={handleFileSelect}
+                      style={{ display: 'none' }}
+                    />
+                  </>
                 )}
                 <input
                   type="text"

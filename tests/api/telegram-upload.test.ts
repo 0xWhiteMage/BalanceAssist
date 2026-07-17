@@ -3,12 +3,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const {
   actualClassifier,
+  actualIntentClassifier,
   classifyConfidentialFilenameMock,
+  classifyConfidentialIntentMock,
   requireSessionMock,
   storePrivateUploadMock
 } = vi.hoisted(() => ({
   actualClassifier: { current: undefined as undefined | ((filename: string) => string) },
+  actualIntentClassifier: { current: undefined as undefined | ((value: string) => string) },
   classifyConfidentialFilenameMock: vi.fn(),
+  classifyConfidentialIntentMock: vi.fn(),
   requireSessionMock: vi.fn(),
   storePrivateUploadMock: vi.fn()
 }));
@@ -24,7 +28,12 @@ vi.mock('@/lib/uploads/private-storage', () => ({
 vi.mock('@/lib/privacy/confidential-intent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/privacy/confidential-intent')>();
   actualClassifier.current = actual.classifyConfidentialFilename;
-  return { ...actual, classifyConfidentialFilename: classifyConfidentialFilenameMock };
+  actualIntentClassifier.current = actual.classifyConfidentialIntent;
+  return {
+    ...actual,
+    classifyConfidentialFilename: classifyConfidentialFilenameMock,
+    classifyConfidentialIntent: classifyConfidentialIntentMock
+  };
 });
 
 describe('POST /api/telegram/upload analysis-only contract', () => {
@@ -32,6 +41,8 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
     classifyConfidentialFilenameMock.mockReset();
     classifyConfidentialFilenameMock.mockImplementation((filename: string) => actualClassifier.current!(filename));
+    classifyConfidentialIntentMock.mockReset();
+    classifyConfidentialIntentMock.mockImplementation((value: string) => actualIntentClassifier.current!(value));
     requireSessionMock.mockClear();
     storePrivateUploadMock.mockClear();
     requireSessionMock.mockResolvedValue({
@@ -172,5 +183,35 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     expect(response.status).toBe(200);
     expect(classifyConfidentialFilenameMock).toHaveBeenCalledWith('personal-project.txt');
     expect(storePrivateUploadMock).toHaveBeenCalledOnce();
+  });
+
+  test('fails closed without echoing extracted content, logging it, or calling a provider when content classification throws', async () => {
+    const confidentialText = 'Private client phrase that must not escape';
+    classifyConfidentialIntentMock.mockImplementationOnce(() => {
+      throw new Error('classifier unavailable');
+    });
+    const form = new FormData();
+    form.set('mode', 'analysis');
+    form.append('files', new File([confidentialText], 'ordinary-brief.txt', { type: 'text/plain' }));
+    const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const providerSpy = vi.spyOn(global, 'fetch');
+
+    const { POST } = await import('@/app/api/telegram/upload/route');
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
+    }));
+    const body = await response.json();
+    formDataSpy.mockRestore();
+
+    expect(response.status).toBe(422);
+    expect(body).toEqual({ ok: false, code: 'confidential_file_not_allowed' });
+    expect(JSON.stringify(body)).not.toContain(confidentialText);
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+    expect(providerSpy).not.toHaveBeenCalled();
+    expect([...logSpy.mock.calls, ...warnSpy.mock.calls, ...errorSpy.mock.calls].flat().join(' ')).not.toContain(confidentialText);
   });
 });

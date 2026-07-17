@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanupExpiredStoredUploads, privateStorageAvailable, storePrivateUpload } from '@/lib/uploads/private-storage';
 import { validateFile } from '@/lib/uploads/quarantine';
+import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 
 const sessionId = '11111111-2222-3333-4444-555555555555';
 
@@ -56,7 +57,7 @@ async function storeFile(client: ReturnType<typeof makeClient>, file: File, extr
     sessionId,
     buffer,
     verifiedMime: validation.mime,
-    extractText
+    extractedText: extractText ? extractTextFromBuffer(Buffer.from(buffer), validation.mime) : ''
   });
 }
 
@@ -108,14 +109,21 @@ describe('private attachment storage', () => {
     }));
   });
 
-  test('returns bounded text extracted from validated server-side bytes', async () => {
+  test('returns precomputed text without changing it during storage', async () => {
     const client = makeClient();
     const bytes = new Uint8Array(Buffer.from('Project scope: launch film'));
     const file = new File([bytes], 'brief.txt', { type: 'text/plain' });
     Object.assign(file, { arrayBuffer: async () => bytes.buffer });
 
-    await expect(storeFile(client, file))
-      .resolves.toMatchObject({ extractedText: 'Project scope: launch film' });
+    await expect(storePrivateUpload({
+      client: client as never,
+      bucket: 'temporary-attachments',
+      sessionId,
+      buffer: bytes.buffer,
+      verifiedMime: 'text/plain',
+      extractedText: 'precomputed project scope'
+    }))
+      .resolves.toMatchObject({ extractedText: 'precomputed project scope' });
   });
 
   test('does not extract PNG bytes whose attacker-controlled filename ends in txt', async () => {
@@ -148,7 +156,7 @@ describe('private attachment storage', () => {
       sessionId,
       buffer: bytes.buffer,
       verifiedMime: 'text/plain',
-      extractText: false
+      extractedText: ''
     } as never)).resolves.toMatchObject({ extractedText: '' });
   });
 

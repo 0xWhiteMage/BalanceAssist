@@ -2,7 +2,8 @@ import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
-import { classifyConfidentialFilename } from '@/lib/privacy/confidential-intent';
+import { classifyConfidentialFilename, classifyConfidentialIntent } from '@/lib/privacy/confidential-intent';
+import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
 import { PRIVATE_ANALYSIS_UPLOAD_POLICY, validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 import {
   HUMAN_UPLOAD_POLICY,
@@ -158,7 +159,7 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, code }, { status: 403 }, request);
   }
 
-  let preflight: Array<{ buffer: ArrayBuffer; verifiedMime: string }>;
+  let preflight: Array<{ buffer: ArrayBuffer; verifiedMime: string; extractedText: string }>;
   try {
     const buffers = await Promise.all(files.map(readFileBuffer));
     if (mode === 'analysis') {
@@ -167,7 +168,11 @@ export async function POST(request: Request) {
       preflight = files.map((file, index) => {
         const validation = validateFile(file, buffers[index]);
         if (!validation.ok) throw new Error('file_validation_failed');
-        return { buffer: buffers[index], verifiedMime: validation.mime };
+        return {
+          buffer: buffers[index],
+          verifiedMime: validation.mime,
+          extractedText: extractTextFromBuffer(Buffer.from(buffers[index]), validation.mime)
+        };
       });
     } else {
       if (!validateHumanUploadBatch(files).ok) throw new Error('file_validation_failed');
@@ -176,11 +181,22 @@ export async function POST(request: Request) {
       }
       preflight = files.map((file, index) => ({
         buffer: buffers[index],
-        verifiedMime: safeHumanUploadMime(file.type)
+        verifiedMime: safeHumanUploadMime(file.type),
+        extractedText: ''
       }));
     }
   } catch {
     return jsonWithCors({ ok: false, code: 'file_validation_failed' }, { status: 422 }, request);
+  }
+
+  if (mode === 'analysis') {
+    try {
+      if (preflight.some(({ extractedText }) => extractedText.trim() && classifyConfidentialIntent(extractedText) !== 'allow')) {
+        return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+      }
+    } catch {
+      return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+    }
   }
 
   const stored: Array<{ objectKey: string; mimeType: string; extractedText: string }> = [];
@@ -190,8 +206,7 @@ export async function POST(request: Request) {
         client: authResult.supabase as unknown as PrivateStorageClient,
         bucket,
         sessionId,
-        ...file,
-        extractText: mode === 'analysis'
+        ...file
       }));
     }
     const response = mode === 'analysis'

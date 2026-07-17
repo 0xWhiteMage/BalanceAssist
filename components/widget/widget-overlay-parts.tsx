@@ -139,7 +139,7 @@ export function FileRequestBanner({ note }: { note: string | null }) {
         {note ?? 'The team asked for files for this project.'}
       </div>
       <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText }}>
-        File delivery through this chat is currently unavailable. Reply to coordinate a supported transfer method.
+        Use the upload control below to send the requested files for human review.
       </div>
       <div style={{ marginTop: '6px', fontSize: '10px', color: brandTokens.colors.mutedText }}>
         {HUMAN_UPLOAD_GUIDANCE}
@@ -175,7 +175,7 @@ export function FileRequestInputHint() {
           display: 'inline-block'
         }}
       />
-      File delivery through this chat is currently unavailable
+      Human file upload requested
     </div>
   );
 }

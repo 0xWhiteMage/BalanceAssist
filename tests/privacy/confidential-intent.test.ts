@@ -9,6 +9,8 @@ import {
 describe('classifyConfidentialIntent', () => {
   test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
     ['This project is under NDA.', 'nda'],
+    ['This project is under our NDA.', 'nda'],
+    ['This project is covered by the NDA.', 'nda'],
     ['These files are covered by a non-disclosure agreement', 'nda'],
     ['I need to share NDA-protected material', 'nda'],
     ['The attached brief contains confidential information.', 'confidential'],

@@ -79,7 +79,13 @@ describe('POST /api/telegram/upload private storage', () => {
         }
       };
     });
-    storePrivateUploadMock.mockResolvedValue({ status: 'stored', objectKey: 'opaque', mimeType: 'application/pdf', extractedText: 'Launch film scope', retentionExpiresAt: '2026-07-15T00:00:00.000Z' });
+    storePrivateUploadMock.mockImplementation(async (input: { verifiedMime: string; extractedText: string }) => ({
+      status: 'stored',
+      objectKey: 'opaque',
+      mimeType: input.verifiedMime,
+      extractedText: input.extractedText,
+      retentionExpiresAt: '2026-07-15T00:00:00.000Z'
+    }));
     deletePrivateUploadMock.mockResolvedValue(true);
   });
 
@@ -209,7 +215,7 @@ describe('POST /api/telegram/upload private storage', () => {
   });
 
   test('stores an analysis-consented file without producer delivery', async () => {
-    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const bytes = new TextEncoder().encode('%PDF-1.4\nstream\nBT (Launch film scope) Tj ET\nendstream\n%%EOF');
     const file = new File([bytes], 'launch-brief.pdf', { type: 'application/pdf' });
     const response = await post(formWith(file));
 
@@ -218,7 +224,7 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
       bucket: 'temporary-attachments',
       verifiedMime: 'application/pdf',
-      extractText: true
+      extractedText: 'Launch film scope'
     }));
   });
 
@@ -261,7 +267,7 @@ describe('POST /api/telegram/upload private storage', () => {
     await expect(response.json()).resolves.toEqual({ ok: true, status: 'stored' });
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
       verifiedMime: 'application/pdf',
-      extractText: false
+      extractedText: ''
     }));
   });
 
@@ -277,7 +283,7 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(response.status).toBe(200);
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
       verifiedMime: type,
-      extractText: false
+      extractedText: ''
     }));
   });
 
@@ -356,6 +362,42 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(storePrivateUploadMock).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ['brief.txt', 'text/plain', new TextEncoder().encode('This work is covered by the NDA.')],
+    ['brief.pdf', 'application/pdf', new TextEncoder().encode('%PDF-1.4\nstream\nBT (This work is under our NDA.) Tj ET\nendstream\n%%EOF')]
+  ])('rejects confidential extracted content from benign %s before storage', async (name, type, bytes) => {
+    const response = await post(formWith(new File([bytes], name, { type })));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'confidential_file_not_allowed' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects the entire batch when the second extracted file is confidential', async () => {
+    const form = new FormData();
+    form.set('mode', 'analysis');
+    form.append('files', new File(['ordinary project scope'], 'first.txt', { type: 'text/plain' }));
+    form.append('files', new File(['This work is covered by the NDA.'], 'second.txt', { type: 'text/plain' }));
+
+    const response = await post(form);
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'confidential_file_not_allowed' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test('stores benign extracted text and reuses it as the analysis response', async () => {
+    const response = await post(formWith(new File(['ordinary project scope'], 'brief.txt', { type: 'text/plain' })));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      status: 'stored',
+      analyses: [{ mimeType: 'text/plain', extractedText: 'ordinary project scope' }]
+    });
+    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ extractedText: 'ordinary project scope' }));
+  });
+
   test('reads each file once during preflight and passes verified bytes to storage', async () => {
     const bytes = new TextEncoder().encode('valid text');
     const file = new File([bytes], 'brief.txt', { type: 'text/plain' });
@@ -369,7 +411,7 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
       buffer: bytes.buffer,
       verifiedMime: 'text/plain',
-      extractText: true
+      extractedText: 'valid text'
     }));
     expect(storePrivateUploadMock.mock.calls[0]?.[0]).not.toHaveProperty('file');
   });
