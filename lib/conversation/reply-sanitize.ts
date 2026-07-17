@@ -8,7 +8,7 @@ const DURATION_EXPRESSION = String.raw`${DURATION_NUMBER}\s+(?:business\s+)?(?:d
 const CURRENCY_AMOUNT = String.raw`(?:(?:s?\$|£|€)\s*\d[\d,]*(?:\.\d{2})?|(?:sgd|usd|eur|gbp)\s*\d[\d,]*(?:\.\d{2})?|\d[\d,]*(?:\.\d{2})?\s*(?:dollars?|pounds?|euros?))`;
 const MONEY_WORD = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)`;
 const BALANCE_PRICE_SUBJECT = String.raw`(?:(?:the\s+)?(?:final|fixed|guaranteed)\s+(?:price|pricing|quote|fee|cost)(?!\s+(?:you|the user)\s+(?:entered|provided|stated|supplied))|(?:our|balance(?:'s)?)\s+(?:(?:final|fixed|guaranteed)\s+)?(?:price|pricing|quote|fee|cost)|(?:the\s+)?quote(?=\s+(?:is|comes?\s+to|totals?|equals?)))`;
-const DIRECT_PRICE_PATTERN = new RegExp(String.raw`\b(?:price|fee|cost)\s+is\s+${CURRENCY_AMOUNT}\b`, 'i');
+const DIRECT_PRICE_PATTERN = new RegExp(String.raw`\b(?:price|fee|cost)\s+(?:is|will be|comes? to|totals?|equals?)\s+${CURRENCY_AMOUNT}\b`, 'i');
 const USER_PRICE_ATTRIBUTION_PATTERN = /\b(?:you\s+(?:entered|stated)|your\s+budget|client[- ]provided)\b/i;
 
 const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
@@ -37,7 +37,7 @@ const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> =
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
-    pattern: new RegExp(String.raw`\bwe (?:can|will) have (?:it|(?:the\s+)?(?:film|video|project)) ready\s+(?:by\s+${TEMPORAL_EXPRESSION}|(?:in|within)\s+${DURATION_EXPRESSION})\b`, 'i'),
+    pattern: new RegExp(String.raw`\bwe(?:'ll| can| will) have (?:it|(?:the\s+)?(?:film|video|project)) ready\s+(?:by\s+${TEMPORAL_EXPRESSION}|(?:in|within)\s+${DURATION_EXPRESSION})\b`, 'i'),
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
@@ -133,8 +133,8 @@ function parseAssistantReply(reply: string): {
 function matchesRefusal(reply: string, userMessage: string): string | null {
   const normalizedReply = reply.normalize('NFKC').replace(/[’‘`]/g, "'");
   const hasDirectPriceCommitment = normalizedReply
-    .split(/(?:[.!?](?:\s+|$)|\n+)/)
-    .some((sentence) => DIRECT_PRICE_PATTERN.test(sentence) && !USER_PRICE_ATTRIBUTION_PATTERN.test(sentence));
+    .split(/(?:[.!?](?:\s+|$)|\n+|;|\bbut\b|\bhowever\b)/i)
+    .some((clause) => DIRECT_PRICE_PATTERN.test(clause) && !USER_PRICE_ATTRIBUTION_PATTERN.test(clause));
   if (hasDirectPriceCommitment) {
     return 'Final pricing is set by Balance producers after they review the scope.';
   }

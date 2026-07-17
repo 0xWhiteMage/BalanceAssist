@@ -173,12 +173,33 @@ test.each([
 });
 
 test.each([
+  ['We’ll have it ready by Friday.', /timing.*producer/i],
+  ['The price will be SGD 12,000.', /pricing.*producer/i],
+  ['The fee comes to USD 5,000.', /pricing.*producer/i],
+  ['The cost totals EUR 4,000.', /pricing.*producer/i],
+  ['The price equals GBP 3,000.', /pricing.*producer/i],
+  ['You entered SGD 8,000, but the price is SGD 12,000.', /pricing.*producer/i],
+  ['Your budget is SGD 8,000; however, the fee comes to SGD 10,000.', /pricing.*producer/i]
+])('overrides clause-level reported commitments: %s', (providerReply, expected) => {
+  const result = sanitizeReply(providerReply, 'What can Balance commit to?', {
+    toolCallArguments: { budgetBand: 'Injected amount', timelineBand: 'Injected timing' }
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(expected);
+  expect(result.draft).toEqual({});
+});
+
+test.each([
   'The price you entered is SGD 12,000.',
   'You stated the fee is USD 5,000.',
   'The price is SGD 12,000, matching your budget.',
   'The client-provided cost is EUR 4,000.',
   'The price is expressed in dollars.',
-  'We can have it ready for discussion.'
+  'The price will be expressed in dollars.',
+  'The cost equals the budget you entered.',
+  'We can have it ready for discussion.',
+  'We’ll have it ready for discussion.'
 ])('allows attributed pricing and non-concrete ready language: %s', (providerReply) => {
   const result = sanitizeReply(providerReply, 'Confirm what I provided', {
     toolCallArguments: { budgetBand: 'User-provided amount' }

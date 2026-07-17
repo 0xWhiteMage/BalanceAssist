@@ -2,15 +2,15 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Override direct unqualified currency pricing and concrete `we can/will have ... ready` commitments while preserving explicit user attribution and benign non-commitments.
+**Goal:** Evaluate direct pricing at clause scope and recognize curly-apostrophe `we'll have ... ready` commitments while preserving inline attribution and benign non-commitments.
 
-**Architecture:** Split replies into bounded sentence fragments for direct pricing classification, and exempt only fragments containing an explicit attribution marker. Extend the existing producer timing patterns with a narrowly structured ready-commitment expression that requires a concrete date or duration.
+**Architecture:** Normalize apostrophes, then split replies into bounded clauses at sentence boundaries, contrast words, and semicolons. Evaluate direct pricing and attribution within each clause using a shared currency expression, and extend the ready-commitment subject to include `we'll`.
 
 **Tech Stack:** TypeScript, Vitest, ESLint
 
 ---
 
-### Task 1: Close pricing and ready-commitment gaps
+### Task 1: Apply clause-level commitment semantics
 
 **Files:**
 - Modify: `tests/conversation/reply-sanitize.test.ts`
@@ -18,17 +18,17 @@
 
 **Step 1: Write the failing tests**
 
-Add table-driven tests proving that `The price is SGD 12,000`, `The fee is $5,000`, `The cost is EUR 4,000`, and concrete `we can/will have ... ready` statements override and discard draft updates. Add pass-through cases for same-sentence `you entered`, `you stated`, `your budget`, and `client-provided` attribution, plus `The price is expressed in dollars` and `We can have it ready for discussion`.
+Add the approved exact matrix for `We’ll have it ready by Friday`, direct pricing with `will be`, `comes to`, `totals`, and `equals`, plus attribution followed by a contrasting commitment clause. Retain existing inline and same-clause attribution controls and benign non-commitments.
 
 **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run tests/conversation/reply-sanitize.test.ts`
 
-Expected: the new unqualified pricing and ready-commitment cases fail because they are not overridden; existing and new precision cases pass.
+Expected: the new curly-apostrophe, pricing-verb, and attribution-separated commitment cases fail because they are not overridden; existing precision cases pass.
 
 **Step 3: Write the minimal implementation**
 
-Add a sentence-level direct pricing check using bounded sentence splitting, a direct `price|fee|cost is <currency amount>` pattern, and an attribution allowlist limited to the same sentence. Add one producer-boundary regex for `we can/will have it|the film|the video|the project ready` followed by `by <date>` or `in|within <duration>`.
+Split normalized replies at sentence boundaries, `but`, `however`, and semicolons. Evaluate the expanded `price|fee|cost` commitment grammar and attribution allowlist per clause. Extend the concrete ready pattern from `we can|will` to `we'll|we can|we will`.
 
 **Step 4: Run focused tests to verify GREEN**
 
