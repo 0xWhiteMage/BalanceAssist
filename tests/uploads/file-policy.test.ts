@@ -5,6 +5,7 @@ import {
   HUMAN_UPLOAD_SUMMARY,
   MAX_UPLOAD_SIZE_BYTES,
   UPLOAD_ACCEPT_ATTRIBUTE,
+  hasBlockedHumanUploadContent,
   safeHumanUploadMime,
   validateHumanUploadBatch,
   validateUploadFile
@@ -58,9 +59,42 @@ test('uses only bounded safe human MIME values', () => {
   expect(safeHumanUploadMime('')).toBe('application/octet-stream');
 });
 
+test.each([
+  ['PE', new Uint8Array([0x4d, 0x5a, 0x90]).buffer],
+  ['ELF', new Uint8Array([0x7f, 0x45, 0x4c, 0x46]).buffer],
+  ['Mach-O', new Uint8Array([0xcf, 0xfa, 0xed, 0xfe]).buffer],
+  ['Java class or fat Mach-O', new Uint8Array([0xca, 0xfe, 0xba, 0xbe]).buffer],
+  ['shebang script', new TextEncoder().encode('#!/usr/bin/env python\nprint(1)').buffer]
+])('blocks a known %s signature in an allowed human upload', (_kind, buffer) => {
+  expect(hasBlockedHumanUploadContent('', buffer)).toBe(true);
+});
+
+test.each([
+  'application/x-msdownload',
+  'application/vnd.microsoft.portable-executable',
+  'application/x-executable',
+  'application/x-elf',
+  'application/x-mach-binary',
+  'application/java-vm',
+  'text/x-shellscript',
+  'application/x-sh',
+  'text/javascript'
+])('blocks known executable or script MIME %s', (mime) => {
+  expect(hasBlockedHumanUploadContent(mime, new TextEncoder().encode('ordinary').buffer)).toBe(true);
+});
+
+test('allows benign PDF and ZIP signatures without claiming malware scanning', () => {
+  expect(hasBlockedHumanUploadContent('application/pdf', new TextEncoder().encode('%PDF-1.7').buffer)).toBe(false);
+  expect(hasBlockedHumanUploadContent('application/zip', new Uint8Array([0x50, 0x4b, 0x03, 0x04]).buffer)).toBe(false);
+});
+
 test('human upload copy states the batch limits', () => {
   expect(HUMAN_UPLOAD_GUIDANCE).toMatch(/up to 5 files.*50 MB each.*50 MB total/i);
   expect(HUMAN_UPLOAD_SUMMARY).toMatch(/5 files.*50 MB each.*50 MB total/i);
+  expect(HUMAN_UPLOAD_GUIDANCE).toMatch(/known executable.*script.*signatures.*blocked/i);
+  expect(HUMAN_UPLOAD_GUIDANCE).toMatch(/archives are not malware-scanned.*trusted files/i);
+  expect(HUMAN_UPLOAD_SUMMARY).toMatch(/archives not malware-scanned.*trusted files/i);
+  expect(`${HUMAN_UPLOAD_GUIDANCE} ${HUMAN_UPLOAD_SUMMARY}`).not.toMatch(/malware[- ]free|virus[- ]free|fully scanned/i);
 });
 
 test('accept attribute includes common extensions', () => {

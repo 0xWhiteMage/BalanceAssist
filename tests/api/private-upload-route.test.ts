@@ -290,6 +290,46 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(storePrivateUploadMock).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ['renamed-pe.pdf', 'application/pdf', new Uint8Array([0x4d, 0x5a, 0x90])],
+    ['renamed-elf.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', new Uint8Array([0x7f, 0x45, 0x4c, 0x46])],
+    ['renamed-mach-o.pdf', 'application/pdf', new Uint8Array([0xcf, 0xfa, 0xed, 0xfe])],
+    ['renamed-class.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', new Uint8Array([0xca, 0xfe, 0xba, 0xbe])],
+    ['renamed-script.pdf', 'application/pdf', new TextEncoder().encode('#!/bin/sh\necho unsafe')]
+  ])('human mode rejects disguised executable or script content in %s', async (name, type, bytes) => {
+    useConsents([{ scope: 'producer_transfer', granted: true }]);
+
+    const response = await post(formWith(new File([bytes], name, { type }), 'human'));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'file_validation_failed' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test('human mode rejects a known executable MIME under an allowed extension', async () => {
+    useConsents([{ scope: 'producer_transfer', granted: true }]);
+
+    const response = await post(formWith(
+      new File(['ordinary'], 'renamed.pdf', { type: 'application/x-msdownload' }),
+      'human'
+    ));
+
+    expect(response.status).toBe(422);
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['benign.pdf', 'application/pdf', new TextEncoder().encode('%PDF-1.7\nbenign')],
+    ['benign.zip', 'application/zip', new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00])]
+  ])('human mode permits benign signature control %s', async (name, type, bytes) => {
+    useConsents([{ scope: 'producer_transfer', granted: true }]);
+
+    const response = await post(formWith(new File([bytes], name, { type }), 'human'));
+
+    expect(response.status).toBe(200);
+    expect(storePrivateUploadMock).toHaveBeenCalledOnce();
+  });
+
   test('human mode permits a near-50 MB contract under its multipart ceiling without allocating it', async () => {
     useConsents([{ scope: 'producer_transfer', granted: true }]);
     const file = new File(['bounded fixture'], 'large.mov', { type: 'video/quicktime' });

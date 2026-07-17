@@ -6,6 +6,7 @@ import { classifyConfidentialFilename } from '@/lib/privacy/confidential-intent'
 import { PRIVATE_ANALYSIS_UPLOAD_POLICY, validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 import {
   HUMAN_UPLOAD_POLICY,
+  hasBlockedHumanUploadContent,
   safeHumanUploadMime,
   validateHumanUploadBatch
 } from '@/lib/uploads/file-policy';
@@ -170,6 +171,9 @@ export async function POST(request: Request) {
       });
     } else {
       if (!validateHumanUploadBatch(files).ok) throw new Error('file_validation_failed');
+      if (files.some((file, index) => hasBlockedHumanUploadContent(file.type, buffers[index]))) {
+        throw new Error('file_validation_failed');
+      }
       preflight = files.map((file, index) => ({
         buffer: buffers[index],
         verifiedMime: safeHumanUploadMime(file.type)
