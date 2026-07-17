@@ -1,34 +1,28 @@
-import { eventPayloadSchema } from '@/lib/api/contracts';
+import { eventPayloadSchema, MAX_EVENT_BODY_BYTES } from '@/lib/api/contracts';
 import { requireSession } from '@/lib/api/require-session';
-import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
-
-const ALLOWED_EVENT_NAMES = new Set([
-  'widget_closed',
-  'human_handoff',
-  'step_advanced',
-  'llm_request',
-  'deletion_requested',
-  'memory_inspected',
-  'memory_reset_requested',
-  'memory_correction_requested'
-]);
+import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
+import { extractRequestId } from '@/lib/logger';
+import { emitEvent } from '@/lib/observability/events';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
 }
 
 export async function POST(request: Request) {
-  const parsed = await parseRequestBody(request, eventPayloadSchema);
-
-  if (!parsed.ok) {
-    return parsed.response;
+  const body = await readJsonBodyLimited(request, MAX_EVENT_BODY_BYTES);
+  if (!body.ok) {
+    return jsonWithCors(
+      { ok: false, error: body.tooLarge ? 'Event payload too large' : 'Invalid JSON body' },
+      { status: body.tooLarge ? 413 : 400 },
+      request
+    );
   }
-
-  const { sessionId, eventName, properties } = parsed.data;
-
-  if (!ALLOWED_EVENT_NAMES.has(eventName)) {
-    return jsonWithCors({ ok: false, error: 'Unknown event name' }, { status: 400 }, request);
+  const parsed = eventPayloadSchema.safeParse(body.data);
+  if (!parsed.success) {
+    return jsonWithCors({ ok: false, error: 'Invalid event payload' }, { status: 400 }, request);
   }
+  const { sessionId, eventName } = parsed.data;
+  const properties = 'properties' in parsed.data ? parsed.data.properties : undefined;
 
   const authResult = await requireSession(request, sessionId);
   if (!authResult.ok) {
@@ -36,6 +30,15 @@ export async function POST(request: Request) {
   }
 
   const { supabase } = authResult;
+
+  const { data: sessionState, error: sessionStateError } = await supabase
+    .from('sessions')
+    .select('deletion_state')
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (sessionStateError || !sessionState || (sessionState as { deletion_state?: string }).deletion_state !== 'active') {
+    return jsonWithCors({ ok: false, error: 'event_session_inactive' }, { status: 409 }, request);
+  }
 
   const { error } = await supabase
     .from('events')
@@ -45,5 +48,6 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'event_persist_failed' }, { status: 500 }, request);
   }
 
-  return jsonWithCors({ ok: true, eventName });
+  emitEvent(eventName, { sessionId, ...(properties ?? {}) }, extractRequestId(request));
+  return jsonWithCors({ ok: true, eventName }, undefined, request);
 }

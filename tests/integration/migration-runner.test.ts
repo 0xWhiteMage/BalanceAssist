@@ -85,7 +85,8 @@ describe('test migration runner', () => {
       '053_monday_reconciliation.sql',
       '054_human_contact_consent.sql',
       '055_final_review_approval.sql',
-      '056_trust_centered_session_controls.sql'
+      '056_trust_centered_session_controls.sql',
+      '057_event_deletion_freeze.sql'
     ]);
   });
 

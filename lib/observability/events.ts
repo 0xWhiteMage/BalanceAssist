@@ -1,4 +1,5 @@
 import { sanitizeObservabilityData } from '@/lib/observability/sanitize';
+import { trustFeedbackPropertiesSchema } from '@/lib/api/contracts';
 
 type EventName =
   | 'consent_granted'
@@ -23,6 +24,10 @@ type EventName =
   | 'memory_inspected'
   | 'memory_reset_requested'
   | 'memory_correction_requested'
+  | 'widget_closed'
+  | 'human_handoff'
+  | 'step_advanced'
+  | 'trust_feedback'
   | 'temporary_sessions_expired'
   | 'monday_sync_succeeded'
   | 'monday_sync_failed'
@@ -73,6 +78,10 @@ const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: re
   memory_inspected: { version: 1, fields: ['sessionId'] },
   memory_reset_requested: { version: 1, fields: ['sessionId'] },
   memory_correction_requested: { version: 1, fields: ['sessionId'] },
+  widget_closed: { version: 1, fields: ['sessionId'] },
+  human_handoff: { version: 1, fields: ['sessionId'] },
+  step_advanced: { version: 1, fields: ['sessionId', 'from', 'to'] },
+  trust_feedback: { version: 1, fields: ['sessionId', 'dimension', 'response'] },
   temporary_sessions_expired: { version: 1, fields: ['deletedSessions', 'deferredSessions', 'releasedClaims'] },
   monday_sync_succeeded: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs'] },
   monday_sync_failed: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs', 'reason'] },
@@ -90,7 +99,15 @@ export function emitEvent(
   const schema = EVENT_SCHEMAS[eventName];
   if (!schema) return;
 
-  const redacted = sanitizeObservabilityData(data, schema.fields, SAFE_REASON_CODES);
+  let redacted = sanitizeObservabilityData(data, schema.fields, SAFE_REASON_CODES);
+  if (eventName === 'trust_feedback') {
+    const feedback = trustFeedbackPropertiesSchema.safeParse({
+      dimension: redacted.dimension,
+      response: redacted.response
+    });
+    if (!feedback.success) return;
+    redacted = { sessionId: redacted.sessionId, ...feedback.data };
+  }
 
   const entry = {
     ts: new Date().toISOString(),

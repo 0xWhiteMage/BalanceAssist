@@ -15,6 +15,7 @@ import {
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
 import { ReviewPanel } from '@/components/widget/review-panel';
+import { TrustFeedback } from '@/components/widget/trust-feedback';
 import { IntakeStageProgress } from '@/components/widget/intake-stage-progress';
 import { AttachmentDropzone, type ReferenceFile } from '@/components/widget/attachment-dropzone';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
@@ -33,7 +34,7 @@ import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 import { classifyUrl, getReferencePresenceStatus, normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
-import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
+import { MAX_PROJECT_SCOPE_CHARACTERS, type TrustFeedbackResponse } from '@/lib/api/contracts';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
 const OPTIONAL_ANSWER_ACTIONS = ['Not sure yet', 'Skip', 'Prefer not to share'] as const;
@@ -181,6 +182,7 @@ export function WidgetOverlay({
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [trustFeedbackResponse, setTrustFeedbackResponse] = useState<TrustFeedbackResponse | null>(null);
   const [deletionStatus, setDeletionStatus] = useState<DeletionReceiptStatus | null>(null);
   const [deletionConfirmationPending, setDeletionConfirmationPending] = useState(false);
   const submitInFlightRef = useRef<boolean>(false);
@@ -192,6 +194,7 @@ export function WidgetOverlay({
   const humanBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const botSayGenerationRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(sessionId);
+  const activeSessionIdRef = useRef<string | null>(sessionId);
   const confidentialDiversionRef = useRef(false);
   const aiProcessingGenerationRef = useRef(0);
 
@@ -220,6 +223,9 @@ export function WidgetOverlay({
   const applyCanonicalDraftState = sessionDraft.applyCanonicalDraft;
   const { messages: teamMessages, reset: resetTeamRelay } = teamRelay;
   const deletionFrozen = Boolean(deletionStatus?.receipt);
+  const deletionFrozenRef = useRef(deletionFrozen);
+  activeSessionIdRef.current = sessionId;
+  deletionFrozenRef.current = deletionFrozen;
 
 
   useEffect(() => {
@@ -262,6 +268,9 @@ export function WidgetOverlay({
   }, [deletionStatus?.receipt, deletionStatus?.status]);
 
   useEffect(() => {
+    if (previousSessionIdRef.current !== sessionId) {
+      setTrustFeedbackResponse(null);
+    }
     if (previousSessionIdRef.current && previousSessionIdRef.current !== sessionId) {
       resetTeamRelay();
     }
@@ -864,6 +873,19 @@ export function WidgetOverlay({
       setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
       await botSay('Sorry — something went wrong saving your brief. Please try again.');
     }
+  }
+
+  async function handleTrustFeedback(response: TrustFeedbackResponse): Promise<boolean> {
+    if (!sessionId || deletionFrozen || !briefApproved || trustFeedbackResponse) return false;
+    const feedbackSessionId = sessionId;
+    const result = await logEvent({
+      sessionId: feedbackSessionId,
+      eventName: 'trust_feedback',
+      properties: { dimension: 'clarity_helpfulness', response }
+    });
+    if (!result?.ok || activeSessionIdRef.current !== feedbackSessionId || deletionFrozenRef.current) return false;
+    setTrustFeedbackResponse(response);
+    return true;
   }
 
   async function processFlowAnswer(value: string, displayLabel?: string) {
@@ -1500,6 +1522,12 @@ export function WidgetOverlay({
                   }}
                   onTalkToHuman={handleTeamConnect}
                 />
+                {briefApproved && sessionId && !deletionFrozen && (
+                  <TrustFeedback
+                    submitted={trustFeedbackResponse !== null}
+                    onSubmit={handleTrustFeedback}
+                  />
+                )}
               </div>
             )}
 
