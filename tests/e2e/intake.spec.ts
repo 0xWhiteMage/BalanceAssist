@@ -126,7 +126,14 @@ test.describe('balance assist intake via persistent rail', () => {
     let draftVersion = 0;
     let finalizeAttempts = 0;
 
-    const stages = [
+    type StageFixture = {
+      currentStage: 'audience' | 'planning' | 'references-contact';
+      message: string;
+      recap: string;
+      updates: Record<string, string>;
+      provenance: Record<string, 'user-stated' | 'inferred'>;
+    };
+    const stages: readonly StageFixture[] = [
       {
         currentStage: 'audience',
         message: 'Who is this for?',
@@ -144,13 +151,15 @@ test.describe('balance assist intake via persistent rail', () => {
         currentStage: 'planning',
         message: 'Timeline helps with planning and feasibility, while budget helps us suggest realistic formats and scope. What timeline are you working with?',
         recap: 'So far: audience: Not sure yet; intended outputs: Skip.',
-        updates: { audience: 'Not sure yet', intendedOutputs: 'Skip' }
+        updates: { audience: 'Not sure yet', intendedOutputs: 'Skip' },
+        provenance: {}
       },
       {
         currentStage: 'references-contact',
         message: 'Would you like to add any references, or Skip?',
         recap: 'So far: timeline: Not sure yet; budget: Prefer not to share.',
-        updates: { timelineBand: 'Not sure yet', budgetBand: 'Prefer not to share' }
+        updates: { timelineBand: 'Not sure yet', budgetBand: 'Prefer not to share' },
+        provenance: {}
       },
       {
         currentStage: 'references-contact',
@@ -161,9 +170,10 @@ test.describe('balance assist intake via persistent rail', () => {
           contactName: 'Jayden',
           contactCompany: 'Acme',
           contactEmail: 'jayden@example.com'
-        }
+        },
+        provenance: {}
       }
-    ] as const;
+    ];
 
     await page.route('**/api/sessions/inspect', async (route) => {
       await route.fulfill({
@@ -255,7 +265,7 @@ test.describe('balance assist intake via persistent rail', () => {
       const stage = stages[chatRequests.length - 1];
       if (!stage) throw new Error(`Unexpected chat request ${chatRequests.length}`);
       Object.assign(canonicalDraft, stage.updates);
-      Object.assign(provenance, Object.fromEntries(Object.keys(stage.updates).map((field) => [field, 'user-stated'])), stage.provenance ?? {});
+      Object.assign(provenance, Object.fromEntries(Object.keys(stage.updates).map((field) => [field, 'user-stated'])), stage.provenance);
       draftVersion += 1;
       await route.fulfill({
         status: 200,
@@ -382,8 +392,9 @@ test.describe('balance assist intake via persistent rail', () => {
     const reviewPanelHandle = await samePanel.elementHandle();
     expect(reviewPanelHandle).not.toBeNull();
     await samePanel.evaluate((node) => {
+      if (!(node instanceof HTMLElement)) throw new Error('Review panel must be an HTML element');
       node.dataset.e2eIdentity = 'desktop-review-panel';
-      (window as Window & { __desktopReviewPanel?: HTMLElement }).__desktopReviewPanel = node;
+      (window as Window & { __desktopReviewPanel?: Element }).__desktopReviewPanel = node;
     });
     await samePanel.getByRole('button', { name: 'Edit project objective' }).click();
     await page.getByRole('textbox', { name: 'Project objective' }).fill('Build awareness and prompt sign-ups.');
@@ -397,13 +408,15 @@ test.describe('balance assist intake via persistent rail', () => {
       { kind: 'consent', payload: expectedConsent },
       { kind: 'finalize', attempt: 3 }
     ]);
-    expect(await samePanel.evaluate((node) =>
-      node.dataset.e2eIdentity === 'desktop-review-panel' &&
-      (window as Window & { __desktopReviewPanel?: HTMLElement }).__desktopReviewPanel === node
-    )).toBe(true);
-    expect(await reviewPanelHandle!.evaluate((node) =>
-      node.isConnected && node.dataset.e2eIdentity === 'desktop-review-panel'
-    )).toBe(true);
+    expect(await samePanel.evaluate((node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      return node.dataset.e2eIdentity === 'desktop-review-panel' &&
+        (window as Window & { __desktopReviewPanel?: Element }).__desktopReviewPanel === node;
+    })).toBe(true);
+    expect(await reviewPanelHandle!.evaluate((node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      return node.isConnected && node.dataset.e2eIdentity === 'desktop-review-panel';
+    })).toBe(true);
 
     expect(consentRequests).toEqual([expectedConsent, expectedConsent, expectedConsent]);
 
