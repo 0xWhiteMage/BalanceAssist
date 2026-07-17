@@ -37,6 +37,10 @@ vi.mock('@/lib/handoff/outbox', () => ({
   markFailed: vi.fn(),
 }));
 
+vi.mock('@/lib/api/consent-cutover', () => ({
+  isConsent12CutoverActive: vi.fn(async () => true),
+}));
+
 vi.mock('@/lib/telegram', () => ({
   sendTelegramMessage: vi.fn(),
   ensureTelegramTopic: vi.fn(),

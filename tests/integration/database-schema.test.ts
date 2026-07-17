@@ -606,7 +606,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        values ($1, '{}'::jsonb, 'pending', 'revoked-handoff-' || gen_random_uuid()) returning id`,
       [sessionId]
     );
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
     await client!.query("select public.record_session_consent($1, 'producer_transfer', false, '1.0')", [sessionId]);
 
     const claim = await client!.query('select * from public.claim_next_handoff()');
@@ -628,7 +628,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
        values ($1, '{}'::jsonb, 'pending', 'expired-pending-' || gen_random_uuid()) returning id`,
       [sessionId]
     );
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
 
     const claim = await client!.query('select * from public.claim_next_handoff()');
     const state = await client!.query('select state, claim_expires_at from public.handoff_outbox where id = $1', [handoff.rows[0].id]);
@@ -674,7 +674,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       "insert into public.sessions (source_url, draft_expires_at) values ('https://send-reservation.example.test', now() + interval '1 hour') returning id"
     );
     const sessionId = session.rows[0].id;
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
     const handoff = await client!.query(
       "insert into public.handoff_outbox (session_id, payload, state, idempotency_key) values ($1, '{}'::jsonb, 'pending', 'send-reservation-' || gen_random_uuid()) returning id",
       [sessionId]
@@ -818,7 +818,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         `insert into public.crm_lead_revisions (
            crm_lead_id, revision, source_draft_version, approval_input_hash, payload,
            payload_hash, approved_at, consent_notice_version, consent_recorded_at
-         ) values ($1, 1, 0, repeat('1', 64), '{"crmRecordId":"opaque"}'::jsonb, repeat('2', 64), now(), '1.1', now())`,
+         ) values ($1, 1, 0, repeat('1', 64), '{"crmRecordId":"opaque"}'::jsonb, repeat('2', 64), now(), '1.2', now())`,
         [crmLeadId]
       );
       const outbox = await client!.query(
@@ -908,7 +908,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     try {
       await client!.query(
         `insert into public.crm_lead_revisions (crm_lead_id, revision, source_draft_version, approval_input_hash, payload, payload_hash, approved_at, consent_notice_version, consent_recorded_at)
-         values ($1, 1, 0, repeat('5', 64), '{}'::jsonb, repeat('6', 64), now(), '1.1', now())`,
+         values ($1, 1, 0, repeat('5', 64), '{}'::jsonb, repeat('6', 64), now(), '1.2', now())`,
         [crmLeadId]
       );
       await client!.query(
@@ -945,7 +945,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           `insert into public.crm_lead_revisions (
              crm_lead_id, revision, source_draft_version, approval_input_hash, payload,
              payload_hash, approved_at, consent_notice_version, consent_recorded_at
-           ) values ($1, $2, 0, repeat($3, 64), '{}'::jsonb, repeat('5', 64), now(), '1.1', now())`,
+           ) values ($1, $2, 0, repeat($3, 64), '{}'::jsonb, repeat('5', 64), now(), '1.2', now())`,
           [crmLeadId, revision, String(revision)]
         );
         await client!.query("insert into public.monday_sync_outbox (crm_lead_id, revision, operation) values ($1, $2, 'upsert')", [crmLeadId, revision]);
@@ -982,12 +982,12 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const competingClient = new Client({ connectionString: grantConnectionString });
     await competingClient.connect();
     try {
-      await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.1')", [sessionId]);
+      await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
       await client!.query(
         `insert into public.crm_lead_revisions (
            crm_lead_id, revision, source_draft_version, approval_input_hash, payload,
            payload_hash, approved_at, consent_notice_version, consent_recorded_at
-         ) values ($1, 1, 0, repeat('6', 64), '{}'::jsonb, repeat('7', 64), now(), '1.1', now())`,
+         ) values ($1, 1, 0, repeat('6', 64), '{}'::jsonb, repeat('7', 64), now(), '1.2', now())`,
         [crmLeadId]
       );
       const outbox = await client!.query("insert into public.monday_sync_outbox (crm_lead_id, revision, operation) values ($1, 1, 'upsert') returning id", [crmLeadId]);
@@ -997,7 +997,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       ]);
       const claimed = [first, second].find((result) => result.rows.length === 1)!;
       const empty = [first, second].find((result) => result.rows.length === 0)!;
-      await client!.query("select public.record_session_consent($1, 'producer_transfer', false, '1.1')", [sessionId]);
+      await client!.query("select public.record_session_consent($1, 'producer_transfer', false, '1.2')", [sessionId]);
       const reserved = await client!.query('select * from public.reserve_monday_sync_send($1, $2)', [outbox.rows[0].id, claimed.rows[0].claim_token]);
       const state = await client!.query('select state, claim_token from public.monday_sync_outbox where id = $1', [outbox.rows[0].id]);
 
@@ -1017,7 +1017,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const crmLead = await client!.query("insert into public.crm_leads (desired_revision, review_due_at, lifecycle_state) values (1, now() + interval '1 day', 'deletion_requested') returning id");
     const crmLeadId = crmLead.rows[0].id;
     try {
-      await client!.query(`insert into public.crm_lead_revisions (crm_lead_id, revision, source_draft_version, approval_input_hash, payload, payload_hash, approved_at, consent_notice_version, consent_recorded_at) values ($1, 1, 0, repeat('8', 64), '{}'::jsonb, repeat('9', 64), now(), '1.1', now())`, [crmLeadId]);
+      await client!.query(`insert into public.crm_lead_revisions (crm_lead_id, revision, source_draft_version, approval_input_hash, payload, payload_hash, approved_at, consent_notice_version, consent_recorded_at) values ($1, 1, 0, repeat('8', 64), '{}'::jsonb, repeat('9', 64), now(), '1.2', now())`, [crmLeadId]);
       const deletion = await client!.query("insert into public.monday_sync_outbox (crm_lead_id, revision, operation) values ($1, 1, 'delete') returning id", [crmLeadId]);
       const claim = await client!.query('select * from public.claim_next_monday_sync()');
       const reserved = await client!.query('select * from public.reserve_monday_sync_send($1, $2)', [deletion.rows[0].id, claim.rows[0].claim_token]);
@@ -1037,12 +1037,12 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const crmLead = await client!.query("insert into public.crm_leads (source_session_id, desired_revision, review_due_at) values ($1, 1, now() + interval '1 day') returning id", [sessionId]);
     const crmLeadId = crmLead.rows[0].id;
     try {
-      await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.1')", [sessionId]);
-      await client!.query(`insert into public.crm_lead_revisions (crm_lead_id, revision, source_draft_version, approval_input_hash, payload, payload_hash, approved_at, consent_notice_version, consent_recorded_at) values ($1, 1, 0, repeat('a', 64), '{}'::jsonb, repeat('b', 64), now(), '1.1', now())`, [crmLeadId]);
+      await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
+      await client!.query(`insert into public.crm_lead_revisions (crm_lead_id, revision, source_draft_version, approval_input_hash, payload, payload_hash, approved_at, consent_notice_version, consent_recorded_at) values ($1, 1, 0, repeat('a', 64), '{}'::jsonb, repeat('b', 64), now(), '1.2', now())`, [crmLeadId]);
       const outbox = await client!.query("insert into public.monday_sync_outbox (crm_lead_id, revision, operation) values ($1, 1, 'upsert') returning id", [crmLeadId]);
       const claim = await client!.query('select * from public.claim_next_monday_sync()');
       await client!.query('select * from public.reserve_monday_sync_send($1, $2)', [outbox.rows[0].id, claim.rows[0].claim_token]);
-      await client!.query("select public.record_session_consent($1, 'producer_transfer', false, '1.1')", [sessionId]);
+      await client!.query("select public.record_session_consent($1, 'producer_transfer', false, '1.2')", [sessionId]);
       const completed = await client!.query("select public.complete_monday_sync_upsert($1, $2, 'late-item') as applied", [outbox.rows[0].id, claim.rows[0].claim_token]);
       const lead = await client!.query('select lifecycle_state, monday_item_id from public.crm_leads where id = $1', [crmLeadId]);
       const deletion = await client!.query("select operation, state from public.monday_sync_outbox where crm_lead_id = $1 and operation = 'delete'", [crmLeadId]);
@@ -1080,7 +1080,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           `insert into public.crm_lead_revisions (
              crm_lead_id, revision, source_draft_version, approval_input_hash, payload,
              payload_hash, approved_at, consent_notice_version, consent_recorded_at
-           ) values ($1, 1, 0, repeat($2, 64), jsonb_build_object('qualificationStatus', $3::text, 'contactEmail', 'remove@example.test'), repeat($4, 64), now(), '1.1', now())`,
+           ) values ($1, 1, 0, repeat($2, 64), jsonb_build_object('qualificationStatus', $3::text, 'contactEmail', 'remove@example.test'), repeat($4, 64), now(), '1.2', now())`,
           [id, String(index + 1), status, String(index + 5)]
         );
         await client!.query("insert into public.monday_sync_outbox (crm_lead_id, revision, operation) values ($1, 1, 'upsert')", [id]);
@@ -1128,7 +1128,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       for (const revision of [1, 2]) {
         await client!.query(
           `insert into public.crm_lead_revisions (crm_lead_id, revision, source_draft_version, approval_input_hash, payload, payload_hash, approved_at, consent_notice_version, consent_recorded_at)
-           values ($1, $2, 0, repeat($3, 64), jsonb_build_object('contactEmail', 'remove@example.test'), repeat($4, 64), now(), '1.1', now())`,
+           values ($1, $2, 0, repeat($3, 64), jsonb_build_object('contactEmail', 'remove@example.test'), repeat($4, 64), now(), '1.2', now())`,
           [crmLeadId, revision, String(revision), String(revision + 2)]
         );
         await client!.query("insert into public.monday_sync_outbox (crm_lead_id, revision, operation, state) values ($1, $2, 'upsert', $3)", [crmLeadId, revision, revision === 1 ? 'synced' : 'pending']);
@@ -1307,7 +1307,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       })]
     );
     const sessionId = session.rows[0].id;
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
     const { Client } = await import('pg');
     const retryClient = new Client({ connectionString: grantConnectionString });
     await retryClient.connect();
@@ -1344,7 +1344,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       })]
     );
     const sessionId = session.rows[0].id;
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
 
     try {
       const finalized = await client!.query('select * from public.finalize_session_lead($1)', [sessionId]);
@@ -1357,7 +1357,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
-  it('atomically snapshots a 1.1-consented canonical draft into one CRM revision and one Monday obligation', async () => {
+  it('atomically snapshots a 1.2-consented canonical draft into one CRM revision and one Monday obligation', async () => {
     const session = await client!.query(
       `insert into public.sessions (source_url, draft, draft_version, draft_expires_at)
        values ('https://crm-approval.example.test', $1::jsonb, 3, now() + interval '1 hour') returning id`,
@@ -1376,7 +1376,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       })]
     );
     const sessionId = session.rows[0].id;
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.1')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
     await client!.query(
       `insert into public.reference_links (session_id, kind, url) values
        ($1, 'Moodboard', 'https://example.com./references?b=2&a=1'),
@@ -1414,7 +1414,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         approval_input_hash: projection.rows[0].approval_input_hash,
         approved_reference_set_hash: approvedReferenceSetHash
       });
-      expect(projection.rows).toEqual([expect.objectContaining({ desired_revision: 1, source_draft_version: 3, consent_notice_version: '1.1', monday_rows: '1', telegram_rows: '1' })]);
+      expect(projection.rows).toEqual([expect.objectContaining({ desired_revision: 1, source_draft_version: 3, consent_notice_version: '1.2', monday_rows: '1', telegram_rows: '1' })]);
       expect(projection.rows[0].review_due_after_90_days).toBe(true);
       expect(projection.rows[0].payload).toEqual(expect.objectContaining({
         schemaVersion: 1,
@@ -1422,7 +1422,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
         approvedRevision: 1,
         approvedDraftVersion: 3,
         approvedAt: expect.any(String),
-        producerTransferNoticeVersion: '1.1',
+        producerTransferNoticeVersion: '1.2',
         producerTransferRecordedAt: expect.any(String),
         contactName: 'Sam', contactEmail: 'sam@example.test', company: null,
         service: 'production', projectType: null,
@@ -1457,14 +1457,19 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     );
     const [historical, deleting] = sessions.rows;
     await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [historical.id]);
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.1')", [deleting.id]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [deleting.id]);
     await client!.query("update public.sessions set deletion_state = 'requested' where id = $1", [deleting.id]);
     try {
       const historicalResult = await client!.query('select * from public.finalize_session_lead($1)', [historical.id]);
       await expect(client!.query('select * from public.finalize_session_lead($1)', [deleting.id])).rejects.toThrow(/SESSION_DELETION_REQUESTED/);
       const crm = await client!.query('select source_session_id from public.crm_leads where source_session_id = any($1::uuid[])', [sessions.rows.map(({ id }) => id)]);
 
-      expect(historicalResult.rows[0]).toMatchObject({ persisted: true, crm_record_id: null, crm_queued: false });
+      expect(historicalResult.rows[0]).toMatchObject({ persisted: false, consent_required: true, crm_record_id: null, crm_queued: false });
+      const historicalArtifacts = await client!.query(
+        'select (select count(*)::int from public.leads where session_id = $1) as leads, (select count(*)::int from public.handoff_outbox where session_id = $1) as handoffs',
+        [historical.id]
+      );
+      expect(historicalArtifacts.rows[0]).toEqual({ leads: 0, handoffs: 0 });
       expect(crm.rows).toEqual([]);
     } finally {
       await deleteSessionForTest(client!, historical.id);
@@ -1478,7 +1483,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       [JSON.stringify({ service: { value: 'production' }, projectScope: { value: 'Detailed project scope for approval.' }, timelineBand: { value: '1 month' }, budgetBand: { value: '20k-50k' }, contactEmail: { value: 'reapprove@example.test' } })]
     );
     const sessionId = session.rows[0].id;
-    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.1')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
     try {
       await client!.query('select * from public.finalize_session_lead($1)', [sessionId]);
       await client!.query(
@@ -1532,7 +1537,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
   it('persists relay messages and their outbox rows atomically by request identity, not text', async () => {
     const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://atomic-relay.example.test', now() + interval '1 hour') returning id");
     const sessionId = session.rows[0].id;
-    await client!.query("select public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
+    await client!.query("select public.record_session_consent($1, 'human_contact', true, '1.2')", [sessionId]);
     const { Client } = await import('pg');
     const retryClient = new Client({ connectionString: grantConnectionString });
     await retryClient.connect();
@@ -1563,7 +1568,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://relay-consent.example.test', now() + interval '1 hour') returning id");
     const sessionId = session.rows[0].id;
     try {
-      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.2')", [sessionId]);
       const relay = await client!.query("select * from public.relay_human_message($1, 'human-contact-only', 'Please contact me')", [sessionId]);
       const claim = await client!.query('select * from public.claim_next_handoff()');
       const reserved = await client!.query('select public.reserve_handoff_send($1, $2) as reserved', [relay.rows[0].handoff_id, claim.rows[0].claim_token]);
@@ -1582,10 +1587,10 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const session = await client!.query("insert into public.sessions (source_url, draft_expires_at) values ('https://relay-revocation.example.test', now() + interval '1 hour') returning id");
     const sessionId = session.rows[0].id;
     try {
-      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.0')", [sessionId]);
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.2')", [sessionId]);
       const relay = await client!.query("select * from public.relay_human_message($1, 'human-contact-revoked', 'Please contact me')", [sessionId]);
       const claim = await client!.query('select * from public.claim_next_handoff()');
-      await client!.query("select * from public.record_session_consent($1, 'human_contact', false, '1.0')", [sessionId]);
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', false, '1.2')", [sessionId]);
       const reserved = await client!.query('select public.reserve_handoff_send($1, $2) as reserved', [relay.rows[0].handoff_id, claim.rows[0].claim_token]);
       const state = await client!.query(
         'select state, last_error, claim_token, claim_expires_at from public.handoff_outbox where id = $1',
@@ -1600,14 +1605,50 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
+  it('does not persist or queue a relay under historical human-contact consent', async () => {
+    const session = await client!.query("insert into public.sessions (source_url) values ('https://historical-relay.example.test') returning id");
+    const sessionId = session.rows[0].id;
+    try {
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.1')", [sessionId]);
+      const relay = await client!.query("select * from public.relay_human_message($1, 'historical-relay', 'Please contact me')", [sessionId]);
+      const artifacts = await client!.query(
+        'select (select count(*)::int from public.human_messages where session_id = $1) as messages, (select count(*)::int from public.handoff_outbox where session_id = $1) as handoffs',
+        [sessionId]
+      );
+
+      expect(relay.rows[0]).toMatchObject({ persisted: false, consent_required: true, message_id: null, handoff_id: null });
+      expect(artifacts.rows[0]).toEqual({ messages: 0, handoffs: 0 });
+    } finally {
+      await deleteSessionForTest(client!, sessionId);
+    }
+  });
+
+  it('keeps human relay persistence frozen after deletion is requested', async () => {
+    const session = await client!.query("insert into public.sessions (source_url) values ('https://deleted-relay.example.test') returning id");
+    const sessionId = session.rows[0].id;
+    try {
+      await client!.query("select * from public.record_session_consent($1, 'human_contact', true, '1.2')", [sessionId]);
+      await client!.query("update public.sessions set deletion_state = 'requested' where id = $1", [sessionId]);
+      await expect(client!.query("select * from public.relay_human_message($1, 'deleted-relay', 'Please contact me')", [sessionId]))
+        .rejects.toThrow(/SESSION_DELETION_REQUESTED/);
+      const artifacts = await client!.query(
+        'select (select count(*)::int from public.human_messages where session_id = $1) as messages, (select count(*)::int from public.handoff_outbox where session_id = $1) as handoffs',
+        [sessionId]
+      );
+      expect(artifacts.rows[0]).toEqual({ messages: 0, handoffs: 0 });
+    } finally {
+      await deleteSessionForTest(client!, sessionId);
+    }
+  });
+
   it('queues CRM deletion when producer-transfer consent is revoked', async () => {
     const session = await client!.query("insert into public.sessions (source_url) values ('https://crm-revocation.example.test') returning id");
     const sessionId = session.rows[0].id;
     const crmLead = await client!.query("insert into public.crm_leads (source_session_id, desired_revision, review_due_at) values ($1, 1, now() + interval '1 day') returning id", [sessionId]);
     const crmLeadId = crmLead.rows[0].id;
     try {
-      await client!.query("select * from public.record_session_consent($1, 'producer_transfer', true, '1.1')", [sessionId]);
-      await client!.query("select * from public.record_session_consent($1, 'producer_transfer', false, '1.1')", [sessionId]);
+      await client!.query("select * from public.record_session_consent($1, 'producer_transfer', true, '1.2')", [sessionId]);
+      await client!.query("select * from public.record_session_consent($1, 'producer_transfer', false, '1.2')", [sessionId]);
       const lead = await client!.query('select lifecycle_state from public.crm_leads where id = $1', [crmLeadId]);
       const deletion = await client!.query("select operation, state from public.monday_sync_outbox where crm_lead_id = $1 and operation = 'delete'", [crmLeadId]);
 

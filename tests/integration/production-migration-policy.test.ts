@@ -31,7 +31,7 @@ describe('production migration policy', () => {
   });
 
   it('requires every reviewed trust migration before ordinary production releases', () => {
-    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053', '054', '055', '056', '057'];
+    const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053', '054', '055', '056', '057', '058', '059'];
 
     expect(productionMigrations.assertReviewedTrustControlsMigrationRecorded).toBeTypeOf('function');
     expect(() => productionMigrations.assertReviewedTrustControlsMigrationRecorded(recordedVersions)).not.toThrow();
@@ -47,6 +47,12 @@ describe('production migration policy', () => {
     expect(() => productionMigrations.assertReviewedTrustFeedbackMigrationRecorded(recordedVersions)).not.toThrow();
     expect(() => productionMigrations.assertReviewedTrustFeedbackMigrationRecorded(recordedVersions.filter((version) => version !== '057')))
       .toThrow('057 is pending; run Production trust feedback migration 057 before this release');
+    expect(() => productionMigrations.assertReviewedUnsentCrmDeletionMigrationRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedUnsentCrmDeletionMigrationRecorded(recordedVersions.filter((version) => version !== '058')))
+      .toThrow('058 is pending; run Production unsent CRM deletion migration 058 before this release');
+    expect(() => productionMigrations.assertReviewedConsent12MigrationRecorded(recordedVersions)).not.toThrow();
+    expect(() => productionMigrations.assertReviewedConsent12MigrationRecorded(recordedVersions.filter((version) => version !== '059')))
+      .toThrow('059 is pending; run Production consent 1.2 migration 059 before this release');
   });
 
   it('does not select reviewed CRM or trust-controls migrations for the ordinary runner', () => {
@@ -58,7 +64,10 @@ describe('production migration policy', () => {
       { version: '054', filename: '054_additive.sql', path: '/tmp/054' },
       { version: '055', filename: '055_final_review_approval.sql', path: '/tmp/055' },
       { version: '056', filename: '056_trust_centered_session_controls.sql', path: '/tmp/056' },
-      { version: '057', filename: '057_event_deletion_freeze.sql', path: '/tmp/057' }
+      { version: '057', filename: '057_event_deletion_freeze.sql', path: '/tmp/057' },
+      { version: '058', filename: '058_unsent_crm_deletion.sql', path: '/tmp/058' },
+      { version: '059', filename: '059_consent_1_2_compatibility.sql', path: '/tmp/059' },
+      { version: '060', filename: '060_consent_1_2_cutover.sql', path: '/tmp/060' }
     ]).map(({ version }) => version)).toEqual(['043']);
   });
 

@@ -13,6 +13,9 @@ const reviewedTrustControlsVersion = '054';
 const reviewedFinalReviewVersion = '055';
 const reviewedSessionControlsVersion = '056';
 const reviewedTrustFeedbackVersion = '057';
+const reviewedUnsentCrmDeletionVersion = '058';
+const reviewedConsent12Version = '059';
+const reviewedConsent12CutoverVersion = '060';
 
 export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
   const recorded = new Set(recordedVersions);
@@ -54,12 +57,27 @@ export function assertReviewedTrustFeedbackMigrationRecorded(recordedVersions) {
   }
 }
 
+export function assertReviewedUnsentCrmDeletionMigrationRecorded(recordedVersions) {
+  if (!recordedVersions.includes(reviewedUnsentCrmDeletionVersion)) {
+    throw new Error('058 is pending; run Production unsent CRM deletion migration 058 before this release.');
+  }
+}
+
+export function assertReviewedConsent12MigrationRecorded(recordedVersions) {
+  if (!recordedVersions.includes(reviewedConsent12Version)) {
+    throw new Error('059 is pending; run Production consent 1.2 migration 059 before this release.');
+  }
+}
+
 export function selectOrdinaryProductionMigrations(migrations) {
   return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version)
     && migration.version !== reviewedTrustControlsVersion
     && migration.version !== reviewedFinalReviewVersion
     && migration.version !== reviewedSessionControlsVersion
-    && migration.version !== reviewedTrustFeedbackVersion);
+    && migration.version !== reviewedTrustFeedbackVersion
+    && migration.version !== reviewedUnsentCrmDeletionVersion
+    && migration.version !== reviewedConsent12Version
+    && migration.version !== reviewedConsent12CutoverVersion);
 }
 
 export function assertExpandOnlyMigration(source, filename) {
@@ -109,6 +127,8 @@ export async function applyProductionMigrations(connectionString = process.env.P
   assertReviewedFinalReviewMigrationRecorded(recordedVersions);
   assertReviewedSessionControlsMigrationRecorded(recordedVersions);
   assertReviewedTrustFeedbackMigrationRecorded(recordedVersions);
+  assertReviewedUnsentCrmDeletionMigrationRecorded(recordedVersions);
+  assertReviewedConsent12MigrationRecorded(recordedVersions);
 
   const migrations = selectOrdinaryProductionMigrations(getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')));
   for (const migration of migrations) {

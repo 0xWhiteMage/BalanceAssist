@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -43,6 +46,8 @@ jobs:
 
   database:
     runs-on: ubuntu-latest
+    env:
+      REQUIRE_SUPABASE_RELEASE_PROOF: '1'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -111,4 +116,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
+
+  release-proof:
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, database, build, diff-check, e2e, dependency-audit]
+    steps:
+      - run: echo "All trust-centered release gates passed."

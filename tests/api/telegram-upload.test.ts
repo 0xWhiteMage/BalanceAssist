@@ -48,7 +48,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     requireSessionMock.mockResolvedValue({
       ok: true,
       auth: { sessionId: '11111111-2222-3333-4444-555555555555', capability: 'capability' },
-      supabase: { from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true }], error: null })) })) })) })) }
+      supabase: { from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true, notice_version: '1.2' }], error: null })) })) })) })) }
     });
     storePrivateUploadMock.mockResolvedValue({ status: 'stored', objectKey: 'opaque', mimeType: 'text/plain', extractedText: 'Draft-only analysis' });
   });

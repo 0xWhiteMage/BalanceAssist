@@ -27,7 +27,7 @@ response stops AI processing and shows human-only contact options, but it does
 not record human-contact consent or start the private relay until the user
 explicitly chooses `Talk to the team without AI`.
 
-Human mode bypasses DeepSeek. Its private relay, consent, retention, and producer
+Human mode bypasses DeepSeek. Its human-only Telegram relay, consent, retention, and producer
 transfer controls remain separate from AI mode.
 
 ## Attachments

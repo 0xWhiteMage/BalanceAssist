@@ -526,15 +526,16 @@ export async function POST(request: Request) {
   }
 
   let processingError: { message?: string } | null = null;
+  let processingAllowed: unknown = false;
   try {
-    ({ error: processingError } = await session.supabase.rpc('assert_session_processing_allowed', {
+    ({ data: processingAllowed, error: processingError } = await session.supabase.rpc('assert_session_processing_allowed', {
       p_session_id: sessionId
     }));
   } catch {
     return jsonWithCors({ error: 'Chat session unavailable', code: 'chat_session_load_failed' }, { status: 503 }, request);
   }
-  if (processingError) {
-    const deletionRequested = processingError.message?.includes('SESSION_DELETION_REQUESTED');
+  if (processingError || processingAllowed !== true) {
+    const deletionRequested = processingError?.message?.includes('SESSION_DELETION_REQUESTED');
     return jsonWithCors({
       error: deletionRequested ? 'Session deletion requested' : 'Analysis consent required',
       code: deletionRequested ? 'SESSION_DELETION_REQUESTED' : 'ANALYSIS_CONSENT_REQUIRED'

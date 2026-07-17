@@ -5,5 +5,7 @@ export function assertReviewedTrustControlsMigrationRecorded(recordedVersions: s
 export function assertReviewedFinalReviewMigrationRecorded(recordedVersions: string[]): void;
 export function assertReviewedSessionControlsMigrationRecorded(recordedVersions: string[]): void;
 export function assertReviewedTrustFeedbackMigrationRecorded(recordedVersions: string[]): void;
+export function assertReviewedUnsentCrmDeletionMigrationRecorded(recordedVersions: string[]): void;
+export function assertReviewedConsent12MigrationRecorded(recordedVersions: string[]): void;
 export function selectOrdinaryProductionMigrations(migrations: Array<{ version: string; filename: string; path: string }>): Array<{ version: string; filename: string; path: string }>;
 export function applyProductionMigrations(connectionString?: string): Promise<{ applied: string[]; schemaVersion: string | undefined }>;

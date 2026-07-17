@@ -86,7 +86,10 @@ describe('test migration runner', () => {
       '054_human_contact_consent.sql',
       '055_final_review_approval.sql',
       '056_trust_centered_session_controls.sql',
-      '057_event_deletion_freeze.sql'
+      '057_event_deletion_freeze.sql',
+      '058_unsent_crm_deletion.sql',
+      '059_consent_1_2_compatibility.sql',
+      '060_consent_1_2_cutover.sql'
     ]);
   });
 

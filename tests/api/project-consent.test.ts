@@ -34,7 +34,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     const response = await POST(new Request('https://www.balancestudio.tv/api/projects/session-1/consent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', origin: 'https://www.balancestudio.tv' },
-      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.1' })
+      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.2' })
     }), { params: Promise.resolve({ sessionId: 'session-1' }) });
 
     expect(response.status).toBe(200);
@@ -42,7 +42,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
       p_session_id: 'session-1',
       p_scope: 'analysis',
       p_granted: true,
-      p_notice_version: '1.1'
+      p_notice_version: '1.2'
     });
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
@@ -71,7 +71,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     const { POST } = await import('@/app/api/projects/[sessionId]/consent/route');
     const response = await POST(new Request('https://www.balancestudio.tv/api/projects/session-1/consent', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: 'human_contact', granted: true, noticeVersion: '1.1' })
+      body: JSON.stringify({ scope: 'human_contact', granted: true, noticeVersion: '1.2' })
     }), { params: Promise.resolve({ sessionId: 'session-1' }) });
 
     expect(client.rpc).toHaveBeenCalledWith('record_session_consent', expect.objectContaining({ p_scope: 'human_contact' }));
@@ -88,7 +88,7 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     const response = await POST(new Request('https://www.balancestudio.tv/api/projects/session-1/consent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', origin: 'https://www.balancestudio.tv' },
-      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.1' })
+      body: JSON.stringify({ scope: 'analysis', granted: true, noticeVersion: '1.2' })
     }), { params: Promise.resolve({ sessionId: 'session-1' }) });
 
     expect(response.status).toBe(401);

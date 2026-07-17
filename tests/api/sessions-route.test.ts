@@ -23,7 +23,7 @@ import { POST } from '@/app/api/sessions/route';
 import { OPTIONS } from '@/app/api/sessions/route';
 
 const validConsent = {
-  consentVersion: '1.1',
+  consentVersion: '1.2',
   consentedAt: '2026-07-11T10:00:00.000Z'
 };
 
@@ -98,7 +98,7 @@ test('does not grant analysis consent for a human-only relay session', async () 
     method: 'POST',
     body: JSON.stringify({
       sourceUrl: 'https://www.balancestudio.tv',
-      consentVersion: 'human-relay-1.1',
+      consentVersion: 'human-relay-1.2',
       consentedAt: '2026-07-17T10:00:00.000Z'
     })
   });

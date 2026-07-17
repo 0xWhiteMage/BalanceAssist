@@ -15,9 +15,11 @@ export const balanceLogoUrl =
 
 export function WidgetOverlayHeader({
   isTeamConnected,
+  humanRelayActive,
   onClose
 }: {
   isTeamConnected: boolean;
+  humanRelayActive: boolean;
   onClose: () => void;
 }) {
   return (
@@ -35,10 +37,10 @@ export function WidgetOverlayHeader({
         </div>
         <div>
           <p id="balance-assist-dialog-title" className="balance-widget-title">
-            {isTeamConnected ? 'Balance Studio Team' : 'Balance Assist'}
+            {isTeamConnected ? 'Balance Studio Team' : humanRelayActive ? 'Balance Studio Relay' : 'Balance Assist'}
           </p>
           <p className="balance-widget-eyebrow">
-            {isTeamConnected ? 'Human relay' : 'AI brief assistant'}
+            {isTeamConnected ? 'Team reply received' : humanRelayActive ? 'Human-only relay' : 'AI brief assistant'}
           </p>
         </div>
       </div>
@@ -345,7 +347,7 @@ export function HumanFallbacks({
   const copy = deliveryUnavailable
     ? 'Message delivery is unavailable. Please email the team or book a call instead.'
     : unavailable
-      ? 'The private relay could not start. You can still contact the team directly.'
+      ? 'The human-only relay could not start. You can still contact the team directly.'
       : 'Prefer another route? Contact the team directly.';
 
   return (

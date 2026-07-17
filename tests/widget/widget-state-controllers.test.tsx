@@ -7,7 +7,7 @@ import { fetchTeamMessages, relayUserMessage } from '@/lib/api/client';
 import type { ConsentRecord } from '@/lib/privacy/notice';
 
 const consent: ConsentRecord = {
-  consentVersion: '1.1',
+  consentVersion: '1.2',
   consentedAt: '2026-07-14T10:00:00.000Z'
 };
 

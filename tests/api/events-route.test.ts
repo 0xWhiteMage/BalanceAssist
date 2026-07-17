@@ -133,4 +133,13 @@ describe('POST /api/events', () => {
     expect(response.status).toBe(500);
     expect(emitEventMock).not.toHaveBeenCalled();
   });
+
+  test('reports a deletion race rejected by the database as an inactive session', async () => {
+    authorize({ insertError: { code: 'P0001', message: 'session_unavailable' } });
+    const { POST } = await import('@/app/api/events/route');
+    const response = await POST(request({ sessionId: 'sess-1', eventName: 'widget_closed' }));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: 'event_session_inactive' });
+    expect(emitEventMock).not.toHaveBeenCalled();
+  });
 });

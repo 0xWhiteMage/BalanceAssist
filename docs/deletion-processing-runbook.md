@@ -2,6 +2,29 @@
 
 Authenticated deletion requests create one opaque job and return its current status. `requested`, `claimed`, `processing`, and `failed` mean deletion is not complete; only `completed` confirms the application data deletion.
 
+## Release Freeze Proof
+
+Application release is blocked until protected migrations `056`, `057`, `058`, and compatibility migration `059` are
+recorded with their exact reviewed filenames. Migration `056` atomically changes
+the session to `requested`; migration `057` rejects every later event insert for
+that session and serializes the insert against deletion's session lock. Apply each
+only through its protected immutable-main workflow. Do not use the ordinary
+expand-only release runner or a workstation to bypass that approval.
+
+The release journey must prove an event can persist while the temporary session
+is active, request deletion, receive `requested`, and then receive
+`409 event_session_inactive` for a new event with no row persisted. The production
+canary performs the same bounded post-request check without exporting the receipt,
+capability, session response, or event payload. A successful freeze proves only
+that new application processing is blocked; it does not prove worker completion
+or erasure from Telegram, provider backups, or other downstream systems.
+
+Migration `058` removes a local CRM projection during revocation or deletion only
+when it has no Monday item ID and no send, synced, delivery-unknown, conflict, or
+failed state. Pending, claimed, and suppressed local work can then be deleted
+without enabling Monday. Any provider-backed or ambiguous state keeps the existing
+scrub/delete barrier and must not be treated as complete.
+
 GitHub Actions invokes the internal deletion worker every five minutes. Investigate an alert when the `deletion-worker` heartbeat is older than 20 minutes or a non-completed deletion job is older than 24 hours. Confirm Storage is available, manually dispatch the GitHub workflow if required, and do not delete session metadata manually: the worker must remove private objects before their metadata and before the session cascade.
 
 The 24-hour threshold is an operational investigation target, not a guaranteed completion time. The worker deletes the temporary session, its owned application rows, and known private attachment objects when storage and provider obligations permit. It cannot retract content already transferred to Telegram or erase provider backups immediately; those systems follow their own retention and deletion processes. Jobs retain only opaque identifiers, lifecycle state, lease data, and timestamps, never deleted draft, contact, attachment, or raw-error data.

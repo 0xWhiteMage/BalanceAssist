@@ -760,7 +760,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/test" />);
 
     await chooseHumanPath();
-    const unavailable = await screen.findByText('The private relay could not start. You can still contact the team directly.');
+    const unavailable = await screen.findByText('The human-only relay could not start. You can still contact the team directly.');
     const email = screen.getByRole('link', { name: /email the team/i });
     const booking = screen.getByRole('link', { name: /book a call/i });
     expect(unavailable).toBeVisible();
@@ -785,7 +785,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await new Promise((resolve) => setTimeout(resolve, 2_100));
     expect(screen.getByRole('link', { name: /email the team/i })).toBeVisible();
     expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
-    expect(screen.getByText('The private relay could not start. You can still contact the team directly.')).toBeVisible();
+    expect(screen.getByText('The human-only relay could not start. You can still contact the team directly.')).toBeVisible();
     expect(requestLog.filter((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toHaveLength(1);
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   });

@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+vi.mock('@/lib/api/consent-cutover', () => ({ isConsent12CutoverActive: vi.fn(async () => true) }));
+
 const {
   hasSupabaseServerConfigMock,
   createServerSupabaseClientMock,

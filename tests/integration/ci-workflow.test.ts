@@ -5,8 +5,9 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-type Step = { uses?: string };
-type Workflow = { jobs?: Record<string, { steps?: Step[] }> };
+type Step = { uses?: string; run?: string };
+type Job = { needs?: string[]; env?: Record<string, string>; steps?: Step[] };
+type Workflow = { permissions?: Record<string, string>; jobs?: Record<string, Job> };
 
 describe('CI workflow action supply chain', () => {
   it('uses only reviewed immutable action commits', async () => {
@@ -22,5 +23,25 @@ describe('CI workflow action supply chain', () => {
     ]));
     expect(actions).not.toHaveLength(0);
     for (const action of actions) expect(action).toMatch(/^[\w-]+\/[\w.-]+@[0-9a-f]{40}$/);
+  });
+
+  it('requires every trust-centered release proof before CI can pass', async () => {
+    const source = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
+    const workflow = parse(source) as Workflow;
+    const jobs = workflow.jobs ?? {};
+    const commands = (name: string) => (jobs[name]?.steps ?? []).flatMap((step) => step.run ? [step.run] : []);
+
+    expect(workflow.permissions).toEqual({ contents: 'read' });
+    expect(commands('lint')).toContain('npm run lint');
+    expect(commands('typecheck')).toContain('npx tsc --noEmit');
+    expect(commands('test')).toContain('npx vitest run');
+    expect(commands('database')).toContain('npm run test:supabase');
+    expect(jobs.database?.env?.REQUIRE_SUPABASE_RELEASE_PROOF).toBe('1');
+    expect(commands('build')).toContain('npm run build');
+    expect(commands('e2e')).toContain('npm run test:e2e');
+    expect(commands('dependency-audit')).toContain('npm audit --omit=dev --audit-level=high');
+    expect(jobs['release-proof']?.needs).toEqual([
+      'lint', 'typecheck', 'test', 'database', 'build', 'diff-check', 'e2e', 'dependency-audit'
+    ]);
   });
 });
