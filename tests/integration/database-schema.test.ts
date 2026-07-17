@@ -1452,18 +1452,19 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const sessions = await client!.query(
       `insert into public.sessions (source_url, draft, deletion_state) values
        ('https://historical-crm.example.test', $1::jsonb, 'active'),
-       ('https://deleted-crm.example.test', $1::jsonb, 'requested') returning id`,
+       ('https://deleted-crm.example.test', $1::jsonb, 'active') returning id`,
       [JSON.stringify({ service: { value: 'production' }, projectScope: { value: 'Detailed project scope for approval.' }, timelineBand: { value: '1 month' }, budgetBand: { value: '20k-50k' }, contactEmail: { value: 'case@example.test' } })]
     );
     const [historical, deleting] = sessions.rows;
     await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.0')", [historical.id]);
     await client!.query("select public.record_session_consent($1, 'producer_transfer', true, '1.1')", [deleting.id]);
+    await client!.query("update public.sessions set deletion_state = 'requested' where id = $1", [deleting.id]);
     try {
-      const results = await Promise.all(sessions.rows.map(({ id }) => client!.query('select * from public.finalize_session_lead($1)', [id])));
+      const historicalResult = await client!.query('select * from public.finalize_session_lead($1)', [historical.id]);
+      await expect(client!.query('select * from public.finalize_session_lead($1)', [deleting.id])).rejects.toThrow(/SESSION_DELETION_REQUESTED/);
       const crm = await client!.query('select source_session_id from public.crm_leads where source_session_id = any($1::uuid[])', [sessions.rows.map(({ id }) => id)]);
 
-      expect(results[0].rows[0]).toMatchObject({ persisted: true, crm_record_id: null, crm_queued: false });
-      expect(results[1].rows[0]).toMatchObject({ persisted: true, crm_record_id: null, crm_queued: false });
+      expect(historicalResult.rows[0]).toMatchObject({ persisted: true, crm_record_id: null, crm_queued: false });
       expect(crm.rows).toEqual([]);
     } finally {
       await deleteSessionForTest(client!, historical.id);

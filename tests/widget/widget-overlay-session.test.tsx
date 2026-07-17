@@ -1009,7 +1009,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     });
   });
 
-  test('returns to the initial choices and starts a new AI session after a successful reset', async () => {
+  test('clears only the editable brief and keeps the active session after a successful reset', async () => {
     let sessionCreates = 0;
     global.fetch = makeFetchRecorder([
       ({ url, method }) => {
@@ -1019,7 +1019,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
           return new Response(JSON.stringify({ sessionId: `reset-session-${sessionCreates}`, persisted: true }), { status: 200 });
         }
         if (url.includes('/api/projects/reset-session-1/reset') && method === 'POST') {
-          return new Response(JSON.stringify({ ok: true, reset: true }), { status: 200 });
+          return new Response(JSON.stringify({ ok: true, reset: true, draftVersion: 1 }), { status: 200 });
         }
         return null;
       }
@@ -1035,9 +1035,10 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     fireEvent.change(input, { target: { value: 'forget this project' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Build a brief with AI' })).toBeVisible(), { timeout: 7000 });
-    await startWithBalanceAssist();
-    await waitFor(() => expect(sessionCreates).toBe(2));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/uploads, links, consent history/i);
+    }, { timeout: 7000 });
+    expect(sessionCreates).toBe(1);
   }, 15000);
 
   test('submits a deletion request through the server when the user asks to delete the project', async () => {
@@ -1064,11 +1065,22 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
         if (url.includes('/api/projects/delete-session-id/delete') && method === 'POST') {
           return new Response(JSON.stringify({
             ok: true,
+            receipt: '11111111-1111-4111-8111-111111111111.secret',
+            receiptId: '11111111-1111-4111-8111-111111111111',
+            status: 'requested',
             message: 'We recorded your deletion request. Downstream copies are handled separately.'
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
           });
+        }
+
+        if (url.includes('/api/deletions/status') && method === 'POST') {
+          return new Response(JSON.stringify({
+            ok: true,
+            receiptId: '11111111-1111-4111-8111-111111111111',
+            status: 'processing'
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
 
         if (url.includes('/api/events')) {
@@ -1090,13 +1102,19 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     fireEvent.change(input, { target: { value: 'delete this project' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/reply DELETE exactly/i), { timeout: 7000 });
+    fireEvent.change(input, { target: { value: 'DELETE' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
     await waitFor(() => {
       expect(requestLog.some((entry) => entry.url.includes('/api/projects/delete-session-id/delete') && entry.method === 'POST')).toBe(true);
       expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/recorded your deletion request/i);
+      expect(screen.getByTestId('deletion-status').textContent).toMatch(/processing|requested/i);
+      expect(screen.getByPlaceholderText('This session is frozen')).toBeDisabled();
     });
   }, 10000);
 
-  test('clears the scheduled reset after delayed submit output when the overlay unmounts', async () => {
+  test('does not schedule a client reset after clearing the editable brief', async () => {
     global.fetch = makeFetchRecorder([
       ({ url, method }) => {
         if (url.includes('/api/sessions/inspect')) {
@@ -1112,7 +1130,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
           });
         }
         if (url.includes('/api/projects/reset-session-id/reset') && method === 'POST') {
-          return new Response(JSON.stringify({ ok: true, reset: true }), {
+          return new Response(JSON.stringify({ ok: true, reset: true, draftVersion: 1 }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
           });
@@ -1142,11 +1160,10 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       const resetTimer = setTimeoutSpy.mock.results
         .map((result, index) => ({ timer: result.value, delay: setTimeoutSpy.mock.calls[index]?.[1] }))
         .find(({ delay }) => delay === 200)?.timer;
-      expect(resetTimer).toBeDefined();
+      expect(resetTimer).toBeUndefined();
 
       unmount();
-
-      expect(clearTimeoutSpy).toHaveBeenCalledWith(resetTimer);
+      expect(clearTimeoutSpy).not.toHaveBeenCalledWith(resetTimer);
     } finally {
       vi.useRealTimers();
       clearTimeoutSpy.mockRestore();

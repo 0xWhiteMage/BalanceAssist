@@ -29,9 +29,14 @@ function createRouteSupabase(session: SessionRow) {
 
   const supabase = {
     rpc: async (name: string, args: any) => {
-      if (name === 'request_deletion_job') {
+      if (name === 'request_session_deletion') {
         deletionJobs.push(args);
-        return { data: { id: 'job-1', state: 'requested', requested_at: '2026-07-14T00:00:00.000Z', attempts: 0 }, error: null };
+        return { data: [{ receipt_id: '11111111-1111-4111-8111-111111111111', status: 'requested', requested_at: '2026-07-14T00:00:00.000Z', updated_at: '2026-07-14T00:00:00.000Z' }], error: null };
+      }
+      if (name === 'clear_session_draft') {
+        state.draft = {};
+        state.draft_version += 1;
+        return { data: [{ draft: {}, draft_version: state.draft_version }], error: null };
       }
       expect(name).toBe('update_session_draft');
       if (args.p_expected_draft_version !== state.draft_version) {
@@ -273,13 +278,17 @@ describe('delete route', () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.sessionId).toBe('session-4');
-    expect(data.jobId).toBe('job-1');
+    expect(data.receiptId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(data.receipt).toMatch(/^11111111-1111-4111-8111-111111111111\.[A-Za-z0-9_-]+$/);
     expect(data.deleted).toBe(false);
     expect(data.status).toBe('requested');
     expect(data.message).toMatch(/recorded your deletion request/i);
     expect(data.message).not.toMatch(/has been deleted/i);
     expect(data.requestedAt).toBeTruthy();
-    expect(harness.deletionJobs).toEqual([{ p_session_id: 'session-4' }]);
+    expect(res.headers.get('cache-control')).toBe('no-store, private');
+    expect(harness.deletionJobs).toHaveLength(1);
+    expect(harness.deletionJobs[0]).toMatchObject({ p_session_id: 'session-4' });
+    expect(harness.deletionJobs[0].p_receipt_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(harness.events).toHaveLength(0);
   });
 
@@ -300,7 +309,7 @@ describe('delete route', () => {
     expect(harness.events).toHaveLength(0);
   });
 
-  test('reset clears canonical draft state and revokes the session capability', async () => {
+  test('reset atomically clears only the editable canonical draft', async () => {
     const harness = createRouteSupabase({
       id: 'session-6',
       draft: {
@@ -322,14 +331,23 @@ describe('delete route', () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.reset).toBe(true);
-    expect(harness.sessionUpdates).toHaveLength(1);
-    expect(harness.sessionUpdates[0]).toMatchObject({
-      draft: {},
-      draft_version: 3,
-      status: 'open',
-      capability_hash: null,
-      capability_expires_at: null
-    });
-    expect(res.headers.get('set-cookie')).toContain('session_capability=;');
+    expect(harness.sessionUpdates).toHaveLength(0);
+    expect(harness.state.draft).toEqual({});
+    expect(harness.state.draft_version).toBe(3);
+    expect(data.message).toMatch(/uploads, links, consent history/i);
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  test('reuses a deterministic receipt secret when a deletion response must be retried', async () => {
+    const harness = createRouteSupabase({ id: 'session-retry', draft: {}, draft_version: 0 });
+    requireSessionMock.mockResolvedValue(authorizedSession('session-retry', harness.supabase));
+
+    const first = await callDeleteRoute('session-retry');
+    const second = await callDeleteRoute('session-retry');
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+
+    expect(firstBody.receipt).toBe(secondBody.receipt);
+    expect(harness.deletionJobs[0].p_receipt_hash).toBe(harness.deletionJobs[1].p_receipt_hash);
   });
 });

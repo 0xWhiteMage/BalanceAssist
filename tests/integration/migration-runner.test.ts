@@ -69,7 +69,7 @@ describe('test migration runner', () => {
     expect(() => runner.getIncrementalMigrations(migrationsDir)).toThrow(/Duplicate migration version 001/);
   });
 
-  it('preserves the root test database migration identities through final review approval', async () => {
+  it('preserves the root test database migration identities through trust-centered session controls', async () => {
     const runner = await loadRunner();
 
     expect(runner.getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations'))
@@ -84,7 +84,8 @@ describe('test migration runner', () => {
       '052_monday_scheduler_health.sql',
       '053_monday_reconciliation.sql',
       '054_human_contact_consent.sql',
-      '055_final_review_approval.sql'
+      '055_final_review_approval.sql',
+      '056_trust_centered_session_controls.sql'
     ]);
   });
 

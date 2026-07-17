@@ -178,6 +178,21 @@ export async function recordProducerTransferConsent(sessionId: string): Promise<
   }
 }
 
+export async function withdrawProducerTransferConsent(sessionId: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'producer_transfer', granted: false, noticeVersion: CONSENT_VERSION })
+    });
+    if (!response.ok) return false;
+    const data = await response.json() as { ok?: boolean; consent?: { producerTransfer?: boolean } };
+    return data.ok === true && data.consent?.producerTransfer === false;
+  } catch {
+    return false;
+  }
+}
+
 export async function recordHumanContactConsent(sessionId: string): Promise<boolean> {
   try {
     const response = await fetchWithTimeout(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
@@ -325,35 +340,67 @@ export async function deleteReferenceLink(linkId: string): Promise<boolean> {
   }
 }
 
-export async function resetProject(sessionId: string): Promise<boolean> {
+export type ResetProjectResult = { ok: boolean; draftVersion?: number; message?: string };
+
+export async function resetProject(sessionId: string): Promise<ResetProjectResult> {
   try {
     const response = await fetchWithTimeout(`/api/projects/${sessionId}/reset`, {
       method: 'POST'
     });
 
     if (!response.ok) {
-      return false;
+      return { ok: false };
     }
 
-    const data = (await response.json()) as { ok?: boolean; reset?: boolean };
-    return data.ok === true && data.reset === true;
+    const data = (await response.json()) as { ok?: boolean; reset?: boolean; draftVersion?: number; message?: string };
+    return { ok: data.ok === true && data.reset === true, draftVersion: data.draftVersion, message: data.message };
   } catch {
-    return false;
+    return { ok: false };
   }
 }
 
-export async function requestProjectDeletion(sessionId: string): Promise<{ ok: boolean; message?: string }> {
+export type DeletionStatus = 'requested' | 'claimed' | 'processing' | 'completed' | 'failed';
+export type DeletionReceiptStatus = {
+  ok: boolean;
+  receipt?: string;
+  receiptId?: string;
+  status?: DeletionStatus;
+  message?: string;
+  requestedAt?: string;
+  updatedAt?: string;
+  completedAt?: string | null;
+  failedAt?: string | null;
+  invalidReceipt?: boolean;
+};
+
+export async function requestProjectDeletion(sessionId: string): Promise<DeletionReceiptStatus> {
   try {
     const response = await fetchWithTimeout(`/api/projects/${sessionId}/delete`, {
       method: 'POST'
     });
 
-    const data = (await response.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+    const data = (await response.json().catch(() => null)) as DeletionReceiptStatus | null;
     if (!response.ok || !data) {
       return { ok: false };
     }
 
-    return { ok: data.ok === true, message: data.message };
+    return { ...data, ok: data.ok === true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export async function fetchProjectDeletionStatus(receipt: string): Promise<DeletionReceiptStatus> {
+  try {
+    const response = await fetchWithTimeout('/api/deletions/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ receipt }),
+      cache: 'no-store'
+    });
+    if (!response.ok) return { ok: false, invalidReceipt: response.status === 404 };
+    const data = await response.json() as DeletionReceiptStatus;
+    return { ...data, receipt, ok: data.ok === true };
   } catch {
     return { ok: false };
   }

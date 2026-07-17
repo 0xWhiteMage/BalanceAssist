@@ -20,6 +20,9 @@ type EventName =
   | 'correction_requested'
   | 'deletion_requested'
   | 'project_reset'
+  | 'memory_inspected'
+  | 'memory_reset_requested'
+  | 'memory_correction_requested'
   | 'temporary_sessions_expired'
   | 'monday_sync_succeeded'
   | 'monday_sync_failed'
@@ -67,6 +70,9 @@ const EVENT_SCHEMAS: Record<EventName, { version: EventSchemaVersion; fields: re
   correction_requested: { version: 1, fields: ['sessionId', 'field'] },
   deletion_requested: { version: 1, fields: ['sessionId'] },
   project_reset: { version: 1, fields: ['sessionId', 'draftVersion'] },
+  memory_inspected: { version: 1, fields: ['sessionId'] },
+  memory_reset_requested: { version: 1, fields: ['sessionId'] },
+  memory_correction_requested: { version: 1, fields: ['sessionId'] },
   temporary_sessions_expired: { version: 1, fields: ['deletedSessions', 'deferredSessions', 'releasedClaims'] },
   monday_sync_succeeded: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs'] },
   monday_sync_failed: { version: 1, fields: ['crmRecordId', 'syncId', 'revision', 'durationMs', 'reason'] },

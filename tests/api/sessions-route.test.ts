@@ -23,7 +23,7 @@ import { POST } from '@/app/api/sessions/route';
 import { OPTIONS } from '@/app/api/sessions/route';
 
 const validConsent = {
-  consentVersion: '2026-07-11',
+  consentVersion: '1.1',
   consentedAt: '2026-07-11T10:00:00.000Z'
 };
 
@@ -36,6 +36,7 @@ beforeEach(() => {
   getClientIpMaterialMock.mockReturnValue('203.0.113.7');
   hasSupabaseServerConfigMock.mockReturnValue(true);
   createServerSupabaseClientMock.mockImplementation(() => ({
+    rpc: async () => ({ data: [{ analysis: true }], error: null }),
     from: () => ({
       insert: (session: Record<string, unknown>) => ({
         select: () => ({
@@ -81,6 +82,33 @@ test('uses the configured trusted client identity for a valid session creation r
   expect(consumeRateLimitMock).toHaveBeenCalledWith('session-create:203.0.113.7', 10, 3600);
 });
 
+test('does not grant analysis consent for a human-only relay session', async () => {
+  const rpc = vi.fn();
+  createServerSupabaseClientMock.mockReturnValue({
+    rpc,
+    from: () => ({
+      insert: (session: Record<string, unknown>) => ({
+        select: () => ({ single: async () => ({ data: {
+          id: session.id, status: 'open', source_url: session.source_url, created_at: '2026-07-13T10:00:00.000Z'
+        }, error: null }) })
+      })
+    })
+  });
+  const request = new NextRequest('https://www.balancestudio.tv/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      sourceUrl: 'https://www.balancestudio.tv',
+      consentVersion: 'human-relay-1.1',
+      consentedAt: '2026-07-17T10:00:00.000Z'
+    })
+  });
+
+  const response = await POST(request);
+
+  expect(response.status).toBe(200);
+  expect(rpc).not.toHaveBeenCalled();
+});
+
 test('returns 429 and does not persist a session when the durable creation limiter rejects the client', async () => {
   consumeRateLimitMock.mockResolvedValue({ permitted: false, retryAfterSeconds: 60 });
   const request = new NextRequest('https://www.balancestudio.tv/api/sessions', {
@@ -100,6 +128,7 @@ test('returns 429 and does not persist a session when the durable creation limit
 test('persists and returns the ID embedded in the session capability', async () => {
   let insertedSession: Record<string, unknown> | undefined;
   createServerSupabaseClientMock.mockReturnValue({
+    rpc: async () => ({ data: [{ analysis: true }], error: null }),
     from: () => ({
       insert: (session: Record<string, unknown>) => {
         insertedSession = session;

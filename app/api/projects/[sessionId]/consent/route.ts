@@ -42,6 +42,9 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     p_notice_version: parsed.data.noticeVersion
   });
   if (error) {
+    if (error.message?.includes('SESSION_DELETION_REQUESTED')) {
+      return jsonWithCors({ ok: false, code: 'SESSION_DELETION_REQUESTED' }, { status: 409 }, request);
+    }
     return jsonWithCors({ ok: false, code: 'CONSENT_PERSISTENCE_FAILED' }, { status: 500 }, request);
   }
 
