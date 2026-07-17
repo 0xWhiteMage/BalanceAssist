@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
-import { getSessionConsent } from '@/lib/privacy/session-consent';
 
 export async function OPTIONS(request: Request) {
   return corsOptionsResponse(request);
@@ -25,21 +24,6 @@ export async function POST(request: Request) {
   const { supabase, auth } = authResult;
 
   const sessionId = parsed.data.sessionId ?? auth.sessionId;
-  let consent;
-  try {
-    consent = await getSessionConsent(supabase as never, sessionId);
-  } catch {
-    return jsonWithCors({ ok: false, error: 'Consent ledger unavailable' }, { status: 500 }, request);
-  }
-
-  if (!consent.producerTransfer) {
-    return jsonWithCors(
-      { ok: false, code: 'consent_required' },
-      { status: 403 },
-      request
-    );
-  }
-
   const { data, error } = await supabase.from('reference_links').insert({
     session_id: sessionId,
     url: parsed.data.url,

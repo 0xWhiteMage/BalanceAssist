@@ -831,7 +831,7 @@ export function WidgetOverlay({
           return;
         }
         const activeSessionId = sessionId ?? await ensureSession();
-        if (!activeSessionId || !await recordProducerTransferConsent(activeSessionId)) {
+        if (!activeSessionId) {
           await botSay('I could not save that reference link. Please try again, or choose Skip.');
           return;
         }

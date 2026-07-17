@@ -203,7 +203,7 @@ describe('session-scoped API routes', () => {
     expect(requireSessionMock).toHaveBeenCalledWith(request, 'sess-schedule');
   });
 
-  test('POST /api/attachments/link uses the authenticated session when sessionId is omitted', async () => {
+  test('POST /api/attachments/link privately stores under the authenticated session without transfer consent', async () => {
     const { inserts, consentEq, consentOrder, consentSelect, supabase } = buildReferenceLinkSupabase();
 
     requireSessionMock.mockResolvedValue({
@@ -218,8 +218,7 @@ describe('session-scoped API routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url: 'https://youtu.be/abc',
-        kind: 'youtube',
-        consent: { aiAnalysis: false, producerShare: true, consentedAt: new Date().toISOString() }
+        kind: 'youtube'
       })
     });
 
@@ -233,9 +232,9 @@ describe('session-scoped API routes', () => {
       link: { id: 'link-1', sessionId: 'sess-link-auth' }
     });
     expect(requireSessionMock).toHaveBeenCalledWith(request, undefined);
-    expect(consentSelect).toHaveBeenCalledWith('scope, granted, created_at, id');
-    expect(consentEq).toHaveBeenCalledWith('session_id', 'sess-link-auth');
-    expect(consentOrder).toHaveBeenCalledWith('created_at', { ascending: true });
+    expect(consentSelect).not.toHaveBeenCalled();
+    expect(consentEq).not.toHaveBeenCalled();
+    expect(consentOrder).not.toHaveBeenCalled();
     expect(inserts).toContainEqual({
       table: 'reference_links',
       row: {

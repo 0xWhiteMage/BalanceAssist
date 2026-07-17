@@ -722,7 +722,7 @@ describe('thesis-aligned optional intake actions', () => {
     expect(requestedUrls.some((url) => /finalize|handoff|qualification/i.test(url))).toBe(false);
   }, 20_000);
 
-  test('persists a typed reference URL and only Skip advances without a link', async () => {
+  test('privately persists a typed reference URL and added status without producer-transfer consent', async () => {
     const requestedUrls: string[] = [];
     const draftWrites: Array<{ fields: Array<{ field: string; value: string }> }> = [];
     const persistenceOrder: string[] = [];
@@ -765,7 +765,7 @@ describe('thesis-aligned optional intake actions', () => {
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url.includes('/consent') && init?.method === 'POST') {
-        return new Response(JSON.stringify({ ok: true, consent: { producerTransfer: true } }), { status: 200 });
+        return new Response(JSON.stringify({ ok: false }), { status: 500 });
       }
       if (url.includes('/api/sessions')) {
         return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
@@ -793,6 +793,7 @@ describe('thesis-aligned optional intake actions', () => {
     ]);
     expect(persistenceOrder).toEqual(['link', 'status']);
     expect(chatCalls).toBe(1);
+    expect(requestedUrls.some((url) => url.includes('/consent'))).toBe(false);
     expect(await screen.findByText(/reference link.*saved/i, {}, { timeout: 7000 })).toBeVisible();
   }, 20_000);
 
