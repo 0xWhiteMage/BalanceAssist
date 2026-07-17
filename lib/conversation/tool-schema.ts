@@ -2,15 +2,20 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { listAllWorks } from '@/lib/conversation/works-search';
 import type { LeadDraft } from '@/lib/onboarding/types';
+import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
 
 const TEXT_FIELD_DESCRIPTION =
-  "Use '' (empty string) when the field is unknown; do NOT omit the key.";
+  "Use '' (empty string) when the field is unknown; do NOT omit the key. User-selected 'Not sure yet', 'Skip', and 'Prefer not to share' are canonical non-empty answers.";
 
 export const recordBriefUpdatesSchema = z
   .object({
     service: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     projectType: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    projectScope: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    projectScope: z.string().max(MAX_PROJECT_SCOPE_CHARACTERS).default('').describe(TEXT_FIELD_DESCRIPTION),
+    projectObjective: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    audience: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    intendedOutputs: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    referencesStatus: z.enum(['', 'added', 'skipped']).default('').describe(TEXT_FIELD_DESCRIPTION),
     scopePolished: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     timelineBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     budgetBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
@@ -23,7 +28,7 @@ export const recordBriefUpdatesSchema = z
   })
   .strict();
 
-// Length caps are enforced by sanitizeDraftUpdates (200 chars); this schema trusts that layer.
+// Field-specific normalization and shorter generated-field caps remain in sanitizeDraftUpdates.
 
 const generated = zodToJsonSchema(recordBriefUpdatesSchema, {
   target: 'jsonSchema7',
@@ -128,6 +133,33 @@ export function guardAgainstFabricatedBriefFields(
 
   const priorEmail = priorDraft.contactEmail ?? '';
   const priorName = priorDraft.contactName ?? '';
+
+  const nextScope = typeof cleaned.projectScope === 'string' ? cleaned.projectScope.trim() : '';
+  if (nextScope && nextScope !== priorDraft.projectScope) {
+    if (priorDraft.projectScope?.trim()) {
+      cleaned.projectScope = priorDraft.projectScope;
+    } else {
+      cleaned.projectScope = userMessage.trim();
+    }
+  }
+
+  if (cleaned.referencesStatus === 'added' && priorDraft.referencesStatus !== 'added') {
+    cleaned.referencesStatus = '';
+  } else if (
+    cleaned.referencesStatus === 'skipped' &&
+    priorDraft.referencesStatus !== 'skipped' &&
+    !/^skip$/i.test(userMessage.trim())
+  ) {
+    cleaned.referencesStatus = '';
+  }
+
+  for (const field of ['projectObjective', 'audience', 'intendedOutputs'] as const) {
+    const nextValue = typeof cleaned[field] === 'string' ? cleaned[field].trim() : '';
+    const priorValue = priorDraft[field]?.trim() ?? '';
+    if (priorValue && nextValue && nextValue !== priorValue && !textContains(userMessage, nextValue)) {
+      cleaned[field] = priorValue;
+    }
+  }
 
   if (typeof cleaned.contactEmail === 'string' && cleaned.contactEmail.trim()) {
     const email = cleaned.contactEmail.trim();

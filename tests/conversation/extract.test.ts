@@ -1,4 +1,5 @@
 import { applyTextToDraft, getNextConversationStep } from '@/lib/conversation/extract';
+import { conversationSteps } from '@/lib/conversation/flow';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 test('extracts structured fields from a natural project description', () => {
@@ -18,16 +19,162 @@ test('extracts structured fields from a natural project description', () => {
 });
 
 test('chooses the next missing conversation step dynamically', () => {
-  expect(
-    getNextConversationStep({
-      service: 'production',
-      projectScope: 'Regional launch film',
-      timelineBand: '',
-      budgetBand: '50k-150k',
-      contactName: 'Jane',
-      contactEmail: 'jane@example.com'
-    })
-  ).toBe('timeline');
+  const draft = createDefaultLeadDraft();
+
+  expect(getNextConversationStep(draft)).toBe('scope');
+  expect(getNextConversationStep({ ...draft, service: 'production' })).toBe('objective');
+  expect(getNextConversationStep({ ...draft, projectType: 'Animation' })).toBe('objective');
+  expect(getNextConversationStep({ ...draft, projectScope: 'Launch film' })).toBe('objective');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness'
+  })).toBe('audience');
+  expect(getNextConversationStep({
+    ...draft,
+    projectType: 'Animation',
+    projectObjective: 'Build awareness'
+  })).toBe('audience');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness'
+  })).toBe('audience');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    service: 'production'
+  })).toBe('audience');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    service: 'production',
+    audience: 'Young adults'
+  })).toBe('outputs');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    service: 'production',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film'
+  })).toBe('timeline');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    service: 'production',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film',
+    timelineBand: 'Not sure yet'
+  })).toBe('budget');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    service: 'production',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film',
+    timelineBand: 'Not sure yet',
+    budgetBand: 'Prefer not to share'
+  })).toBe('references');
+  expect(conversationSteps.references.next).toBe('contact-name');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    service: 'production',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film',
+    timelineBand: 'Not sure yet',
+    budgetBand: 'Prefer not to share',
+    referencesStatus: 'skipped',
+    contactName: 'Jane'
+  })).toBe('contact-email');
+  expect(getNextConversationStep({
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    service: 'production',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film',
+    timelineBand: 'Not sure yet',
+    budgetBand: 'Prefer not to share',
+    referencesStatus: 'added',
+    contactName: 'Jane',
+    contactEmail: 'jane@example.com'
+  })).toBe('consent');
+
+  const planningComplete = {
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film',
+    timelineBand: 'Not sure yet',
+    budgetBand: 'Prefer not to share'
+  };
+  expect(getNextConversationStep({ ...planningComplete, contactName: 'Early Name' })).toBe('references');
+  expect(getNextConversationStep({ ...planningComplete, contactEmail: 'early@example.com' })).toBe('references');
+  expect(getNextConversationStep({ ...planningComplete, referencesStatus: 'skipped' })).toBe('contact-name');
+});
+
+test('handoff and contact flow avoid unproved producer review or follow-up promises', () => {
+  const messagesFor = (step: typeof conversationSteps[keyof typeof conversationSteps]) =>
+    typeof step.botMessages === 'function' ? step.botMessages(createDefaultLeadDraft()) : step.botMessages;
+  const visibleCopy = [
+    ...messagesFor(conversationSteps['contact-email']),
+    ...messagesFor(conversationSteps.upload),
+    ...messagesFor(conversationSteps.handoff)
+  ].join(' ');
+
+  expect(visibleCopy).not.toMatch(/producer.*(?:will|follow up)|team will review|will review everything/i);
+});
+
+test('captures canonical prose from its dedicated intake step', () => {
+  const objective = applyTextToDraft(
+    'Build awareness for the launch',
+    createDefaultLeadDraft(),
+    'objective'
+  );
+  const audience = applyTextToDraft('Young adults', objective, 'audience');
+  const outputs = applyTextToDraft('Hero film and cut-downs', audience, 'outputs');
+
+  expect(outputs.projectObjective).toBe('Build awareness for the launch');
+  expect(outputs.audience).toBe('Young adults');
+  expect(outputs.intendedOutputs).toBe('Hero film and cut-downs');
+});
+
+test('uses stable prompts and excludes qualification from the user journey', () => {
+  expect(conversationSteps.objective).toMatchObject({
+    botMessages: ['What should this project achieve? Not sure yet is a valid answer.'],
+    field: 'projectObjective',
+    next: 'audience'
+  });
+  expect(conversationSteps.audience).toMatchObject({
+    botMessages: ['Who is this for? You can choose Not sure yet or Skip.'],
+    field: 'audience',
+    next: 'outputs'
+  });
+  expect(conversationSteps.outputs).toMatchObject({
+    botMessages: ['What outputs or deliverables do you expect? You can choose Not sure yet or Skip.'],
+    field: 'intendedOutputs',
+    next: 'timeline'
+  });
+  expect(conversationSteps.references).toMatchObject({
+    botMessages: ['Would you like to add any references? You can add them now or Skip.'],
+    next: 'contact-name'
+  });
+  expect(conversationSteps.timeline.botMessages).toEqual([
+    expect.stringMatching(/planning.*feasibility|feasibility.*planning/i)
+  ]);
+  expect(conversationSteps.budget.botMessages).toEqual([
+    expect.stringMatching(/realistic formats.*scope|scope.*realistic formats/i)
+  ]);
+  expect(conversationSteps).not.toHaveProperty('qualification');
+  expect(conversationSteps.consent.next).toBe('handoff');
 });
 
 test('captures a direct contact name response', () => {

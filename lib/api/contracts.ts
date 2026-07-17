@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 export const MAX_CHAT_BODY_BYTES = 50_000;
 export const MAX_CHAT_MESSAGES = 20;
-export const MAX_CHAT_MESSAGE_CHARACTERS = 8_000;
+export const MAX_PROJECT_SCOPE_CHARACTERS = 4_000;
+export const MAX_CHAT_MESSAGE_CHARACTERS = MAX_PROJECT_SCOPE_CHARACTERS;
 export const MAX_CHAT_TOTAL_CHARACTERS = 40_000;
 export const MAX_CHAT_CONTEXT_STEP_CHARACTERS = 256;
 export const MAX_CHAT_CONTEXT_DRAFT_CHARACTERS = 16_000;
@@ -29,38 +30,45 @@ export const finalizeLeadPayloadSchema = z.object({
   sessionId: z.string().min(1)
 }).strict();
 
-export const chatResponsePayloadSchema = z
-  .object({
-    message: z.string().optional(),
-    messages: z.array(z.string()).min(1).optional(),
-    outcome: z.literal('confidential_diversion').optional(),
-    draftUpdates: z.record(z.string()).optional(),
-    briefReady: z.boolean().optional(),
-    reviewPrompt: z.string().nullable().optional(),
-    missingFields: z.array(z.string()).optional(),
-    sharedWork: z
-      .object({
-        entries: z.array(
-          z.object({
-            title: z.string(),
-            url: z.string(),
-            description: z.string().optional(),
-            image_url: z.string().optional(),
-            category: z.string().optional(),
-            slug: z.string()
-          })
-        )
-      })
-      .optional(),
-    error: z.string().optional(),
-    detail: z.string().optional()
-  })
-  .refine(
-    (value) =>
-      Boolean(value.message && value.message.length > 0) ||
-      Boolean(value.messages && value.messages.length > 0),
-    { message: 'Either message or messages must be provided' }
-  );
+const chatReplyFields = {
+  message: z.string().min(1).optional(),
+  messages: z.array(z.string().min(1)).min(1).optional()
+};
+const chatSharedWorkSchema = z.object({
+  entries: z.array(z.object({
+    title: z.string(), url: z.string(), description: z.string().optional(), image_url: z.string().optional(),
+    category: z.string().optional(), slug: z.string()
+  }))
+});
+const canonicalChatFields = {
+  canonicalDraft: z.record(z.string()),
+  canonicalProvenance: z.record(z.enum(['user-stated', 'inferred', 'confirmed', 'cleared'])).optional(),
+  draftVersion: z.number().int().nonnegative(),
+  currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']),
+  stageRecaps: z.array(z.string()),
+  briefReady: z.boolean()
+};
+
+export const chatResponsePayloadSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal('draft_persisted'), ...chatReplyFields, ...canonicalChatFields,
+    draftUpdates: z.record(z.string()).optional(), reviewPrompt: z.string().nullable().optional(),
+    missingFields: z.array(z.string()).optional(), sharedWork: chatSharedWorkSchema.optional(), truncated: z.boolean().optional()
+  }).strict(),
+  z.object({ outcome: z.literal('draft_conflict'), ...chatReplyFields, ...canonicalChatFields }).strict(),
+  z.object({ outcome: z.literal('non_persistence'), ...chatReplyFields, sharedWork: chatSharedWorkSchema.optional() }).strict(),
+  z.object({ outcome: z.literal('confidential_diversion'), ...chatReplyFields }).strict(),
+  z.object({ outcome: z.literal('draft_save_failed'), ...chatReplyFields }).strict(),
+  z.object({
+    outcome: z.literal('provider_unavailable'),
+    error: z.literal('Chat service unavailable'),
+    detail: z.literal('chat_provider_unavailable')
+  }).strict()
+]).superRefine((value, context) => {
+  if (value.outcome !== 'provider_unavailable' && !value.message && !value.messages) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Either message or messages must be provided' });
+  }
+});
 
 export const chatRequestPayloadSchema = z.object({
   messages: z

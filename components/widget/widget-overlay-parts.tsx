@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import React, { useRef, useState } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
+import { normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
 import {
   serviceOptions
 } from '@/lib/onboarding/service-options';
@@ -265,11 +266,13 @@ export function HumanFooter({
   isTeamConnected,
   hasTeamReply = false,
   humanStatus,
+  calendlyUrl = null,
   onConnect
 }: {
   isTeamConnected: boolean;
   hasTeamReply?: boolean;
   humanStatus: 'idle' | 'requested' | 'sending' | 'saved' | 'queued' | 'delivered' | 'unavailable';
+  calendlyUrl?: string | null;
   onConnect: () => void;
 }) {
   return (
@@ -282,41 +285,49 @@ export function HumanFooter({
       }}
     >
       {!isTeamConnected ? (
-        <button
-          onClick={onConnect}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            border: `1px solid ${brandTokens.colors.border}`,
-            background: 'transparent',
-            color: brandTokens.colors.warmGold,
-            fontSize: '11px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: brandTokens.typography.condensed,
-            textTransform: 'uppercase',
-            letterSpacing: '0.12em',
-            transition: 'all 0.15s ease'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = brandTokens.colors.warmGold;
-            e.currentTarget.style.background = 'rgba(219, 181, 128, 0.06)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = brandTokens.colors.border;
-            e.currentTarget.style.background = 'transparent';
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill={brandTokens.colors.warmGold} />
-          </svg>
-          Talk to a human
-        </button>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <button
+            type="button"
+            className="balance-widget-action"
+            onClick={onConnect}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              width: '100%',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: `1px solid ${brandTokens.colors.border}`,
+              background: 'transparent',
+              color: brandTokens.colors.warmGold,
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: brandTokens.typography.condensed,
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = brandTokens.colors.warmGold;
+              e.currentTarget.style.background = 'rgba(219, 181, 128, 0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = brandTokens.colors.border;
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill={brandTokens.colors.warmGold} />
+            </svg>
+            Talk to the team without AI
+          </button>
+          <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '6px 16px', fontSize: 11 }}>
+            <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
+            {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
+          </div>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
           <div
@@ -421,16 +432,19 @@ export function ConfidentialDiversionRecovery({
 export function ProjectBriefCard({
   draft,
   showNudge,
-  readyForApproval,
-  approved,
   title,
-  onApprove,
-  onContinueRefining,
   onChange,
+  provenance = {},
+  referenceLinks = [],
+  onAddReference,
+  onRemoveReference,
   compact = false
 }: {
   draft: {
     projectScope: string;
+    projectObjective: string;
+    audience: string;
+    intendedOutputs: string;
     scopePolished?: string;
     projectType?: string;
     service: string;
@@ -441,12 +455,12 @@ export function ProjectBriefCard({
     contactEmail: string;
   };
   showNudge?: boolean;
-  readyForApproval?: boolean;
-  approved?: boolean;
   title?: string;
-  onApprove?: () => void;
-  onContinueRefining?: () => void;
-  onChange?: (key: string, value: string) => void;
+  onChange?: (key: string, value: string) => Promise<BriefMutationOutcome>;
+  provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
+  referenceLinks?: ReadonlyArray<{ id: string; kind: string; url: string }>;
+  onAddReference?: (url: string) => Promise<BriefMutationOutcome>;
+  onRemoveReference?: (id: string) => Promise<BriefMutationOutcome>;
   compact?: boolean;
 }) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -456,12 +470,52 @@ export function ProjectBriefCard({
     key: string;
     raw: string;
     display: string;
+    multiline?: boolean;
   }> = [
     {
-      label: 'Project scope',
+      label: provenance.projectScope === 'user-stated'
+        ? 'Original wording'
+        : provenance.projectScope === 'confirmed'
+          ? 'User-edited wording'
+          : 'Project description',
       key: 'projectScope',
-      raw: draft.scopePolished || draft.projectScope,
-      display: (draft.scopePolished || draft.projectScope).trim()
+      raw: draft.projectScope,
+      display: draft.projectScope.trim(),
+      multiline: true
+    },
+    ...(draft.scopePolished?.trim() && draft.scopePolished.trim() !== draft.projectScope.trim()
+      ? [{
+          label: provenance.scopePolished === 'inferred'
+            ? 'AI-drafted summary'
+            : provenance.scopePolished === 'confirmed'
+              ? 'Edited draft'
+              : 'Project summary',
+          key: 'scopePolished',
+          raw: draft.scopePolished,
+          display: draft.scopePolished.trim(),
+          multiline: true
+        }]
+      : []),
+    {
+      label: 'Project objective',
+      key: 'projectObjective',
+      raw: draft.projectObjective,
+      display: draft.projectObjective.trim(),
+      multiline: true
+    },
+    {
+      label: 'Audience',
+      key: 'audience',
+      raw: draft.audience,
+      display: draft.audience.trim(),
+      multiline: true
+    },
+    {
+      label: 'Intended outputs',
+      key: 'intendedOutputs',
+      raw: draft.intendedOutputs,
+      display: draft.intendedOutputs.trim(),
+      multiline: true
     },
     {
       label: 'Project type',
@@ -508,6 +562,11 @@ export function ProjectBriefCard({
   ];
 
   const completed = rows.filter((row) => row.raw.trim().length > 0).length;
+  const coreKeys = new Set(['projectScope', 'scopePolished', 'projectObjective', 'service', 'contactName', 'contactEmail']);
+  const rowGroups = [
+    { label: 'Core details', rows: rows.filter((row) => coreKeys.has(row.key)) },
+    { label: 'Optional details', rows: rows.filter((row) => !coreKeys.has(row.key)), includesReferences: true }
+  ];
 
   const labelFontSize = compact ? 9 : 10;
   const bodyFontSize = compact ? 11 : 12;
@@ -534,20 +593,16 @@ export function ProjectBriefCard({
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
-        {rows.map((row, rowIndex) => {
+      {rowGroups.map((group) => (
+      <div key={group.label} role="group" aria-label={group.label} style={{ display: 'grid', gap: compact ? '4px' : '6px' }}>
+        <div style={{ fontSize: labelFontSize, fontWeight: 700, color: brandTokens.colors.warmGold }}>{group.label}</div>
+        {group.rows.map((row, rowIndex) => {
           const filled = row.raw.trim().length > 0;
           const editing = editingKey === row.key;
           const openEditor = () => {
             if (onChange) setEditingKey(row.key);
           };
-          const rowClick = onChange
-            ? (event: React.MouseEvent<HTMLDivElement>) => {
-                if (event.defaultPrevented) return;
-                openEditor();
-              }
-            : undefined;
-          const isLastRow = rowIndex === rows.length - 1;
+          const isLastRow = rowIndex === group.rows.length - 1;
           const labelStyle: React.CSSProperties = {
             fontSize: labelFontSize,
             fontWeight: 400,
@@ -566,7 +621,7 @@ export function ProjectBriefCard({
                 flexDirection: 'column' as const,
                 gap: '2px',
                 fontSize: bodyFontSize,
-                cursor: onChange ? 'pointer' : 'default',
+                cursor: 'default',
                 borderBottom: isLastRow ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
                 paddingBottom: isLastRow ? 0 : 4
               }
@@ -575,7 +630,7 @@ export function ProjectBriefCard({
                 flexDirection: 'column' as const,
                 gap: '6px',
                 fontSize: bodyFontSize,
-                cursor: onChange ? 'pointer' : 'default',
+                cursor: 'default',
                 borderBottom: isLastRow ? 'none' : `1px solid ${brandTokens.colors.subtleBorder}`,
                 paddingBottom: isLastRow ? 0 : 6
               };
@@ -588,7 +643,6 @@ export function ProjectBriefCard({
                 data-row-key={row.key}
                 data-filled={filled ? 'true' : 'false'}
                 data-editing={editing ? 'true' : 'false'}
-                onClick={rowClick}
                 style={baseRowStyle}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -618,9 +672,10 @@ export function ProjectBriefCard({
                       ...labelStyle,
                       flex: 1,
                       minWidth: 0,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      whiteSpace: row.multiline ? 'pre-wrap' : 'nowrap',
+                      overflowWrap: row.multiline ? 'anywhere' : undefined,
+                      overflow: row.multiline ? 'visible' : 'hidden',
+                      textOverflow: row.multiline ? 'clip' : 'ellipsis'
                     }}
                   >
                     {row.label}
@@ -628,6 +683,7 @@ export function ProjectBriefCard({
                   {onChange && (
                     <button
                       type="button"
+                      className="balance-widget-action"
                       onClick={(event) => {
                         event.stopPropagation();
                         openEditor();
@@ -639,6 +695,8 @@ export function ProjectBriefCard({
                         border: 'none',
                         color: brandTokens.colors.mutedText,
                         cursor: 'pointer',
+                        minWidth: 44,
+                        minHeight: 44,
                         padding: 2,
                         fontSize: 10,
                         lineHeight: 1
@@ -654,9 +712,10 @@ export function ProjectBriefCard({
                     style={{
                       ...valueStyle,
                       marginLeft: 20,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      whiteSpace: row.multiline ? 'pre-wrap' : 'nowrap',
+                      overflowWrap: row.multiline ? 'anywhere' : undefined,
+                      overflow: row.multiline ? 'visible' : 'hidden',
+                      textOverflow: row.multiline ? 'clip' : 'ellipsis'
                     }}
                   >
                     {row.display}
@@ -666,10 +725,8 @@ export function ProjectBriefCard({
                   <BriefRowEditor
                     row={row}
                     compact={true}
-                    onCommit={(value) => {
-                      onChange?.(row.key, value);
-                      setEditingKey(null);
-                    }}
+                    onCommit={(value) => onChange?.(row.key, value) ?? Promise.resolve({ status: 'failed', message: 'This edit cannot be saved.' })}
+                    onSaved={() => setEditingKey(null)}
                     onCancel={() => setEditingKey(null)}
                   />
                 )}
@@ -683,7 +740,6 @@ export function ProjectBriefCard({
               data-row-key={row.key}
               data-filled={filled ? 'true' : 'false'}
               data-editing={editing ? 'true' : 'false'}
-              onClick={rowClick}
               style={baseRowStyle}
             >
               <div
@@ -710,7 +766,15 @@ export function ProjectBriefCard({
                   <span
                     style={
                       filled
-                        ? { ...valueStyle, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+                        ? {
+                            ...valueStyle,
+                            flex: 1,
+                            minWidth: 0,
+                            whiteSpace: row.multiline ? 'pre-wrap' : 'nowrap',
+                            overflowWrap: row.multiline ? 'anywhere' : undefined,
+                            overflow: row.multiline ? 'visible' : 'hidden',
+                            textOverflow: row.multiline ? 'clip' : 'ellipsis'
+                          }
                         : {
                             flex: 1,
                             minWidth: 0,
@@ -727,6 +791,7 @@ export function ProjectBriefCard({
                   {onChange && (
                     <button
                       type="button"
+                      className="balance-widget-action"
                       onClick={(event) => {
                         event.stopPropagation();
                         openEditor();
@@ -738,6 +803,8 @@ export function ProjectBriefCard({
                         border: 'none',
                         color: brandTokens.colors.mutedText,
                         cursor: 'pointer',
+                        minWidth: 44,
+                        minHeight: 44,
                         padding: 2,
                         fontSize: 10,
                         lineHeight: 1,
@@ -753,17 +820,25 @@ export function ProjectBriefCard({
                 <BriefRowEditor
                   row={row}
                   compact={false}
-                  onCommit={(value) => {
-                    onChange?.(row.key, value);
-                    setEditingKey(null);
-                  }}
+                  onCommit={(value) => onChange?.(row.key, value) ?? Promise.resolve({ status: 'failed', message: 'This edit cannot be saved.' })}
+                  onSaved={() => setEditingKey(null)}
                   onCancel={() => setEditingKey(null)}
                 />
               )}
             </div>
           );
         })}
+        {group.includesReferences && (
+          <ReferenceLinkManager
+            links={referenceLinks}
+            onAdd={onAddReference}
+            onRemove={onRemoveReference}
+            labelFontSize={labelFontSize}
+            bodyFontSize={bodyFontSize}
+          />
+        )}
       </div>
+      ))}
 
       {showNudge && completed < rows.length && (
         <div style={{ fontSize: nudgeFontSize, color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
@@ -771,59 +846,6 @@ export function ProjectBriefCard({
         </div>
       )}
 
-      {readyForApproval && !approved && (
-        <div style={{ display: 'grid', gap: '8px', marginTop: '4px' }}>
-          <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
-            Review this brief carefully. When you approve it, Balance Assist will prepare it for the team.
-          </div>
-          <div style={{ display: 'grid', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={onApprove}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: 'none',
-                background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-                color: brandTokens.colors.baseBlack,
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em'
-              }}
-            >
-              Approve &amp; send to team
-            </button>
-            <button
-              type="button"
-              onClick={onContinueRefining}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: `1px solid ${brandTokens.colors.border}`,
-                background: 'transparent',
-                color: brandTokens.colors.lightText,
-                fontSize: '11px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em'
-              }}
-            >
-              Continue refining
-            </button>
-          </div>
-        </div>
-      )}
-
-      {approved && (
-        <div role="status" aria-live="polite" style={{ fontSize: '11px', color: '#4ade80', lineHeight: 1.5 }}>
-          Brief approved. You can now continue refining it or speak to the team.
-        </div>
-      )}
     </div>
   );
 }
@@ -833,7 +855,13 @@ type BriefRow = {
   key: string;
   raw: string;
   display: string;
+  multiline?: boolean;
 };
+
+export type BriefMutationOutcome =
+  | { status: 'saved' }
+  | { status: 'conflict'; message: string }
+  | { status: 'failed'; message: string };
 
 function formatProjectType(value: string | undefined): string {
   const trimmed = (value ?? '').trim();
@@ -846,71 +874,217 @@ function BriefRowEditor({
   row,
   compact = true,
   onCommit,
+  onSaved,
   onCancel
 }: {
   row: BriefRow;
   compact?: boolean;
-  onCommit: (value: string) => void;
+  onCommit: (value: string) => Promise<BriefMutationOutcome>;
+  onSaved: () => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(row.raw);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function commit() {
-    onCommit(value);
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    const outcome = await onCommit(value);
+    setSaving(false);
+    if (!outcome || outcome.status === 'saved') {
+      onSaved();
+      return;
+    }
+    setError(outcome.message);
   }
 
   const containerStyle: React.CSSProperties = compact
-    ? { marginLeft: 20, display: 'flex', alignItems: 'center', gap: 6 }
-    : { display: 'flex', alignItems: 'center', gap: 6, width: '100%' };
+    ? { marginLeft: 20, display: 'grid', gap: 6 }
+    : { display: 'grid', gap: 6, width: '100%' };
+
+  const editorStyle: React.CSSProperties = {
+    width: '100%',
+    background: 'rgba(255,255,255,0.04)',
+    border: `1px solid ${brandTokens.colors.border}`,
+    color: brandTokens.colors.lightText,
+    borderRadius: 6,
+    padding: '8px 10px',
+    fontSize: 12,
+    outline: 'none',
+    minWidth: 0,
+    resize: row.multiline ? 'vertical' : undefined
+  };
 
   return (
     <div style={containerStyle}>
-      <input
-        type="text"
-        value={value}
-        aria-label={row.label}
-        autoFocus
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            commit();
-          } else if (event.key === 'Escape') {
-            event.preventDefault();
+      {row.multiline ? (
+        <textarea
+          className="balance-widget-wrap"
+          rows={3}
+          value={value}
+          aria-label={row.label}
+          autoFocus
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          style={editorStyle}
+        />
+      ) : (
+        <input
+          className="balance-widget-wrap"
+          type="text"
+          value={value}
+          aria-label={row.label}
+          autoFocus
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          style={editorStyle}
+        />
+      )}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          type="button"
+          className="balance-widget-action"
+          aria-label={`Save ${row.label.toLowerCase()}`}
+          disabled={saving}
+          onClick={(event) => {
+            event.stopPropagation();
+            void save();
+          }}
+          style={{ minWidth: 44, minHeight: 44, borderRadius: 6, border: 'none', background: brandTokens.colors.warmGold, color: brandTokens.colors.baseBlack, cursor: 'pointer', fontWeight: 700 }}
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        <button
+          type="button"
+          className="balance-widget-action"
+          disabled={saving}
+          onClick={(event) => {
+            event.stopPropagation();
             onCancel();
-          }
-        }}
-        onBlur={commit}
-        style={{
-          flex: 1,
-          background: 'rgba(255,255,255,0.04)',
-          border: `1px solid ${brandTokens.colors.border}`,
-          color: brandTokens.colors.lightText,
-          borderRadius: 6,
-          padding: '4px 6px',
-          fontSize: 12,
-          outline: 'none',
-          minWidth: 0
-        }}
-      />
-      <button
-        type="button"
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onCancel();
-        }}
-        aria-label={`Cancel editing ${row.label.toLowerCase()}`}
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: brandTokens.colors.mutedText,
-          cursor: 'pointer',
-          fontSize: 11
-        }}
-      >
-        ×
-      </button>
+          }}
+          aria-label={`Cancel editing ${row.label.toLowerCase()}`}
+          style={{ minWidth: 44, minHeight: 44, borderRadius: 6, border: `1px solid ${brandTokens.colors.border}`, background: 'transparent', color: brandTokens.colors.lightText, cursor: 'pointer' }}
+        >
+          Cancel
+        </button>
+      </div>
+      {error && (
+        <div role="alert" style={{ display: 'grid', gap: 6, color: '#fca5a5', fontSize: 11 }}>
+          <span>{error}</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              aria-label={`Retry saving ${row.label.toLowerCase()}`}
+              onClick={() => void save()}
+              style={{ minWidth: 44, minHeight: 44 }}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              aria-label={`Cancel editing ${row.label.toLowerCase()} after error`}
+              onClick={onCancel}
+              style={{ minWidth: 44, minHeight: 44 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReferenceLinkManager({
+  links,
+  onAdd,
+  onRemove,
+  labelFontSize,
+  bodyFontSize
+}: {
+  links: ReadonlyArray<{ id: string; kind: string; url: string }>;
+  onAdd?: (url: string) => Promise<BriefMutationOutcome>;
+  onRemove?: (id: string) => Promise<BriefMutationOutcome>;
+  labelFontSize: number;
+  bodyFontSize: number;
+}) {
+  const [url, setUrl] = useState('');
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function add() {
+    if (!onAdd || pending || !url.trim()) return;
+    setPending('add');
+    setError(null);
+    const outcome = await onAdd(url.trim());
+    setPending(null);
+    if (outcome.status === 'saved') setUrl('');
+    else setError(outcome.message);
+  }
+
+  async function remove(id: string) {
+    if (!onRemove || pending) return;
+    setPending(id);
+    setError(null);
+    const outcome = await onRemove(id);
+    setPending(null);
+    if (outcome.status !== 'saved') setError(outcome.message);
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+      <label htmlFor="brief-reference-url" style={{ fontSize: labelFontSize, color: brandTokens.colors.mutedText }}>Reference links</label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          id="brief-reference-url"
+          type="url"
+          aria-label="Reference URL"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          disabled={pending === 'add'}
+          style={{ flex: 1, minWidth: 0, minHeight: 44 }}
+        />
+        <button type="button" onClick={() => void add()} disabled={!onAdd || Boolean(pending) || !url.trim()} style={{ minWidth: 44, minHeight: 44 }}>
+          Add reference link
+        </button>
+      </div>
+      {links.length > 0 ? links.map((link) => {
+        const supported = normalizePublicReferenceUrl(link.url) !== null;
+        return (
+        <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            {supported ? (
+              <a href={link.url} target="_blank" rel="noreferrer" style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere' }}>{link.url}</a>
+            ) : (
+              <span style={{ color: brandTokens.colors.mutedText, overflowWrap: 'anywhere' }}>{link.url}</span>
+            )}
+            {!supported && <div style={{ color: '#fca5a5', fontSize: 11 }}>Unsupported legacy link - not transferable</div>}
+          </div>
+          <button
+            type="button"
+            aria-label={`Remove ${link.url}`}
+            onClick={() => void remove(link.id)}
+            disabled={!onRemove || Boolean(pending)}
+            style={{ minWidth: 44, minHeight: 44 }}
+          >
+            Remove
+          </button>
+        </div>
+        );
+      }) : <span style={{ color: brandTokens.colors.mutedText, fontSize: bodyFontSize, fontStyle: 'italic' }}>No reference links added</span>}
+      {error && <div role="alert" style={{ color: '#fca5a5', fontSize: 11 }}>{error}</div>}
     </div>
   );
 }

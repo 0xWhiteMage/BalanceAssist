@@ -191,6 +191,20 @@ describe('draft route', () => {
     expect(data.draft.service.provenance).toBe('cleared');
   });
 
+  test('PUT preserves a 4,000-character projectScope without truncation', async () => {
+    const harness = createRouteSupabase({ id: 'session-long-scope', draft: {}, draft_version: 0 });
+    requireSessionMock.mockResolvedValue(authorizedSession('session-long-scope', harness.supabase));
+    const projectScope = 'scope-'.repeat(667).slice(0, 4_000);
+
+    const response = await callDraftPut('session-long-scope', {
+      expectedDraftVersion: 0,
+      fields: [{ field: 'projectScope', value: projectScope, provenance: 'user-stated' }]
+    });
+
+    expect(response.status).toBe(200);
+    expect((harness.state.draft.projectScope as { value: string }).value).toBe(projectScope);
+  });
+
   test('PUT rejects stale draft updates when the expected version does not match', async () => {
     const harness = createRouteSupabase({
       id: 'session-stale',

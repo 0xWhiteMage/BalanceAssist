@@ -37,7 +37,7 @@ vi.mock('@/components/widget/use-team-relay', () => ({
 vi.mock('@/components/widget/use-widget-session-draft', () => ({
   useWidgetSessionDraft: () => ({
     draft: {}, setDraft: vi.fn(), noticeConsent: null, setNoticeConsent: vi.fn(),
-    hasProjectIntent: false, setHasProjectIntent: vi.fn(), briefApproved: false, setBriefApproved: vi.fn(),
+    hasProjectIntent: false, setHasProjectIntent: vi.fn(), briefApproved: false,
     sessionId: 'human-upload-session', sessionUnavailable: false, isSessionExpired: false,
     draftVersion: 0, setDraftVersion: vi.fn(), approval: {}, applyCanonicalDraft: vi.fn(), hydrateDraft: vi.fn(),
     ensureSession: vi.fn(async () => 'human-upload-session'), loadOrCreateSession: vi.fn(async () => 'human-upload-session'),

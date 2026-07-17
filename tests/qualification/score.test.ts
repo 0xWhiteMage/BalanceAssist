@@ -1,7 +1,9 @@
 import { scoreLead } from '@/lib/qualification/score';
+import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 test('marks a relevant complete inquiry as qualified', () => {
   const result = scoreLead({
+    ...createDefaultLeadDraft(),
     service: 'production',
     budgetBand: '50k-150k',
     timelineBand: '1-2-months',
@@ -15,6 +17,7 @@ test('marks a relevant complete inquiry as qualified', () => {
 
 test('marks an empty inquiry as unqualified', () => {
   const result = scoreLead({
+    ...createDefaultLeadDraft(),
     service: '',
     projectScope: '',
     timelineBand: '',
@@ -29,6 +32,7 @@ test('marks an empty inquiry as unqualified', () => {
 
 test('marks a partial inquiry as needs review', () => {
   const result = scoreLead({
+    ...createDefaultLeadDraft(),
     service: 'generative-ai',
     projectScope: 'AI concept exploration for launch visuals',
     timelineBand: 'asap',
@@ -43,6 +47,7 @@ test('marks a partial inquiry as needs review', () => {
 
 test('marks a low-budget but specified inquiry as misfit', () => {
   const result = scoreLead({
+    ...createDefaultLeadDraft(),
     service: 'not-sure-yet',
     projectScope: '',
     timelineBand: 'asap',
@@ -57,6 +62,7 @@ test('marks a low-budget but specified inquiry as misfit', () => {
 
 test('marks a non-empty inquiry with missing selectors as unqualified', () => {
   const result = scoreLead({
+    ...createDefaultLeadDraft(),
     service: '',
     projectScope: 'Need help with a production brief',
     timelineBand: '',
@@ -70,6 +76,7 @@ test('marks a non-empty inquiry with missing selectors as unqualified', () => {
 
 test('keeps the qualified boundary at score 8', () => {
   const result = scoreLead({
+    ...createDefaultLeadDraft(),
     service: 'production',
     projectScope: 'Launch visuals',
     timelineBand: '1-2-months',
@@ -84,6 +91,7 @@ test('keeps the qualified boundary at score 8', () => {
 
 test('keeps the needs review boundary at score 5', () => {
   const result = scoreLead({
+    ...createDefaultLeadDraft(),
     service: 'not-sure-yet',
     projectScope: 'AI concept visuals',
     timelineBand: 'asap',
@@ -95,3 +103,39 @@ test('keeps the needs review boundary at score 5', () => {
   expect(result.score).toBe(5);
   expect(result.status).toBe('needs_review');
 });
+
+test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
+  'treats %s as budget uncertainty rather than a specified budget',
+  (budgetBand) => {
+    const result = scoreLead({
+      ...createDefaultLeadDraft(),
+      service: 'production',
+      projectScope: 'Launch visuals',
+      timelineBand: '1-2-months',
+      budgetBand,
+      contactName: 'Dana',
+      contactEmail: 'dana@example.com'
+    });
+
+    expect(result.dimensions.budget).toBe(1);
+    expect(result.score).toBe(8);
+    expect(result.status).toBe('qualified');
+  }
+);
+
+test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
+  'treats %s as timeline uncertainty rather than a specified timeline',
+  (timelineBand) => {
+    const result = scoreLead({
+      ...createDefaultLeadDraft(),
+      service: 'production',
+      projectScope: 'Launch visuals',
+      timelineBand,
+      budgetBand: '50k-150k',
+      contactName: 'Dana',
+      contactEmail: 'dana@example.com'
+    });
+
+    expect(result.dimensions.timeline).toBe(1);
+  }
+);

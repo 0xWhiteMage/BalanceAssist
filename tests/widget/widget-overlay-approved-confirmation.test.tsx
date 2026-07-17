@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const { finalizeLeadMock } = vi.hoisted(() => ({
   finalizeLeadMock: vi.fn(async () => ({
@@ -13,7 +13,9 @@ const { finalizeLeadMock } = vi.hoisted(() => ({
     retryable: false,
     crmQueued: true,
     crmRevision: 1,
-    approvedDraftVersion: 1
+    approvedDraftVersion: 1,
+    approvalInputHash: 'approval-hash-v1',
+    approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
   }))
 }));
 
@@ -66,13 +68,16 @@ afterEach(() => {
       retryable: false,
       crmQueued: true,
       crmRevision: 1,
-      approvedDraftVersion: 1
+      approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1',
+      approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
   });
 });
 
 const originalFetch = global.fetch;
 afterEach(() => {
   global.fetch = originalFetch;
+  setMobileViewport(false);
 });
 
 function makeJsonResponse(body: unknown, status = 200) {
@@ -80,6 +85,42 @@ function makeJsonResponse(body: unknown, status = 200) {
     status,
     headers: { 'Content-Type': 'application/json' }
   });
+}
+
+function setMobileViewport(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(max-width: 639px)' ? matches : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn()
+    }))
+  });
+}
+
+function setResponsiveViewport(initialMatches: boolean) {
+  let matches = initialMatches;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      get matches() { return query === '(max-width: 639px)' ? matches : false; },
+      media: query,
+      onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+      dispatchEvent: vi.fn()
+    }))
+  });
+  return (nextMatches: boolean) => {
+    matches = nextMatches;
+    const event = { matches: nextMatches, media: '(max-width: 639px)' } as MediaQueryListEvent;
+    listeners.forEach((listener) => listener(event));
+  };
 }
 
 function mockWidgetFetch() {
@@ -101,6 +142,15 @@ function mockWidgetFetch() {
           contactCompany: 'Acme',
           contactEmail: 'jayden@example.com'
         },
+        outcome: 'draft_persisted',
+        canonicalDraft: {
+          service: 'production', projectType: 'Video', projectScope: '30s animation for social media',
+          timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden',
+          contactCompany: 'Acme', contactEmail: 'jayden@example.com'
+        },
+        draftVersion: 1,
+        currentStage: 'project',
+        stageRecaps: [],
         briefReady: true,
         reviewPrompt: 'Your brief is ready. Tap the tab on the right to review.',
         missingFields: []
@@ -117,7 +167,9 @@ function mockWidgetFetch() {
         retryable: false,
         crmQueued: true,
         crmRevision: 1,
-        approvedDraftVersion: 1
+        approvedDraftVersion: 1,
+        approvalInputHash: 'approval-hash-v1',
+        approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
       });
     }
     if (url.includes('/api/projects/mock-session-id/consent')) {
@@ -145,6 +197,27 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay approved confirmation (Fix 5)', () => {
+  test('renders one live canonical ready direction that follows viewport changes without entering chat history', async () => {
+    const resize = setResponsiveViewport(false);
+    mockWidgetFetch();
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    const readyStatus = await screen.findByRole('status', { name: 'Brief ready' }, { timeout: 7000 });
+    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the brief panel.');
+    expect(screen.getByRole('log')).not.toHaveTextContent(/Your core brief is ready|tab on the right/i);
+
+    act(() => resize(true));
+    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the Brief tab.');
+    expect(screen.getAllByText(/Your core brief is ready/i)).toHaveLength(1);
+
+    act(() => resize(false));
+    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the brief panel.');
+    expect(screen.queryByText(/tab on the right|rail on the right/i)).toBeNull();
+  }, 15_000);
+
   test('does not update unmounted state or raise a window error when delayed approval output completes', async () => {
     mockWidgetFetch();
     let resolveFinalize: ((value: Awaited<ReturnType<typeof finalizeLeadMock>>) => void) | undefined;
@@ -182,7 +255,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
         retryable: false,
         crmQueued: true,
         crmRevision: 1,
-        approvedDraftVersion: 1
+        approvedDraftVersion: 1,
+        approvalInputHash: 'approval-hash-v1',
+        approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
         });
         await Promise.resolve();
       });
@@ -195,7 +270,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     }
   });
 
-  test('after a successful approve, the rail renders a "Book a catch-up" CTA inside the green approved confirmation', async () => {
+  test('after a successful send, the rail renders queued public copy and follow-up actions', async () => {
     mockWidgetFetch();
 
     render(<WidgetOverlay autoOpen={true} />);
@@ -221,32 +296,17 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
 
     fireEvent.click(approveButton);
 
-    // After approval, the green confirmation banner + Book a catch-up CTA render.
     await waitFor(() => {
       const confirmation = document.querySelector('[data-testid="approve-confirmation"]');
       expect(confirmation).not.toBeNull();
-      const bookCta = document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement | null;
-      expect(bookCta).not.toBeNull();
-      expect(bookCta?.textContent).toMatch(/book a catch-up/i);
+      expect(screen.getByRole('button', { name: /book a catch-up/i })).toBeInTheDocument();
+      expect(screen.getByText('Queued for the Balance team')).toBeInTheDocument();
     });
 
-    // The confirmation copy stays truthful when delivery is queued but not verified.
-    const countLine = document.querySelector('[data-testid="approve-confirmation-count"]') as HTMLElement | null;
-    expect(countLine).not.toBeNull();
-    expect(countLine?.textContent).toMatch(/Approval saved\. Team notification queued\./i);
-
-    // Telegram status line shows "Telegram notification queued" since queued was true in finalize response.
-    const telegramStatus = document.querySelector('[data-testid="approve-confirmation-telegram"]') as HTMLElement | null;
-    expect(telegramStatus).not.toBeNull();
-    expect(telegramStatus?.textContent).toMatch(/Telegram notification queued/i);
-
-    const crmStatus = document.querySelector('[data-testid="approve-confirmation-crm"]') as HTMLElement | null;
-    expect(crmStatus).not.toBeNull();
-    expect(crmStatus?.textContent).toMatch(/CRM transfer queued.*revision 1/i);
-    expect(crmStatus?.textContent).not.toMatch(/delivered to Monday/i);
+    expect(screen.getByTestId('review-panel').textContent).not.toMatch(/crm|telegram|revision|reviewed/i);
   });
 
-  test('when finalize responds with queued=false and delivered=false, the rail shows "Telegram connection pending"', async () => {
+  test('when finalization persists without queue or delivery, the rail says Brief saved', async () => {
     mockWidgetFetch();
     finalizeLeadMock.mockResolvedValueOnce({
       ok: true,
@@ -258,7 +318,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       retryable: false,
       crmQueued: false,
       crmRevision: 1,
-      approvedDraftVersion: 1
+      approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1',
+      approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
     });
 
     render(<WidgetOverlay autoOpen={true} />);
@@ -281,9 +343,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.click(approveButton);
 
     await waitFor(() => {
-      const telegramStatus = document.querySelector('[data-testid="approve-confirmation-telegram"]') as HTMLElement | null;
-      expect(telegramStatus).not.toBeNull();
-      expect(telegramStatus?.textContent).toMatch(/Telegram connection pending/i);
+      expect(screen.getByText('Brief saved')).toBeInTheDocument();
     });
   });
 
@@ -299,7 +359,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
       retryable: false,
       crmQueued: false,
       crmRevision: 1,
-      approvedDraftVersion: 1
+      approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1',
+      approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
     });
 
     render(<WidgetOverlay autoOpen={true} />);
@@ -327,6 +389,92 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     });
   }, 10000);
 
+  test('reloads and shows retryable error when server approval facts mismatch the submitted draft', async () => {
+    let draftReloads = 0;
+    mockWidgetFetch();
+    const baseFetch = global.fetch;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/mock-session-id/draft') && init?.method !== 'PUT') {
+        draftReloads += 1;
+        return makeJsonResponse({
+          sessionId: 'mock-session-id', draft: {}, draftVersion: 1, fieldCount: 0,
+          referenceLinks: [], canonicalReferenceSetHash: 'current-reference-hash'
+        });
+      }
+      return baseFetch(input, init);
+    }) as unknown as typeof fetch;
+    finalizeLeadMock.mockResolvedValueOnce({
+      ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
+      queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 2,
+      approvedDraftVersion: 2, approvalInputHash: 'server-approval-hash',
+      approvedReferenceSetHash: 'different-reference-hash'
+    });
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
+
+    expect(await screen.findByRole('alert', {}, { timeout: 7000 })).toHaveTextContent(/changed.*reload|reload.*retry/i);
+    expect(document.querySelector('[data-testid="approve-confirmation"]')).toBeNull();
+    expect(draftReloads).toBeGreaterThan(0);
+  }, 15_000);
+
+  test('shows one retryable approval error above both mobile tab panels', async () => {
+    setMobileViewport(true);
+    mockWidgetFetch();
+    finalizeLeadMock
+      .mockRejectedValueOnce(new Error('temporary finalization failure'))
+      .mockResolvedValueOnce({
+        ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
+        queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1,
+        approvalInputHash: 'approval-hash-v1', approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
+      });
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Brief' }));
+    const mountedRail = screen.getByTestId('review-rail');
+    fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
+    const alert = await screen.findByRole('alert', {}, { timeout: 7000 });
+    expect(alert).toHaveTextContent('The brief was not sent');
+    expect(alert.closest('[role="tabpanel"]')).toBeNull();
+    const retry = screen.getByRole('button', { name: 'Retry sending brief' });
+    expect(retry).toHaveClass('balance-widget-action');
+    expect(within(alert).getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
+    expect(within(alert).getByRole('link', { name: 'Email the team' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(within(alert).getByRole('button', { name: 'Book a call' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
+    expect(alert).toBeVisible();
+    fireEvent.click(retry);
+    await waitFor(() => expect(finalizeLeadMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Queued for the Balance team')).toBeInTheDocument();
+    expect(screen.getByTestId('review-rail')).toBe(mountedRail);
+  }, 20_000);
+
+  test('reports verified delivery instead of merely saved or queued', async () => {
+    mockWidgetFetch();
+    finalizeLeadMock.mockResolvedValueOnce({
+      ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
+      queued: true, delivered: true, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1,
+      approvalInputHash: 'approval-hash-v1', approvedReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
+    });
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
+
+    expect(await screen.findByText('Delivered to the Balance team')).toBeInTheDocument();
+    expect(screen.queryByText('Brief saved')).toBeNull();
+    expect(screen.queryByText('Queued for the Balance team')).toBeNull();
+  }, 10_000);
+
   test('does not finalize until producer-transfer consent has been recorded', async () => {
     mockWidgetFetch();
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -335,7 +483,17 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
         return makeJsonResponse({ sessionId: 'mock-session-id', capability: 'mock-session-id.mock-cap', expiresAt: new Date(Date.now() + 86400000).toISOString(), persisted: true });
       }
       if (url.includes('/api/chat')) {
-        return makeJsonResponse({ message: 'Ready.', draftUpdates: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' }, briefReady: true, missingFields: [] });
+        return makeJsonResponse({
+          message: 'Ready.',
+          draftUpdates: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' },
+          outcome: 'draft_persisted',
+          canonicalDraft: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' },
+          draftVersion: 1,
+          currentStage: 'project',
+          stageRecaps: [],
+          briefReady: true,
+          missingFields: []
+        });
       }
       if (url.includes('/api/projects/mock-session-id/consent')) {
         return makeJsonResponse({ ok: false }, 500);
@@ -354,10 +512,8 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     });
     fireEvent.click(approveButton);
 
-    await waitFor(() => {
-      expect(finalizeLeadMock).not.toHaveBeenCalled();
-      expect(screen.getByText(/could not confirm consent/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByText(/could not confirm consent/i, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(finalizeLeadMock).not.toHaveBeenCalled();
   }, 10000);
 
   test('after Calendly completes without verified server confirmation, the widget stays truthful about team notification', async () => {
@@ -383,11 +539,10 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.click(approveButton);
 
     await waitFor(() => {
-      const bookCta = document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement | null;
-      expect(bookCta).not.toBeNull();
+      expect(screen.getByRole('button', { name: /book a catch-up/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(document.querySelector('[data-testid="book-catch-up-cta"]') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: /book a catch-up/i }));
 
     await waitFor(() => {
       const embed = document.querySelector('[data-testid="mock-calendly-embed"]');

@@ -18,6 +18,10 @@ const positiveFixture = {
   service: 'production',
   projectType: 'Brand film',
   projectScope: '30s hero spot',
+  projectObjective: 'Build launch awareness',
+  audience: 'Young adults',
+  intendedOutputs: 'Hero film and social cut-downs',
+  referencesStatus: 'added',
   scopePolished: '',
   timelineBand: '1-2-months',
   budgetBand: '50k-150k',
@@ -30,6 +34,10 @@ const negativeFixture = {
   service: 'production',
   projectType: 'Brand film',
   projectScope: '30s hero spot',
+  projectObjective: 'Build launch awareness',
+  audience: 'Young adults',
+  intendedOutputs: 'Hero film and social cut-downs',
+  referencesStatus: 'skipped',
   scopePolished: '',
   timelineBand: '1-2-months',
   budgetBand: '50k-150k',
@@ -67,6 +75,10 @@ test('rejects consentToShare from LLM tool call', () => {
     service: 'production',
     projectType: 'Video',
     projectScope: '30s animation',
+    projectObjective: '',
+    audience: '',
+    intendedOutputs: '',
+    referencesStatus: '',
     scopePolished: '',
     timelineBand: '1-2-months',
     budgetBand: '20k-50k',
@@ -101,6 +113,10 @@ test('accepts all known fields with empty strings', () => {
       service: '',
       projectType: '',
       projectScope: '30s animation',
+      projectObjective: '',
+      audience: '',
+      intendedOutputs: '',
+      referencesStatus: '',
       scopePolished: '',
       timelineBand: '',
       budgetBand: '',
@@ -117,6 +133,17 @@ test('happy path: parsed data matches default-everywhere object', () => {
   if (result.success) {
     expect(result.data).toEqual({ ...positiveFixture });
   }
+});
+
+test('tool schema preserves a 4,000-character original scope and rejects 4,001 characters', () => {
+  const exactScope = 's'.repeat(4_000);
+  const parsed = recordBriefUpdatesSchema.safeParse({ ...positiveFixture, projectScope: exactScope });
+  expect(parsed.success).toBe(true);
+  if (parsed.success) expect(parsed.data.projectScope).toBe(exactScope);
+  expect(recordBriefUpdatesSchema.safeParse({ ...positiveFixture, projectScope: `${exactScope}x` }).success).toBe(false);
+
+  expect(validateJsonSchema({ ...positiveFixture, projectScope: exactScope })).toBe(true);
+  expect(validateJsonSchema({ ...positiveFixture, projectScope: `${exactScope}x` })).toBe(false);
 });
 
 test('contactEmail: empty string is accepted', () => {
@@ -305,6 +332,54 @@ describe('sanitizeShareWork', () => {
 });
 
 describe('guardAgainstFabricatedBriefFields', () => {
+  test('uses the complete trimmed first user answer as original projectScope', () => {
+    const userMessage = '  We need a launch film for the new chair, aimed at young adults.  ';
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, projectScope: 'launch film for the new chair' },
+      createDefaultLeadDraft(),
+      userMessage
+    );
+
+    expect(guarded.projectScope).toBe('We need a launch film for the new chair, aimed at young adults.');
+  });
+
+  test('does not let the model assert that a reference was added', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, referencesStatus: 'added' },
+      createDefaultLeadDraft(),
+      'Here is my project'
+    );
+    expect(guarded.referencesStatus).toBe('');
+  });
+  test('preserves the first project statement and keeps generated wording separate', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        ...positiveFixture,
+        projectScope: 'A polished launch-film summary',
+        scopePolished: 'A polished launch-film summary'
+      },
+      { ...createDefaultLeadDraft(), projectScope: 'We need a film for our chair launch' },
+      'The audience is young adults'
+    );
+
+    expect(guarded.projectScope).toBe('We need a film for our chair launch');
+    expect(guarded.scopePolished).toBe('A polished launch-film summary');
+  });
+
+  test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
+    'preserves the stable non-answer literal %s',
+    (literal) => {
+      const guarded = guardAgainstFabricatedBriefFields(
+        { ...positiveFixture, audience: literal, intendedOutputs: literal, budgetBand: literal },
+        createDefaultLeadDraft(),
+        literal
+      );
+
+      expect(guarded.audience).toBe(literal);
+      expect(guarded.intendedOutputs).toBe(literal);
+      expect(guarded.budgetBand).toBe(literal);
+    }
+  );
   test('strips a fabricated contactName that the user message did not contain', () => {
     const prior = createDefaultLeadDraft();
     const guarded = guardAgainstFabricatedBriefFields(

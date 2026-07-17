@@ -1,6 +1,7 @@
 import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
+import { formatIntakeStageRecap, getCompletedIntakeStageCount, getCurrentIntakeStage, INTAKE_STAGES } from '@/lib/conversation/intake-stage';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-responses';
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
@@ -38,6 +39,7 @@ export async function OPTIONS() {
 type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 const PROVIDER_TIMEOUT_MS = 15000;
 const CHAT_PROVIDER_UNAVAILABLE = {
+  outcome: 'provider_unavailable',
   error: 'Chat service unavailable',
   detail: 'chat_provider_unavailable'
 } as const;
@@ -47,12 +49,7 @@ const SHARE_WORK_TOOL_NAME = 'share_work';
 function confidentialDiversionResponse(request: Request) {
   return jsonWithCors({
     message: CONFIDENTIAL_INTAKE_RESPONSE,
-    outcome: 'confidential_diversion',
-    draftUpdates: {},
-    briefReady: false,
-    reviewPrompt: null,
-    missingFields: [],
-    truncated: false
+    outcome: 'confidential_diversion'
   }, undefined, request);
 }
 
@@ -257,6 +254,10 @@ type ChatContext = {
 
 const CAPTURED_FIELD_KEYS = [
   'projectScope',
+  'projectObjective',
+  'audience',
+  'intendedOutputs',
+  'referencesStatus',
   'projectType',
   'service',
   'timelineBand',
@@ -359,9 +360,13 @@ async function loadAuthenticatedDraftState(session: Awaited<ReturnType<typeof re
 async function persistAuthenticatedDraftState(
   state: Awaited<ReturnType<typeof loadAuthenticatedDraftState>>,
   draftUpdates: Record<string, string | boolean>
-) {
+): Promise<
+  | { ok: true; draft: VersionedDraft; draftVersion: number }
+  | { ok: false; conflict: true; draft: VersionedDraft; draftVersion: number }
+  | { ok: false; conflict: false }
+> {
   if (!state.authenticated || !state.supabase || !state.sessionId) {
-    return;
+    return { ok: false, conflict: false };
   }
 
   let nextDraft = { ...state.versionedDraft };
@@ -392,7 +397,7 @@ async function persistAuthenticatedDraftState(
       continue;
     }
 
-    nextDraft = updateField(nextDraft, field, value, 'user-stated');
+    nextDraft = updateField(nextDraft, field, value, field === 'scopePolished' ? 'inferred' : 'user-stated');
     changed = true;
   }
 
@@ -400,28 +405,68 @@ async function persistAuthenticatedDraftState(
     const fields = Object.entries(nextDraft)
       .filter(([field, entry]) => state.versionedDraft[field]?.value !== entry.value || state.versionedDraft[field]?.provenance !== entry.provenance)
       .map(([field, entry]) => ({ field, value: entry.value, provenance: entry.provenance }));
-    await state.supabase.rpc('update_session_draft', {
+    const { data, error } = await state.supabase.rpc('update_session_draft', {
       p_session_id: state.sessionId,
       p_expected_draft_version: state.draftVersion,
       p_fields: fields
     });
+    if (error) return { ok: false, conflict: false };
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row !== 'object') return { ok: false, conflict: false };
+    const result = row as { draft?: unknown; draft_version?: unknown; conflict?: unknown };
+    if (typeof result.draft_version !== 'number') return { ok: false, conflict: false };
+    const savedDraft = normalizeVersionedDraft(result.draft);
+    return result.conflict === true
+      ? { ok: false, conflict: true, draft: savedDraft, draftVersion: result.draft_version }
+      : { ok: true, draft: savedDraft, draftVersion: result.draft_version };
   } else {
-    await state.supabase
+    const { error } = await state.supabase
       .from('sessions')
       .update({ last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
       .eq('id', state.sessionId);
+    if (error) return { ok: false, conflict: false };
+    const { data: latest, error: reloadError } = await state.supabase
+      .from('sessions')
+      .select('draft, draft_version')
+      .eq('id', state.sessionId)
+      .maybeSingle();
+    if (reloadError || !latest || typeof latest.draft_version !== 'number') {
+      return { ok: false, conflict: false };
+    }
+    const latestDraft = normalizeVersionedDraft(latest.draft);
+    return latest.draft_version === state.draftVersion
+      ? { ok: true, draft: latestDraft, draftVersion: latest.draft_version }
+      : { ok: false, conflict: true, draft: latestDraft, draftVersion: latest.draft_version };
   }
+}
+
+function canonicalProgress(draft: VersionedDraft, draftVersion: number) {
+  const canonicalDraft = getVisibleDraftValues(draft);
+  const canonicalProvenance = Object.fromEntries(
+    Object.entries(draft)
+      .filter(([, field]) => field.provenance !== 'cleared' && Boolean(field.value))
+      .map(([key, field]) => [key, field.provenance])
+  );
+  const values = toLeadDraftState(canonicalDraft);
+  return {
+    canonicalDraft,
+    canonicalProvenance,
+    draftVersion,
+    currentStage: getCurrentIntakeStage(values).id,
+    briefReady: isBriefReadyForApproval(values)
+  };
 }
 
 function buildLlmContext(context: ChatContext, promptDraft: Record<string, string>, priorDraft: Partial<LeadDraft>) {
   const briefReady = isBriefReadyForApproval(priorDraft);
   const capturedFields = computeCapturedFieldsFromDraft(promptDraft);
+  const currentStage = getCurrentIntakeStage(priorDraft);
   const systemPrompt = buildSystemPrompt({
     isTeamConnected: context?.isTeamConnected,
-    step: context?.step,
     draft: Object.keys(promptDraft).length > 0 ? JSON.stringify(promptDraft) : undefined,
     briefReady,
-    capturedFields
+    capturedFields,
+    currentStage
   });
   return { priorDraft, briefReady, capturedFields, systemPrompt };
 }
@@ -468,7 +513,7 @@ export async function POST(request: Request) {
   const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
 
   if (messages.some((message) => isCareersIntent(message.content))) {
-    return jsonWithCors({ message: `Please apply through ${getCareersRedirect()}.`, draftUpdates: {}, briefReady: false, reviewPrompt: null, missingFields: [], truncated: false }, undefined, request);
+    return jsonWithCors({ outcome: 'non_persistence', message: `Please apply through ${getCareersRedirect()}.` }, undefined, request);
   }
 
   try {
@@ -491,13 +536,9 @@ export async function POST(request: Request) {
       : undefined;
 
     return jsonWithCors({
+      outcome: 'non_persistence',
       messages: faqResponse.messages,
-      draftUpdates: {},
-      briefReady: false,
-      reviewPrompt: null,
-      missingFields: [],
-      sharedWork: sharedWork && sharedWork.entries.length > 0 ? sharedWork : undefined,
-      truncated: false
+      sharedWork: sharedWork && sharedWork.entries.length > 0 ? sharedWork : undefined
     });
   }
 
@@ -550,7 +591,10 @@ export async function POST(request: Request) {
       truncated = providerResult.truncated;
     }
 
-    const sanitized = sanitizeReply(visibleContent, lastUserMessage, { toolCallArguments: toolArguments ?? undefined });
+    const sanitized = sanitizeReply(visibleContent, lastUserMessage, {
+      toolCallArguments: toolArguments ?? undefined,
+      enforceInternalLanguage: Boolean(env.DEEPSEEK_API_KEY)
+    });
     let replyText = sanitized.reply;
     if (sanitized.overridden) {
       category = 'refusal';
@@ -561,21 +605,54 @@ export async function POST(request: Request) {
     }
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
-    const mergedDraft = { ...llmContext.priorDraft, ...draftUpdates };
-    const briefReady = isBriefReadyForApproval(mergedDraft);
-    const missingFields = missingReviewFields(mergedDraft);
+    let persisted: Awaited<ReturnType<typeof persistAuthenticatedDraftState>>;
+    try {
+      persisted = await persistAuthenticatedDraftState(draftState, draftUpdates);
+    } catch {
+      return jsonWithCors({
+        outcome: 'draft_save_failed',
+        message: 'I could not save that answer. Please try again, or talk to the team without AI.'
+      }, { status: 500 }, request);
+    }
+    if (!persisted.ok) {
+      if (persisted.conflict) {
+        const progress = canonicalProgress(persisted.draft, persisted.draftVersion);
+        return jsonWithCors({
+          outcome: 'draft_conflict',
+          message: 'This brief changed elsewhere, so I reloaded the latest saved version. Please reapply your change.',
+          ...progress,
+          stageRecaps: []
+        }, { status: 409 }, request);
+      }
+      return jsonWithCors({
+        outcome: 'draft_save_failed',
+        message: 'I could not save that answer. Please try again, or talk to the team without AI.'
+      }, { status: 500 }, request);
+    }
 
-    await persistAuthenticatedDraftState(draftState, draftUpdates);
+    const progress = canonicalProgress(persisted.draft, persisted.draftVersion);
+    const savedValues = toLeadDraftState(progress.canonicalDraft);
+    const previousCompletedStageCount = getCompletedIntakeStageCount(llmContext.priorDraft);
+    const currentCompletedStageCount = getCompletedIntakeStageCount(savedValues);
+    const stageRecaps = INTAKE_STAGES
+      .slice(previousCompletedStageCount, currentCompletedStageCount)
+      .flatMap((stage) => {
+        const recap = formatIntakeStageRecap(stage.id, savedValues);
+        return recap ? [recap] : [];
+      });
+    const missingFields = missingReviewFields(savedValues);
 
     void logLlmEvent(sessionId, category, Object.keys(draftUpdates).length > 0, requestId);
 
     const replyChunks = splitReplyIntoMessages(replyText);
     if (replyChunks.length > 1) {
       return jsonWithCors({
+        outcome: 'draft_persisted',
         messages: replyChunks,
         draftUpdates,
-        briefReady,
-        reviewPrompt: briefReady ? REVIEW_PROMPT : null,
+        ...progress,
+        stageRecaps,
+        reviewPrompt: progress.briefReady ? REVIEW_PROMPT : null,
         missingFields,
         sharedWork: sharedWork ?? undefined,
         truncated
@@ -583,10 +660,12 @@ export async function POST(request: Request) {
     }
 
     return jsonWithCors({
+      outcome: 'draft_persisted',
       message: replyText,
       draftUpdates,
-      briefReady,
-      reviewPrompt: briefReady ? REVIEW_PROMPT : null,
+      ...progress,
+      stageRecaps,
+      reviewPrompt: progress.briefReady ? REVIEW_PROMPT : null,
       missingFields,
       sharedWork: sharedWork ?? undefined,
       truncated

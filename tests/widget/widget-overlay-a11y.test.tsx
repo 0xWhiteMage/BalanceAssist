@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi, beforeAll, afterEach } from 'vitest';
-import { render, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, fireEvent, waitFor, act, screen } from '@testing-library/react';
 import { WidgetOverlay } from '@/components/widget/widget-overlay';
 
 const originalFetch = global.fetch;
@@ -30,6 +30,7 @@ beforeAll(() => {
 
 afterEach(() => {
   global.fetch = originalFetch;
+  setMobileViewport(false);
 });
 
 function stubFetch() {
@@ -46,6 +47,60 @@ function stubFetch() {
     }
     return new Response('{}', { status: 200 });
   }) as unknown as typeof fetch;
+}
+
+function setMobileViewport(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(max-width: 639px)' ? matches : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  });
+}
+
+function stubReadyFetch() {
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/chat') && init?.method === 'POST') {
+      const canonicalDraft = {
+        service: 'production', projectScope: 'A launch film', projectObjective: 'Build awareness',
+        audience: 'Young adults', intendedOutputs: 'Hero film', timelineBand: 'Not sure yet',
+        budgetBand: 'Prefer not to share', contactEmail: 'jayden@example.com'
+      };
+      return new Response(JSON.stringify({
+        message: 'Use the rail on the right to review this.',
+        outcome: 'draft_persisted', canonicalDraft, canonicalProvenance: {}, draftVersion: 1,
+        currentStage: 'references-contact', stageRecaps: [], briefReady: true,
+        reviewPrompt: 'Use the rail on the right to review this.', missingFields: []
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.includes('/api/sessions')) {
+      return new Response(JSON.stringify({ sessionId: 'test-session', persisted: true }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response('{}', { status: 200 });
+  }) as unknown as typeof fetch;
+}
+
+async function startReadyAiIntake() {
+  fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continue with AI' }));
+  const input = await screen.findByPlaceholderText(/Type your message/i, {}, { timeout: 5000 });
+  await waitFor(() => {
+    expect(screen.getByRole('dialog', { name: /balance assist/i })).toHaveTextContent(/What can I help you with today\?/i);
+  }, { timeout: 7000 });
+  fireEvent.change(input, { target: { value: 'A launch film' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await screen.findByRole('tablist', { name: 'Widget sections' }, { timeout: 7000 });
 }
 
 describe('WidgetOverlay accessibility', () => {
@@ -201,4 +256,73 @@ describe('WidgetOverlay accessibility', () => {
     const closeButton = getByLabelText('Close Balance Assist');
     expect(closeButton).toBeDefined();
   });
+
+  test('shows canonical intake progress throughout AI intake but not human-only intake', async () => {
+    setMobileViewport(false);
+    stubFetch();
+    const { unmount } = render(<WidgetOverlay autoOpen={true} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with AI' }));
+
+    expect(await screen.findByRole('list', { name: 'Intake stages' })).toBeVisible();
+    unmount();
+
+    stubFetch();
+    render(<WidgetOverlay autoOpen={true} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+    expect(screen.queryByRole('list', { name: 'Intake stages' })).toBeNull();
+  });
+
+  test('keeps progress visible across mobile tabs and implements arrow, Home, and End semantics', async () => {
+    setMobileViewport(true);
+    stubReadyFetch();
+    render(<WidgetOverlay autoOpen={true} />);
+    await startReadyAiIntake();
+
+    const progress = screen.getByTestId('intake-stage-progress');
+    const chat = screen.getByRole('tab', { name: 'Chat' });
+    const brief = screen.getByRole('tab', { name: 'Brief' });
+    const chatPanel = document.getElementById('widget-chat-panel');
+    const briefPanel = document.getElementById('widget-brief-panel');
+    expect(progress).toBeVisible();
+    expect(chatPanel).toBeVisible();
+    expect(chatPanel).not.toHaveAttribute('aria-hidden');
+    expect(briefPanel).toBeInTheDocument();
+    expect(briefPanel).not.toBeVisible();
+    expect(briefPanel).toHaveAttribute('aria-hidden', 'true');
+    expect(briefPanel).toHaveAttribute('inert');
+    expect(chat).toHaveAttribute('aria-controls', 'widget-chat-panel');
+    expect(brief).toHaveAttribute('aria-controls', 'widget-brief-panel');
+    expect(chat).toHaveClass('balance-widget-action');
+
+    fireEvent.keyDown(chat, { key: 'ArrowRight' });
+    expect(brief).toHaveFocus();
+    expect(brief).toHaveAttribute('aria-selected', 'true');
+    expect(progress).toBeVisible();
+    expect(chatPanel).not.toBeVisible();
+    expect(chatPanel).toHaveAttribute('aria-hidden', 'true');
+    expect(chatPanel).toHaveAttribute('inert');
+    expect(briefPanel).toBeVisible();
+
+    const edit = screen.getByRole('button', { name: 'Edit project description' });
+    fireEvent.click(edit);
+    const editor = screen.getByRole('textbox', { name: 'Project description' });
+    fireEvent.change(editor, { target: { value: 'Unsaved mobile wording' } });
+    fireEvent.click(chat);
+    expect(editor).not.toBeVisible();
+    expect(editor.closest('[inert]')).toBe(briefPanel);
+    fireEvent.click(brief);
+    expect(screen.getByRole('textbox', { name: 'Project description' })).toHaveValue('Unsaved mobile wording');
+
+    fireEvent.keyDown(brief, { key: 'ArrowLeft' });
+    expect(chat).toHaveFocus();
+    fireEvent.keyDown(chat, { key: 'End' });
+    expect(brief).toHaveFocus();
+    fireEvent.keyDown(brief, { key: 'Home' });
+    expect(chat).toHaveFocus();
+
+    const human = screen.getByRole('button', { name: 'Talk to the team without AI' });
+    expect(human).toHaveClass('balance-widget-action');
+    expect(human).toBeVisible();
+  }, 15_000);
 });

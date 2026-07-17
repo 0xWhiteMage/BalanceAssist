@@ -1,339 +1,129 @@
 import { describe, expect, test, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ReviewPanel } from '@/components/widget/review-panel';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 const readyDraft = {
   ...createDefaultLeadDraft(),
   service: 'production' as const,
-  projectType: 'Video',
-  projectScope: '30s launch animation',
-  scopePolished: '30s launch animation',
-  timelineBand: '1-2-months' as const,
-  budgetBand: '20k-50k' as const,
+  projectScope: 'Make a launch film',
+  projectObjective: 'Build awareness',
+  audience: 'Young adults',
+  intendedOutputs: 'Hero film and cut-downs',
+  scopePolished: 'A campaign launch film for a younger audience',
+  timelineBand: 'Not sure yet',
+  budgetBand: 'Prefer not to share',
   contactName: 'Jayden',
-  contactCompany: 'Samsung',
   contactEmail: 'jayden@example.com'
 };
 
+const baseProps = {
+  approved: false,
+  mode: 'essentials' as const,
+  onApprove: vi.fn(),
+  onContinueRefining: vi.fn()
+};
+
 describe('ReviewPanel', () => {
-  test('renders progress strip with completed count', () => {
-    render(
-      <ReviewPanel
-        draft={createDefaultLeadDraft()}
-        approved={false}
-        mode="essentials"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
+  test('renders semantic core and optional groups without field counts or internal words', () => {
+    render(<ReviewPanel {...baseProps} draft={readyDraft} />);
+
+    expect(screen.getByText('Core brief ready')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Optional details' })).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ of \d+ captured/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('review-panel').textContent).not.toMatch(
+      /score|qualified|unqualified|misfit|crm|telegram|revision/i
     );
-    expect(screen.getByText(/0 of 8 captured/i)).toBeInTheDocument();
-    expect(screen.getByText(/Project Brief/i)).toBeInTheDocument();
   });
 
-  test('updates completed count when draft is ready', () => {
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="essentials"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
-    );
-    expect(screen.getByText(/8 of 8 captured/i)).toBeInTheDocument();
+  test('explains the semantic requirements when the core brief is not ready', () => {
+    render(<ReviewPanel {...baseProps} draft={createDefaultLeadDraft()} />);
+
+    expect(screen.getByText('Core brief needs a project need and contact detail')).toBeInTheDocument();
+    expect(screen.getByText('Add any useful context, or leave these for the team conversation')).toBeInTheDocument();
+    expect(screen.getByTestId('approve-button')).toBeDisabled();
   });
 
-  test('essentials mode renders a disabled "Send to team" CTA when the draft is not ready', () => {
+  test('keeps a legacy generated summary visible without claiming unsupported attribution', () => {
     render(
       <ReviewPanel
-        draft={createDefaultLeadDraft()}
-        approved={false}
-        mode="essentials"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
+        {...baseProps}
+        draft={{
+          ...createDefaultLeadDraft(),
+          scopePolished: 'Legacy generated interpretation',
+          contactEmail: 'jayden@example.com'
+        }}
       />
     );
-    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
-    expect(approveButton).toBeInTheDocument();
-    expect(approveButton.disabled).toBe(true);
-    expect(approveButton.textContent).toMatch(/send to team/i);
-    expect(screen.getByTestId('approve-disabled-hint')).toBeInTheDocument();
+
+    expect(screen.getByText('Project summary')).toBeInTheDocument();
+    expect(screen.getByText('Legacy generated interpretation')).toBeInTheDocument();
+    expect(screen.getByText('Core brief needs a project need and contact detail')).toBeInTheDocument();
+    expect(screen.getByTestId('approve-button')).toBeDisabled();
   });
 
-  test('essentials mode renders a disabled "Send to team" CTA when even a fully ready brief should still show the disabled sub-line', () => {
+  test('uses controller approval state to disable duplicate sends while pending', () => {
     const onApprove = vi.fn();
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="essentials"
-        onApprove={onApprove}
-        onContinueRefining={() => {}}
-      />
-    );
-    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
-    expect(approveButton).toBeInTheDocument();
-    expect(approveButton.disabled).toBe(false);
-    expect(approveButton.textContent).toMatch(/send to team/i);
-    expect(screen.queryByTestId('approve-disabled-hint')).not.toBeInTheDocument();
-  });
+    const { rerender } = render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onApprove={onApprove} />);
 
-  test('summary mode renders Approve CTA + Continue refining when ready and not approved', () => {
-    const onApprove = vi.fn();
-    const onContinueRefining = vi.fn();
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="summary"
-        onApprove={onApprove}
-        onContinueRefining={onContinueRefining}
-      />
-    );
-    expect(screen.getByRole('button', { name: /approve & send to team/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /continue refining/i })).toBeInTheDocument();
-  });
+    const button = screen.getByRole('button', { name: 'Send brief to Balance' });
+    fireEvent.click(button);
+    expect(onApprove).toHaveBeenCalledOnce();
 
-  test('summary mode invokes onApprove when the primary CTA is clicked', () => {
-    const onApprove = vi.fn();
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="summary"
-        onApprove={onApprove}
-        onContinueRefining={() => {}}
-      />
-    );
-    fireEvent.click(screen.getByRole('button', { name: /approve & send to team/i }));
+    rerender(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onApprove={onApprove} approvalInFlight />);
+    const pendingButton = screen.getByRole('button', { name: /sending/i });
+    expect(pendingButton).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Sending brief to Balance');
+    fireEvent.click(pendingButton);
     expect(onApprove).toHaveBeenCalledOnce();
   });
 
-  test('summary mode invokes onContinueRefining when the secondary CTA is clicked', () => {
-    const onContinueRefining = vi.fn();
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="summary"
-        onApprove={() => {}}
-        onContinueRefining={onContinueRefining}
-      />
-    );
-    fireEvent.click(screen.getByRole('button', { name: /continue refining/i }));
-    expect(onContinueRefining).toHaveBeenCalledOnce();
+  test('keeps editor labels persistent and gives inline actions shared mobile-safe classes', () => {
+    render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onChange={vi.fn()} provenance={{ projectScope: 'user-stated' }} />);
+
+    const send = screen.getByRole('button', { name: 'Send brief to Balance' });
+    expect(send).toHaveClass('balance-widget-action', 'balance-widget-wrap');
+
+    const edit = screen.getByRole('button', { name: 'Edit original wording' });
+    expect(edit).toHaveClass('balance-widget-action');
+    fireEvent.click(edit);
+
+    const editor = screen.getByRole('textbox', { name: 'Original wording' });
+    expect(editor.tagName).toBe('TEXTAREA');
+    expect(screen.getByText('Original wording')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Save original wording' })).toHaveClass('balance-widget-action');
+    expect(screen.getByRole('button', { name: 'Cancel editing original wording' })).toHaveClass('balance-widget-action');
   });
 
-  test('renders a truthful queued confirmation when approved=true but delivery is not verified', () => {
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={true}
-        mode="summary"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-        telegramBroadcastStatus="queued"
-      />
-    );
-    expect(screen.getByText(/Approval saved\. Team notification queued\./i)).toBeInTheDocument();
-    expect(screen.queryByText(/The Balance team has been notified/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
+  test('uses the updated send label after a canonical edit', () => {
+    render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" requiresReapproval />);
+
+    expect(screen.getByRole('button', { name: 'Send updated brief to Balance' })).toBeInTheDocument();
   });
 
-  test('summary mode renders a disabled "Approve & send to team" CTA when the draft is not ready', () => {
-    const onApprove = vi.fn();
-    render(
-      <ReviewPanel
-        draft={createDefaultLeadDraft()}
-        approved={false}
-        mode="summary"
-        onApprove={onApprove}
-        onContinueRefining={() => {}}
-      />
-    );
-    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
-    expect(approveButton).toBeInTheDocument();
-    expect(approveButton.textContent).toMatch(/approve.*send to team/i);
-    expect(approveButton.disabled).toBe(true);
-    expect(screen.getByTestId('approve-disabled-hint')).toBeInTheDocument();
-  });
-
-  test('exposes mode via data-mode attribute', () => {
+  test('shows only observable persisted, queued, or delivered confirmation copy', () => {
     const { rerender } = render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="essentials"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
+      <ReviewPanel {...baseProps} draft={readyDraft} approved transferStatus="saved" />
     );
-    expect(screen.getByTestId('review-panel').getAttribute('data-mode')).toBe('essentials');
-    rerender(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="summary"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
-    );
-    expect(screen.getByTestId('review-panel').getAttribute('data-mode')).toBe('summary');
+    expect(screen.getByText('Brief saved')).toBeInTheDocument();
+
+    rerender(<ReviewPanel {...baseProps} draft={readyDraft} approved transferStatus="queued" />);
+    expect(screen.getByText('Queued for the Balance team')).toBeInTheDocument();
+
+    rerender(<ReviewPanel {...baseProps} draft={readyDraft} approved transferStatus="delivered" />);
+    expect(screen.getByText('Delivered to the Balance team')).toBeInTheDocument();
+    expect(screen.getByTestId('review-panel').textContent).not.toMatch(/reviewed|approved/i);
   });
 
-  test('summary mode renders the Approve button with a static warmGold gradient and no pulse animation', () => {
+  test('passes restored reference links through to the editable brief', () => {
     render(
       <ReviewPanel
+        {...baseProps}
         draft={readyDraft}
-        approved={false}
-        mode="summary"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
-    );
-    const approveButton = screen.getByRole('button', { name: /approve & send to team/i });
-    expect(approveButton.getAttribute('data-pulse')).toBeNull();
-    expect(approveButton.style.animation === '' || approveButton.style.animation === 'none').toBe(true);
-    expect(approveButton.style.background).toMatch(/linear-gradient/);
-    expect(approveButton.style.animation).not.toMatch(/approve-pulse/i);
-  });
-
-  test('summary mode only claims the team was notified after verified delivery', () => {
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={true}
-        mode="summary"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-        telegramBroadcastStatus="sent"
-      />
-    );
-    expect(screen.queryByRole('button', { name: /approve & send to team/i })).not.toBeInTheDocument();
-    const confirmation = screen.getByTestId('approve-confirmation');
-    expect(confirmation).toBeInTheDocument();
-    expect(confirmation.textContent).toMatch(/Balance team has been notified/i);
-  });
-
-  test('approved confirmation stays truthful when notification could not be verified', () => {
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={true}
-        mode="summary"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-        telegramBroadcastStatus="unconfigured"
+        referenceLinks={[{ id: 'reference-1', kind: 'vimeo', url: 'https://vimeo.com/123' }]}
       />
     );
 
-    expect(screen.getByTestId('approve-confirmation-count')).toHaveTextContent(
-      /Approval saved\. Team notification still needs confirmation\./i
-    );
-    expect(screen.queryByText(/The Balance team has been notified/i)).not.toBeInTheDocument();
-  });
-
-  test('essentials mode always renders the Approve button, even when the brief is ready', () => {
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="essentials"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
-    );
-    const approveButton = screen.getByTestId('approve-button');
-    expect(approveButton).toBeInTheDocument();
-    expect(approveButton.textContent).toMatch(/send to team/i);
-    expect((approveButton as HTMLButtonElement).disabled).toBe(false);
-    expect(approveButton.getAttribute('style') ?? '').not.toMatch(/animation\s*:\s*[^n]/i);
-  });
-
-  test('disabled Send-to-team button has aria-label explaining why it is disabled', () => {
-    render(
-      <ReviewPanel
-        draft={createDefaultLeadDraft()}
-        approved={false}
-        mode="essentials"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
-    );
-    const approveButton = screen.getByTestId('approve-button') as HTMLButtonElement;
-    expect(approveButton.getAttribute('aria-label')).toBe('Fill the missing fields to send to the team');
-  });
-
-  test('enabled Send-to-team button is reachable under the accessible name "Send to team"', () => {
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="essentials"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
-    );
-    expect(
-      screen.getByRole('button', { name: /send to team/i }) as HTMLButtonElement
-    ).toBeInTheDocument();
-  });
-
-  test('Approve button background is a static warmGold linear gradient (no animation property)', () => {
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="summary"
-        onApprove={() => {}}
-        onContinueRefining={() => {}}
-      />
-    );
-    const approveButton = screen.getByRole('button', { name: /approve & send to team/i }) as HTMLButtonElement;
-    expect(approveButton.style.background).toMatch(/linear-gradient/);
-    expect(approveButton.style.background).toMatch(/#dbb580|#ffd293/i);
-    expect(approveButton.style.animation === '' || approveButton.style.animation === 'none').toBe(true);
-    expect(approveButton.getAttribute('style') ?? '').not.toMatch(/animation\s*:\s*[^n]/i);
-  });
-
-  test('clicking Approve twice in a row only invokes onApprove once (button enters in-flight state)', () => {
-    const onApprove = vi.fn();
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={false}
-        mode="summary"
-        onApprove={onApprove}
-        onContinueRefining={() => {}}
-      />
-    );
-    const approveButton = screen.getByRole('button', { name: /approve & send to team/i });
-    fireEvent.click(approveButton);
-    // After the first click, the button label flips to "Sending…" and the
-    // second click MUST NOT re-invoke onApprove.
-    expect(screen.getByTestId('approve-button').getAttribute('data-in-flight')).toBe('true');
-    const sendingButton = screen.getByRole('button', { name: /sending/i }) as HTMLButtonElement;
-    expect(sendingButton.disabled).toBe(true);
-    fireEvent.click(sendingButton);
-    expect(onApprove).toHaveBeenCalledOnce();
-  });
-
-  test('when approved=true, clicking the Approve button (if it renders) does NOT trigger onApprove', () => {
-    const onApprove = vi.fn();
-    render(
-      <ReviewPanel
-        draft={readyDraft}
-        approved={true}
-        mode="summary"
-        onApprove={onApprove}
-        onContinueRefining={() => {}}
-      />
-    );
-    // The Approve CTA is replaced by the green confirmation pill when approved,
-    // so onApprove must remain uncalled.
-    expect(screen.queryByRole('button', { name: /approve.*send to team/i })).not.toBeInTheDocument();
-    expect(screen.getByTestId('approve-confirmation')).toBeInTheDocument();
-    expect(onApprove).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'https://vimeo.com/123' })).toBeInTheDocument();
   });
 });

@@ -1,8 +1,10 @@
 import { getEssentialsProgress } from '@/lib/onboarding/progress';
+import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 test('counts completed essential fields', () => {
   expect(
     getEssentialsProgress({
+      ...createDefaultLeadDraft(),
       service: 'production',
       projectScope: 'Brand campaign',
       timelineBand: '1-2-months',

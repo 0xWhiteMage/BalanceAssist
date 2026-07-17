@@ -57,6 +57,47 @@ test('passes through normal conversation', () => {
   expect(result.reply).toBe('Sounds good, what timeline are you thinking?');
 });
 
+test.each([
+  'Your lead score is 9 and you are qualified.',
+  "You're qualified for the next stage.",
+  'This inquiry is unqualified and marked as a misfit.',
+  'The CRM record is queued.',
+  'The Telegram delivery status is sent.',
+  'CRM revision 3 has been created.'
+])('replaces provider internal-status output and discards its draft: %s', (providerReply) => {
+  const result = sanitizeReply(providerReply, 'Tell me what happens next', {
+    toolCallArguments: { projectScope: 'Injected scope' },
+    enforceInternalLanguage: true
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(/brief/i);
+  expect(result.reply).not.toMatch(/score|qualified|unqualified|misfit|CRM|Telegram|revision/i);
+  expect(result.reply.length).toBeLessThanOrEqual(200);
+  expect(result.draft).toEqual({});
+});
+
+test('sanitizes a provider qualification assertion even when the user asked about qualification', () => {
+  const result = sanitizeReply('You are qualified for this service.', 'Am I qualified?', {
+    toolCallArguments: { projectScope: 'Injected scope' },
+    enforceInternalLanguage: true
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(/brief/i);
+  expect(result.reply).not.toMatch(/score|qualified|unqualified|misfit|CRM|Telegram|revision/i);
+  expect(result.draft).toEqual({});
+});
+
+test('preserves a neutral user-facing provider answer to a qualification question', () => {
+  const reply = 'I can help you capture and review your project brief, and you can contact the team directly at any time.';
+  expect(sanitizeReply(reply, 'Am I qualified?', { enforceInternalLanguage: true })).toEqual({
+    reply,
+    draft: {},
+    overridden: false
+  });
+});
+
 test('uses tool-call arguments over prose draft line when both present', () => {
   const result = sanitizeReply(
     'Visible reply.\n:::draft:::{"contactName":"Prose"}:::\n<<<END_REPLY>>>',

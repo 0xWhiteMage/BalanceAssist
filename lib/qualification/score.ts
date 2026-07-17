@@ -17,6 +17,12 @@ export type QualificationResult = {
 const QUALIFIED_MIN = 8;
 const REVIEW_MIN = 5;
 
+function isUncertainAnswer(value: string) {
+  return ['not-sure-yet', 'not sure yet', 'skip', 'prefer not to share'].includes(
+    value.trim().toLowerCase()
+  );
+}
+
 function scoreService(service: LeadDraft['service']) {
   if (!service) {
     return 0;
@@ -34,12 +40,16 @@ function scoreBudget(budgetBand: LeadDraft['budgetBand']) {
     return 1;
   }
 
-  return budgetBand === 'not-sure-yet' ? 1 : 2;
+  return isUncertainAnswer(budgetBand) ? 1 : 2;
 }
 
 function scoreTimeline(timelineBand: LeadDraft['timelineBand']) {
   if (!timelineBand) {
     return 0;
+  }
+
+  if (isUncertainAnswer(timelineBand)) {
+    return 1;
   }
 
   // Free-text timeline: treat fast-turnaround phrasing ("3 weeks", "asap",

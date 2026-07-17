@@ -169,13 +169,31 @@ function matchesRefusal(reply: string, userMessage: string): string | null {
 }
 
 const MAX_REPLY_LENGTH = 600;
+const INTERNAL_STATUS_REPLY = "I've recorded the brief details you shared. We can continue with the next question or review the brief.";
+
+const INTERNAL_STATUS_TERMS = [
+  /\bscore\b/i,
+  /\bqualified\b/i,
+  /\bunqualified\b/i,
+  /\bmisfit\b/i,
+  /\bCRM\b/i,
+  /\bTelegram\b/i,
+  /\brevision\b/i
+];
+
+function assertsInternalStatus(reply: string): boolean {
+  return INTERNAL_STATUS_TERMS.some((term) => term.test(reply));
+}
 
 export function sanitizeReply(
   rawReply: string,
   userMessage: string,
-  options?: { toolCallArguments?: Record<string, unknown> }
+  options?: { toolCallArguments?: Record<string, unknown>; enforceInternalLanguage?: boolean }
 ): { reply: string; draft: Record<string, unknown>; overridden: boolean } {
   const { displayText, draft: proseDraft } = parseAssistantReply(rawReply);
+  if (options?.enforceInternalLanguage !== false && assertsInternalStatus(displayText)) {
+    return { reply: INTERNAL_STATUS_REPLY, draft: {}, overridden: true };
+  }
   const refusal = matchesRefusal(displayText, userMessage);
   if (refusal) return { reply: refusal, draft: {}, overridden: true };
 

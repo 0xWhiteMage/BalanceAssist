@@ -13,23 +13,26 @@ export type EventResponse = {
   eventName: string;
 };
 
-export type FinalizeLeadResponse = {
-  ok: boolean;
-  code?: string;
-  sessionId: string;
-  qualificationStatus: string;
-  persisted?: boolean;
-  queued?: boolean;
-  delivered?: boolean;
-  retryable?: boolean;
-  handoffId?: string;
-  score?: number | null;
-  recommendedNextStep?: string | null;
-  crmRecordId?: string;
-  crmQueued?: boolean;
-  crmRevision?: number;
-  approvedDraftVersion?: number;
-};
+export type FinalizeLeadResponse =
+  | {
+      ok: true;
+      sessionId: string;
+      qualificationStatus: string | null;
+      persisted: true;
+      queued: boolean;
+      delivered: boolean;
+      retryable: boolean;
+      handoffId?: string;
+      score?: number | null;
+      recommendedNextStep?: string | null;
+      crmRecordId?: string;
+      crmQueued: boolean;
+      crmRevision?: number;
+      approvedDraftVersion: number;
+      approvalInputHash: string;
+      approvedReferenceSetHash: string;
+    }
+  | { ok: true; sessionId: string; persisted: false; reason: string };
 
 const REQUEST_TIMEOUT_MS = 10000;
 
@@ -144,7 +147,19 @@ export async function logEvent(payload: {
 }
 
 export async function finalizeLead(payload: { sessionId: string }): Promise<FinalizeLeadResponse | null> {
-  return postJson<FinalizeLeadResponse>('/api/leads/finalize', payload);
+  try {
+    const response = await fetchWithTimeout('/api/leads/finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+    if (!response.ok) return null;
+    const parsed = finalizeLeadResponseSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function recordProducerTransferConsent(sessionId: string): Promise<boolean> {
@@ -346,6 +361,7 @@ export async function requestProjectDeletion(sessionId: string): Promise<{ ok: b
 
 export type ProjectDraftResponse = {
   draft: Record<string, string>;
+  provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
   draftVersion: number;
   fieldCount: number;
   referenceLinks?: ReferenceLink[];
@@ -355,6 +371,42 @@ export type ProjectDraftResponse = {
   approvedReferenceSetHash?: string;
   crmRevision?: number;
 };
+
+const versionedDraftFieldSchema = z.object({
+  value: z.string(),
+  provenance: z.enum(['user-stated', 'inferred', 'confirmed', 'cleared']),
+  updatedAt: z.string()
+}).strict();
+const versionedDraftSchema = z.record(versionedDraftFieldSchema);
+const projectReferenceLinkSchema = z.object({
+  id: z.string(),
+  sessionId: z.string().optional(),
+  url: z.string(),
+  kind: z.enum(['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other'])
+}).strict();
+const projectDraftBaseFields = {
+  draft: versionedDraftSchema,
+  draftVersion: z.number().int().nonnegative(),
+  fieldCount: z.number().int().nonnegative()
+};
+const projectDraftGetResponseSchema = z.object({
+  sessionId: z.string(),
+  ...projectDraftBaseFields,
+  referenceLinks: z.array(projectReferenceLinkSchema).optional(),
+  approvedDraftVersion: z.number().int().nonnegative().optional(),
+  approvalInputHash: z.string().optional(),
+  canonicalReferenceSetHash: z.string().optional(),
+  approvedReferenceSetHash: z.string().optional(),
+  crmRevision: z.number().int().nonnegative().optional()
+}).strict();
+const projectDraftUpdateResponseSchema = z.object({
+  sessionId: z.string(),
+  ...projectDraftBaseFields
+}).strict();
+const projectDraftConflictResponseSchema = z.object({
+  error: z.string(),
+  ...projectDraftBaseFields
+}).strict();
 
 function flattenDraftValues(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object') {
@@ -376,6 +428,19 @@ function flattenDraftValues(value: unknown): Record<string, string> {
   return values;
 }
 
+function flattenDraftProvenance(value: unknown): NonNullable<ProjectDraftResponse['provenance']> {
+  if (!value || typeof value !== 'object') return {};
+  const provenance: NonNullable<ProjectDraftResponse['provenance']> = {};
+  for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+    if (!field || typeof field !== 'object') continue;
+    const fieldProvenance = (field as { provenance?: unknown }).provenance;
+    if (fieldProvenance === 'user-stated' || fieldProvenance === 'inferred' || fieldProvenance === 'confirmed' || fieldProvenance === 'cleared') {
+      provenance[key] = fieldProvenance;
+    }
+  }
+  return provenance;
+}
+
 export async function fetchProjectDraft(sessionId: string): Promise<ProjectDraftResponse | null> {
   try {
     const response = await fetchWithTimeout(`/api/projects/${sessionId}/draft`, { cache: 'no-store' });
@@ -383,12 +448,15 @@ export async function fetchProjectDraft(sessionId: string): Promise<ProjectDraft
       return null;
     }
 
-    const data = (await response.json()) as ProjectDraftResponse & { draft?: unknown; draftVersion?: number; fieldCount?: number };
+    const parsed = projectDraftGetResponseSchema.safeParse(await response.json());
+    if (!parsed.success || parsed.data.sessionId !== sessionId) return null;
+    const data = parsed.data;
     return {
       draft: flattenDraftValues(data.draft),
-      draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
-      referenceLinks: Array.isArray(data.referenceLinks) ? data.referenceLinks : [],
+      provenance: flattenDraftProvenance(data.draft),
+      draftVersion: data.draftVersion,
+      fieldCount: data.fieldCount,
+      referenceLinks: (data.referenceLinks ?? []).map((link) => ({ ...link, sessionId: link.sessionId ?? sessionId })),
       approvedDraftVersion: data.approvedDraftVersion,
       approvalInputHash: data.approvalInputHash,
       canonicalReferenceSetHash: data.canonicalReferenceSetHash,
@@ -416,17 +484,18 @@ export async function updateProjectDraft(
       body: JSON.stringify({ expectedDraftVersion, fields })
     });
 
-    const data = (await response.json().catch(() => null)) as
-      | { draft?: unknown; draftVersion?: number; fieldCount?: number }
-      | null;
+    const data = await response.json().catch(() => null);
 
     if (response.status === 409 && data) {
+      const parsed = projectDraftConflictResponseSchema.safeParse(data);
+      if (!parsed.success) return { ok: false, conflict: false };
       return {
         ok: false,
         conflict: true,
-        draft: flattenDraftValues(data.draft),
-        draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-        fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
+        draft: flattenDraftValues(parsed.data.draft),
+        provenance: flattenDraftProvenance(parsed.data.draft),
+        draftVersion: parsed.data.draftVersion,
+        fieldCount: parsed.data.fieldCount,
         referenceLinks: []
       };
     }
@@ -434,12 +503,15 @@ export async function updateProjectDraft(
     if (!response.ok || !data) {
       return { ok: false, conflict: false };
     }
+    const parsed = projectDraftUpdateResponseSchema.safeParse(data);
+    if (!parsed.success || parsed.data.sessionId !== sessionId) return { ok: false, conflict: false };
 
     return {
       ok: true,
-      draft: flattenDraftValues(data.draft),
-      draftVersion: typeof data.draftVersion === 'number' ? data.draftVersion : 0,
-      fieldCount: typeof data.fieldCount === 'number' ? data.fieldCount : Object.keys(flattenDraftValues(data.draft)).length,
+      draft: flattenDraftValues(parsed.data.draft),
+      provenance: flattenDraftProvenance(parsed.data.draft),
+      draftVersion: parsed.data.draftVersion,
+      fieldCount: parsed.data.fieldCount,
       referenceLinks: []
     };
   } catch {
@@ -477,31 +549,67 @@ export type ChatRequestPayload = {
   };
 };
 
-export type ChatResponse = {
+type ChatResponseBase = {
   replies: ChatReplyItem[];
-  outcome?: 'confidential_diversion' | 'provider_unavailable';
-  error?: 'Chat service unavailable';
-  detail?: 'chat_provider_unavailable';
   draftUpdates: Record<string, string | boolean>;
   briefReady: boolean;
   sharedWork: ChatSharedWork | null;
 };
 
-const chatProviderUnavailableSchema = z.object({
-  error: z.literal('Chat service unavailable'),
-  detail: z.literal('chat_provider_unavailable')
-});
+type CanonicalChatResponse = ChatResponseBase & {
+  outcome: 'draft_persisted' | 'draft_conflict';
+  canonicalDraft: Record<string, string>;
+  canonicalProvenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
+  draftVersion: number;
+  currentStage: 'project' | 'audience' | 'planning' | 'references-contact';
+  stageRecaps: string[];
+};
 
-const chatResponseSchema = z.object({
-  message: z.string().optional(),
-  messages: z.array(z.string()).optional(),
-  outcome: z.literal('confidential_diversion').optional(),
-  draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(),
-  briefReady: z.boolean().optional(),
-  sharedWork: z.object({ entries: z.array(z.object({
+export type ChatResponse =
+  | CanonicalChatResponse
+  | (ChatResponseBase & { outcome: 'non_persistence' })
+  | (ChatResponseBase & { outcome: 'confidential_diversion' })
+  | (ChatResponseBase & { outcome: 'draft_save_failed' })
+  | (ChatResponseBase & {
+      outcome: 'provider_unavailable';
+      error: 'Chat service unavailable';
+      detail: 'chat_provider_unavailable';
+    });
+
+const clientReplyFields = {
+  message: z.string().min(1).optional(),
+  messages: z.array(z.string().min(1)).min(1).optional()
+};
+const clientSharedWorkSchema = z.object({ entries: z.array(z.object({
     title: z.string(), url: z.string(), description: z.string().optional(), image_url: z.string().optional(),
     category: z.enum(['reference', 'mood', 'pitch']).optional(), slug: z.string(), clients: z.string().optional(), year: z.number().nullable().optional()
-  })) }).optional()
+  })) });
+const clientCanonicalFields = {
+  canonicalDraft: z.record(z.string()),
+  canonicalProvenance: z.record(z.enum(['user-stated', 'inferred', 'confirmed', 'cleared'])).optional(),
+  draftVersion: z.number().int().nonnegative(),
+  currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']),
+  stageRecaps: z.array(z.string()),
+  briefReady: z.boolean()
+};
+const chatResponseSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal('draft_persisted'), ...clientReplyFields, ...clientCanonicalFields,
+    draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(), sharedWork: clientSharedWorkSchema.optional(),
+    reviewPrompt: z.string().nullable().optional(), missingFields: z.array(z.string()).optional(), truncated: z.boolean().optional()
+  }).strict(),
+  z.object({ outcome: z.literal('draft_conflict'), ...clientReplyFields, ...clientCanonicalFields }).strict(),
+  z.object({ outcome: z.literal('non_persistence'), ...clientReplyFields, sharedWork: clientSharedWorkSchema.optional() }).strict(),
+  z.object({ outcome: z.literal('confidential_diversion'), ...clientReplyFields }).strict(),
+  z.object({ outcome: z.literal('draft_save_failed'), ...clientReplyFields }).strict(),
+  z.object({
+    outcome: z.literal('provider_unavailable'), error: z.literal('Chat service unavailable'),
+    detail: z.literal('chat_provider_unavailable')
+  }).strict()
+]).superRefine((value, context) => {
+  if (value.outcome !== 'provider_unavailable' && !value.message && !value.messages) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Either message or messages must be provided' });
+  }
 });
 
 export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResponse | null> {
@@ -526,24 +634,27 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
     return null;
   }
 
-  if (response.status === 503) {
-    const unavailable = chatProviderUnavailableSchema.safeParse(responseBody);
-    if (!unavailable.success) return null;
+  const parsed = chatResponseSchema.safeParse(responseBody);
+  if (!parsed.success) return null;
+  const data = parsed.data;
+  const validStatus =
+    (response.status === 200 && ['draft_persisted', 'non_persistence', 'confidential_diversion'].includes(data.outcome)) ||
+    (response.status === 409 && data.outcome === 'draft_conflict') ||
+    (response.status === 500 && data.outcome === 'draft_save_failed') ||
+    (response.status === 503 && data.outcome === 'provider_unavailable');
+  if (!validStatus) return null;
+
+  if (data.outcome === 'provider_unavailable') {
     return {
       outcome: 'provider_unavailable',
-      error: unavailable.data.error,
-      detail: unavailable.data.detail,
+      error: data.error,
+      detail: data.detail,
       replies: [],
       draftUpdates: {},
       briefReady: false,
       sharedWork: null
     };
   }
-  if (!response.ok) return null;
-
-  const parsed = chatResponseSchema.safeParse(responseBody);
-  if (!parsed.success) return null;
-  const data = parsed.data;
 
   const textChunks: string[] = (() => {
     if (Array.isArray(data.messages) && data.messages.length > 0) {
@@ -555,13 +666,52 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
     return [];
   })();
 
-  return {
+  const base = {
     replies: textChunks.map((text) => ({ text })),
     outcome: data.outcome,
-    draftUpdates: data.draftUpdates ?? {},
-    briefReady: Boolean(data.briefReady),
-    sharedWork: data.sharedWork ?? null
+    draftUpdates: 'draftUpdates' in data ? data.draftUpdates ?? {} : {},
+    briefReady: data.outcome === 'draft_persisted' || data.outcome === 'draft_conflict' ? data.briefReady : false,
+    sharedWork: 'sharedWork' in data ? data.sharedWork ?? null : null
   };
+  if (data.outcome === 'draft_persisted' || data.outcome === 'draft_conflict') {
+    return {
+      ...base,
+      outcome: data.outcome,
+      canonicalDraft: data.canonicalDraft,
+      canonicalProvenance: data.canonicalProvenance,
+      draftVersion: data.draftVersion,
+      currentStage: data.currentStage,
+      stageRecaps: data.stageRecaps
+    };
+  }
+  return { ...base, outcome: data.outcome };
 }
 import { z } from 'zod';
+
+const finalizeLeadResponseSchema = z.discriminatedUnion('persisted', [
+  z.object({
+    ok: z.literal(true),
+    sessionId: z.string(),
+    qualificationStatus: z.string().nullable(),
+    persisted: z.literal(true),
+    queued: z.boolean(),
+    delivered: z.boolean(),
+    retryable: z.boolean(),
+    handoffId: z.string().optional(),
+    score: z.number().nullable().optional(),
+    recommendedNextStep: z.string().nullable().optional(),
+    crmRecordId: z.string().optional(),
+    crmQueued: z.boolean(),
+    crmRevision: z.number().int().nonnegative().optional(),
+    approvedDraftVersion: z.number().int().nonnegative(),
+    approvalInputHash: z.string().min(1),
+    approvedReferenceSetHash: z.string().min(1)
+  }).strict(),
+  z.object({
+    ok: z.literal(true),
+    sessionId: z.string(),
+    persisted: z.literal(false),
+    reason: z.string()
+  }).strict()
+]);
 import { CONSENT_VERSION } from '@/lib/privacy/notice';

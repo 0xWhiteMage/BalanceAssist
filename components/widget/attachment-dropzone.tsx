@@ -5,7 +5,6 @@ import { brandTokens } from '@/lib/brand-tokens';
 import {
   createAttachmentConsent,
   hasAnalysisConsent,
-  hasProducerShareConsent,
   type AttachmentConsent
 } from '@/lib/uploads/consent';
 import {
@@ -20,8 +19,9 @@ import {
   CONFIDENTIAL_INTAKE_RESPONSE
 } from '@/lib/privacy/confidential-intent';
 
-export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
+export type ReferenceLink = { id?: string; sessionId?: string; kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
+type ReferenceMutationOutcome = { status: 'saved' } | { status: 'failed'; message: string };
 
 type FileStatus = 'queued' | 'validating' | 'stored' | 'failed' | 'retryable';
 
@@ -48,7 +48,7 @@ export function AttachmentDropzone({
   consent,
   messageContext = ''
 }: {
-  onAddLink: (link: ReferenceLink) => void;
+  onAddLink: (url: string) => Promise<ReferenceMutationOutcome>;
   onAddFile: (file: ReferenceFile) => void;
   onFileAnalyzed?: (fileName: string, extractedText: string) => void;
   sessionId?: string | null;
@@ -121,13 +121,6 @@ export function AttachmentDropzone({
     });
   }
 
-  function setProducerShare(nextChecked: boolean) {
-    updateConsent({
-      aiAnalysis: effectiveConsent?.aiAnalysis === true,
-      producerShare: nextChecked
-    });
-  }
-
   function updateFileStatus(fileName: string, status: FileStatus, error?: string) {
     setQueuedFiles((prev) =>
       prev.map((qf) => (qf.file.name === fileName ? { ...qf, status, error } : qf))
@@ -155,35 +148,20 @@ export function AttachmentDropzone({
     e.preventDefault();
     const kind = classifyUrl(url);
     if (!kind) {
-      setError('Not a valid URL.');
+      setError('Enter a valid public HTTPS reference URL.');
       return;
     }
-
-    if (!hasProducerShareConsent(effectiveConsent ?? null)) {
-      setError('Please confirm that the Balance team may review this link before adding it.');
-      return;
+    try {
+      const outcome = await onAddLink(url.trim());
+      if (outcome.status !== 'saved') {
+        setError(outcome.message);
+        return;
+      }
+      setUrl('');
+      setError(null);
+    } catch {
+      setError('The HTTPS reference link could not be saved. Please retry.');
     }
-
-    if (!await persistConsent('producer_transfer')) return;
-
-    const res = await fetch('/api/attachments/link', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url,
-        kind,
-        sessionId: sessionId ?? undefined
-      })
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      setError(body?.error ?? 'Failed to add link.');
-      return;
-    }
-    onAddLink({ kind, url });
-    setUrl('');
-    setError(null);
   }
 
   async function handleFiles(input: HTMLInputElement) {
@@ -339,15 +317,6 @@ export function AttachmentDropzone({
           Add link
         </button>
       </form>
-      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: brandTokens.colors.lightText }}>
-        <input
-          type="checkbox"
-          checked={effectiveConsent?.producerShare === true}
-          onChange={(event) => setProducerShare(event.target.checked)}
-          disabled={consent !== undefined}
-        />
-        <span>The Balance team may review links I add here.</span>
-      </label>
 
       <div
         id="private-analysis-upload-disclosure"

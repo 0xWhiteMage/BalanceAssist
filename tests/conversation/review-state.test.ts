@@ -1,4 +1,4 @@
-import { isBriefReadyForApproval, REVIEW_PROMPT, missingReviewFields } from '@/lib/conversation/review-state';
+import { getReviewPrompt, isBriefReadyForApproval, missingReviewFields } from '@/lib/conversation/review-state';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 
@@ -68,6 +68,26 @@ test('ready with only projectScope (no service)', () => {
   expect(missingReviewFields(draft)).toEqual([]);
 });
 
+test('ready with only projectObjective and a contact detail', () => {
+  const draft: Partial<LeadDraft> = {
+    projectObjective: 'Increase awareness',
+    contactEmail: 'jayden@example.com'
+  };
+
+  expect(isBriefReadyForApproval(draft)).toBe(true);
+  expect(missingReviewFields(draft)).toEqual([]);
+});
+
+test('legacy scopePolished remains visible data but is not readiness evidence', () => {
+  const draft: Partial<LeadDraft> = {
+    scopePolished: 'AI interpretation of an otherwise empty brief',
+    contactEmail: 'jayden@example.com'
+  };
+
+  expect(isBriefReadyForApproval(draft)).toBe(false);
+  expect(missingReviewFields(draft)).toEqual(expect.arrayContaining(['projectScope', 'projectObjective', 'service']));
+});
+
 test('ready with only contactName (no email)', () => {
   const draft: Partial<LeadDraft> = {
     service: 'production',
@@ -97,12 +117,26 @@ test('ready with unknown timeline and budget', () => {
   expect(missingReviewFields(draft)).toEqual([]);
 });
 
+test('optional uncertainty values do not affect semantic readiness', () => {
+  const draft: Partial<LeadDraft> = {
+    projectScope: 'Launch film',
+    contactName: 'Jayden',
+    audience: 'Not sure yet',
+    intendedOutputs: 'Skip',
+    timelineBand: 'Prefer not to share',
+    budgetBand: 'Not sure yet'
+  };
+
+  expect(isBriefReadyForApproval(draft)).toBe(true);
+});
+
 test('missingReviewFields returns individual empty required fields', () => {
   const draft = createDefaultLeadDraft();
   const missing = missingReviewFields(draft);
   expect(missing).toEqual(
     expect.arrayContaining([
       'projectScope',
+      'projectObjective',
       'service',
       'contactName',
       'contactEmail'
@@ -123,6 +157,7 @@ test('missingReviewFields does not require contactCompany, timelineBand, or budg
   expect(missing).not.toContain('budgetBand');
 });
 
-test('exports the review prompt', () => {
-  expect(REVIEW_PROMPT).toBe('Your brief is ready. Review it in the panel on the left.');
+test('uses viewport-correct review prompts', () => {
+  expect(getReviewPrompt(false)).toBe('Your core brief is ready. Review it in the brief panel.');
+  expect(getReviewPrompt(true)).toBe('Your core brief is ready. Review it in the Brief tab.');
 });

@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
+import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -36,6 +37,7 @@ test('refuses prompt-injection attempts', () => {
 test('does not reset greeting mid-brief', () => {
   const reply = getLocalResponse('hello', {
     draft: {
+      ...createDefaultLeadDraft(),
       service: 'production',
       projectType: '3D animation',
       projectScope: '30-second animation for social media',

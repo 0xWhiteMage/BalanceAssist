@@ -15,24 +15,28 @@ import {
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
 import { ReviewPanel } from '@/components/widget/review-panel';
-import { AttachmentDropzone, type ReferenceFile, type ReferenceLink } from '@/components/widget/attachment-dropzone';
+import { IntakeStageProgress } from '@/components/widget/intake-stage-progress';
+import { AttachmentDropzone, type ReferenceFile } from '@/components/widget/attachment-dropzone';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
-import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from '@/lib/conversation/extract';
+import { getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
-import { detectProjectIntent } from '@/lib/conversation/project-intent';
-import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { addReferenceLink, chatRequest, createSession, deleteReferenceLink, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
-import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
+import { getReviewPrompt, isBriefReadyForApproval } from '@/lib/conversation/review-state';
+import { getCurrentIntakeStage } from '@/lib/conversation/intake-stage';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
+import { classifyUrl, getReferencePresenceStatus, normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
+import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
+const OPTIONAL_ANSWER_ACTIONS = ['Not sure yet', 'Skip', 'Prefer not to share'] as const;
 
 let messageCounter = 0;
 function nextId() {
@@ -62,31 +66,6 @@ function resolveBotTexts(stepId: ConversationStepId, draft: LeadDraft): string[]
   const step = conversationSteps[stepId];
   const raw = step.botMessages;
   return typeof raw === 'function' ? raw(draft) : raw;
-}
-
-function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): string | null {
-  const lines = getDraftSummaryLines(draft);
-  if (lines.length === 0) return null;
-
-  if (currentStep === 'scope' || currentStep === 'service') {
-    return `So far I have:\n\n${lines
-      .filter((line) => line.startsWith('Project scope:') || line.startsWith('Service:'))
-      .map((line) => `• ${line}`)
-      .join('\n')}\n\nAnything to correct before we move on?`;
-  }
-
-  if (currentStep === 'timeline' || currentStep === 'budget') {
-    return `So far I have:\n\n${lines
-      .filter((line) => line.startsWith('Timeline:') || line.startsWith('Budget:') || line.startsWith('Service:'))
-      .map((line) => `• ${line}`)
-      .join('\n')}\n\nDoes that look right?`;
-  }
-
-  if (currentStep === 'contact-name' || currentStep === 'contact-email') {
-    return `I now have the core brief:\n\n${lines.map((line) => `• ${line}`).join('\n')}\n\nAnything you'd like me to correct before I summarise it for the team?`;
-  }
-
-  return null;
 }
 
 function createAttachment(file: File) {
@@ -120,6 +99,10 @@ function cleanupAttachmentPreviews(messages: ChatMessage[]) {
 
 const CAPTURED_FIELD_KEYS_FOR_LLM = [
   'projectScope',
+  'projectObjective',
+  'audience',
+  'intendedOutputs',
+  'referencesStatus',
   'projectType',
   'service',
   'timelineBand',
@@ -156,8 +139,8 @@ export function WidgetOverlay({
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
   const sessionDraft = useWidgetSessionDraft({ createSession, getCurrentSession, fetchProjectDraft, updateProjectDraft, resetProject, requestProjectDeletion });
   const {
-    draft, setDraft, noticeConsent, setNoticeConsent, hasProjectIntent, setHasProjectIntent,
-    briefApproved, setBriefApproved, sessionId, sessionUnavailable, isSessionExpired,
+    draft, noticeConsent, setNoticeConsent, hasProjectIntent,
+    briefApproved, sessionId, sessionUnavailable, isSessionExpired,
     draftVersion, setDraftVersion, approval
   } = sessionDraft;
   const [isTyping, setIsTyping] = useState(false);
@@ -174,13 +157,13 @@ export function WidgetOverlay({
   } = teamRelay;
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
   const [railMode, setRailMode] = useState<'essentials' | 'summary'>('essentials');
-  const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
+  const referenceLinks = sessionDraft.referenceLinks;
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
-  const [crmQueued, setCrmQueued] = useState(false);
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const submitInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,7 +199,6 @@ export function WidgetOverlay({
   humanScheduleRequestOpenRef.current = humanScheduleRequestOpen;
 
   const applyCanonicalDraftState = sessionDraft.applyCanonicalDraft;
-  const hydrateCanonicalDraft = sessionDraft.hydrateDraft;
   const { messages: teamMessages, reset: resetTeamRelay } = teamRelay;
 
 
@@ -495,26 +477,26 @@ export function WidgetOverlay({
     setHasStarted(false);
     setEntryPath(null);
     setRailMode('essentials');
-    setReferenceLinks([]);
     setReferenceFiles([]);
     setAttachmentOpen(false);
     setView('chat');
     setCalendlyUrl(null);
     setAllowAttachment(false);
     setConfidentialRecoveryOpen(false);
+    setApprovalError(null);
     confidentialDiversionRef.current = false;
     cancelRef.current = false;
   }
 
   async function handleLLMResponse(history: ChatMessage[]) {
     if (confidentialDiversionRef.current) return;
+    const draftOperation = sessionDraft.beginDraftOperation();
     const aiProcessingGeneration = aiProcessingGenerationRef.current;
     const isCurrent = () =>
       aiProcessingGeneration === aiProcessingGenerationRef.current &&
+      sessionDraft.isDraftOperationCurrent(draftOperation) &&
       !cancelRef.current &&
       !confidentialDiversionRef.current;
-    const latestUserText = [...history].reverse().find((message) => message.sender === 'user')?.text ?? '';
-
     try {
       const llmMessages = history
         .filter((message) => message.sender === 'user' && message.text.trim().length > 0)
@@ -543,7 +525,7 @@ export function WidgetOverlay({
       }
 
       if (data.outcome === 'provider_unavailable') {
-        await botSay(CHAT_UNAVAILABLE_MESSAGE);
+        await botSay(CHAT_UNAVAILABLE_MESSAGE, { isValid: isCurrent });
         if (!isCurrent()) return;
         return;
       }
@@ -552,12 +534,16 @@ export function WidgetOverlay({
         confidentialDiversionRef.current = true;
         aiProcessingGenerationRef.current += 1;
         const diversionGeneration = aiProcessingGenerationRef.current;
+        const diversionIsCurrent = () =>
+          diversionGeneration === aiProcessingGenerationRef.current &&
+          sessionDraft.isDraftOperationCurrent(draftOperation) &&
+          !cancelRef.current;
         if (advanceTimerRef.current) {
           clearTimeout(advanceTimerRef.current);
           advanceTimerRef.current = null;
         }
         for (const reply of data.replies) {
-          await botSay(reply.text);
+          await botSay(reply.text, { isValid: diversionIsCurrent });
           if (
             diversionGeneration !== aiProcessingGenerationRef.current ||
             cancelRef.current
@@ -568,11 +554,26 @@ export function WidgetOverlay({
         return;
       }
 
+      if (data.outcome === 'draft_save_failed') {
+        for (const reply of data.replies) await botSay(reply.text, { isValid: isCurrent });
+        return;
+      }
+
+      if (data.outcome === 'draft_conflict') {
+        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation, data.canonicalProvenance)) return;
+        setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft));
+        for (const reply of data.replies) await botSay(reply.text, { isValid: isCurrent });
+        return;
+      }
+
       const replyChunks: string[] = (() => {
-        if (data.replies.length > 0) return data.replies.map((reply) => reply.text);
-        return [CHAT_UNAVAILABLE_MESSAGE];
+        const replies = data.replies.length > 0
+          ? data.replies.map((reply) => reply.text)
+          : [CHAT_UNAVAILABLE_MESSAGE];
+        return data.briefReady
+          ? replies.slice(0, -1)
+          : replies;
       })();
-      const draftUpdates: Record<string, string | boolean> = data.draftUpdates ?? {};
       const sharedWork = data.sharedWork
         ? {
             entries: data.sharedWork.entries.map((entry) => ({
@@ -584,43 +585,33 @@ export function WidgetOverlay({
           }
         : null;
 
-      if (Object.keys(draftUpdates).length > 0) {
-        const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
-        for (const [key, value] of Object.entries(draftUpdates)) {
-          if (typeof value === 'boolean') {
-            (merged as Record<string, unknown>)[key] = value;
-          } else if (value && value.trim().length > 0) {
-            (merged as Record<string, unknown>)[key] = value;
-          }
-        }
-        if (!isCurrent()) return;
-        setDraft(merged);
-        if (!isCurrent()) return;
-        setHasProjectIntent(detectProjectIntent(merged));
-        if (!isCurrent()) return;
-        setBriefApproved(false);
-
-        const nextStep = getNextConversationStep(merged);
+      if (data.outcome === 'draft_persisted') {
+        if (!applyCanonicalDraftState(data.canonicalDraft, data.draftVersion, undefined, draftOperation, data.canonicalProvenance)) return;
+        const nextStep = getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft);
         if (nextStep !== stepRef.current) {
           if (!isCurrent()) return;
           setCurrentStep(nextStep);
-        }
-        // The chat route persists authenticated updates. Replace optimistic values with its canonical version.
-        if (sessionId) {
-          await hydrateCanonicalDraft(sessionId, isCurrent);
-          if (!isCurrent()) return;
         }
       }
 
       for (let i = 0; i < replyChunks.length; i++) {
         const isFirst = i === 0;
         const chunk = replyChunks[i];
-        await botSay(chunk, isFirst && sharedWork ? { sharedWork } : undefined);
+        await botSay(chunk, {
+          ...(isFirst && sharedWork ? { sharedWork } : {}),
+          isValid: isCurrent
+        });
         if (!isCurrent()) return;
+      }
+      if (data.outcome === 'draft_persisted') {
+        for (const recap of data.stageRecaps) {
+          await botSay(recap, { isValid: isCurrent });
+          if (!isCurrent()) return;
+        }
       }
     } catch {
       if (!isCurrent()) return;
-      await botSay(CHAT_UNAVAILABLE_MESSAGE);
+      await botSay(CHAT_UNAVAILABLE_MESSAGE, { isValid: isCurrent });
       if (!isCurrent()) return;
     }
   }
@@ -673,62 +664,49 @@ export function WidgetOverlay({
     }
   }
 
-  function handleDraftEdit(key: string, value: string) {
+  async function handleDraftEdit(key: string, value: string) {
     const editableKeys: ReadonlySet<keyof LeadDraft> = new Set([
-      'projectScope',
-      'projectType',
-      'service',
-      'timelineBand',
-      'budgetBand',
-      'contactName',
-      'contactCompany',
-      'contactEmail'
+      'projectScope', 'projectObjective', 'audience', 'intendedOutputs', 'scopePolished', 'projectType',
+      'service', 'timelineBand', 'budgetBand', 'contactName', 'contactCompany', 'contactEmail'
     ]);
-    if (!editableKeys.has(key as keyof LeadDraft)) return;
+    if (!editableKeys.has(key as keyof LeadDraft)) return { status: 'failed', message: 'This field cannot be edited.' } as const;
+    if (!sessionId) return { status: 'failed', message: 'This edit cannot be saved without an active session.' } as const;
 
-    const nextDraft = { ...draft, [key]: value } as LeadDraft;
-    setDraft(nextDraft);
-    setHasProjectIntent(detectProjectIntent(nextDraft));
-    setBriefApproved(false);
-
-    const nextStep = getNextConversationStep(nextDraft);
-    if (nextStep !== currentStep) {
-      setCurrentStep(nextStep);
-    }
-
-    const activeSessionId = sessionId;
-    if (!activeSessionId) {
-      return;
-    }
-
-    const provenance = value.trim().length > 0 ? 'confirmed' : 'cleared';
-    void updateProjectDraft(
-      activeSessionId,
-      [{ field: key, value, provenance }],
-      draftVersionRef.current
-    ).then(async (result) => {
-      if (!result) {
-        return;
-      }
-
-      if (result.ok) {
-        applyCanonicalDraftState(result.draft, result.draftVersion);
-        return;
-      }
-
-      if (result.conflict) {
-        applyCanonicalDraftState(result.draft, result.draftVersion);
-        await botSay('This brief changed elsewhere, so I reloaded the latest saved version before applying more edits.');
-        return;
-      }
-
-      await botSay('Sorry — I could not save that brief edit. Please try again.');
-    });
+    const operation = sessionDraft.beginDraftOperation();
+    const result = await sessionDraft.updateDraft(key, value, operation);
+    if (!result) return { status: 'failed', message: 'This edit was interrupted. Please retry.' } as const;
+    if (result.status === 'saved') setCurrentStep(getNextConversationStep(sessionDraft.draft));
+    return result;
   }
 
-  async function appendReferenceLink(link: ReferenceLink) {
-    setReferenceLinks((prev) => [...prev, link]);
-    setBriefApproved(false);
+  async function addPrivateReference(url: string) {
+    const normalizedUrl = normalizePublicReferenceUrl(url);
+    const kind = normalizedUrl ? classifyUrl(normalizedUrl) : null;
+    if (!normalizedUrl || !kind) return { status: 'failed', message: 'Enter a valid public HTTPS reference URL.' } as const;
+    const activeSessionId = sessionId ?? await ensureSession();
+    if (!activeSessionId) return { status: 'failed', message: 'The reference link could not be saved without an active session.' } as const;
+    const existing = referenceLinks.find((link) => link.url === normalizedUrl);
+    const link = existing ?? await addReferenceLink({ sessionId: activeSessionId, url: normalizedUrl, kind });
+    if (!link) return { status: 'failed', message: 'The HTTPS reference link could not be saved. Please retry.' } as const;
+    if (!existing) sessionDraft.appendReferenceLink(link);
+    const statusResult = await sessionDraft.updateDraft('referencesStatus', 'added');
+    if (statusResult?.status !== 'saved') {
+      return { status: 'failed', message: 'The reference link was saved, but its brief status was not. Retry to finish saving it.' } as const;
+    }
+    await sessionDraft.hydrateDraft(activeSessionId);
+    return { status: 'saved' } as const;
+  }
+
+  async function removePrivateReference(id: string) {
+    if (!await deleteReferenceLink(id)) return { status: 'failed', message: 'The reference link could not be removed. Please retry.' } as const;
+    sessionDraft.removeReferenceLink(id);
+    const remaining = referenceLinks.filter((link) => link.id !== id);
+    const statusResult = await sessionDraft.updateDraft('referencesStatus', getReferencePresenceStatus(remaining));
+    if (statusResult?.status !== 'saved') {
+      return { status: 'failed', message: 'The link was removed, but the brief status was not updated. Please retry.' } as const;
+    }
+    if (sessionId) await sessionDraft.hydrateDraft(sessionId);
+    return { status: 'saved' } as const;
   }
 
   function appendReferenceFile(file: ReferenceFile) {
@@ -750,38 +728,58 @@ export function WidgetOverlay({
   }
 
   async function handleApproveBrief() {
-    if (!sessionDraft.beginApproval()) return;
+    const approvalToken = sessionDraft.beginApproval();
+    if (approvalToken === null) return;
+    setApprovalError(null);
     setTelegramBroadcastStatus('pending');
 
     try {
       const activeSessionId = await ensureSession();
-      if (cancelRef.current) return;
+      if (cancelRef.current) {
+        sessionDraft.finishApproval(approvalToken, 'error');
+        return;
+      }
       if (!activeSessionId) {
-        sessionDraft.finishApproval(false);
+        sessionDraft.finishApproval(approvalToken, 'error');
         setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         return;
       }
 
       if (!await recordProducerTransferConsent(activeSessionId)) {
-        if (cancelRef.current) return;
-        sessionDraft.finishApproval(false);
+        if (cancelRef.current) {
+          sessionDraft.finishApproval(approvalToken, 'error');
+          return;
+        }
+        sessionDraft.finishApproval(approvalToken, 'error');
         setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
         return;
       }
 
       const finalizeResponse = await finalizeLead({ sessionId: activeSessionId });
-      if (cancelRef.current) return;
+      if (cancelRef.current) {
+        sessionDraft.finishApproval(approvalToken, 'error');
+        return;
+      }
       if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
-        sessionDraft.finishApproval(false);
+        sessionDraft.finishApproval(approvalToken, 'error');
         setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         await botSay('Sorry — the brief could not be saved. Please try again or contact the team directly.');
         return;
       }
 
-      sessionDraft.finishApproval(true);
-      sessionDraft.recordApproval(finalizeResponse);
-      setCrmQueued(finalizeResponse.crmQueued === true);
+      const approvalOutcome = sessionDraft.finishApprovalSuccess(approvalToken, finalizeResponse);
+      if (approvalOutcome !== 'approved') {
+        setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief changed while it was being approved. I reloaded the latest saved version; review it and retry.');
+        await sessionDraft.hydrateDraft(activeSessionId);
+        await botSay('The saved brief changed during approval, so I reloaded the latest version. Please review it and retry.');
+        return;
+      }
+      setApprovalError(null);
       if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
       } else if (finalizeResponse.queued === true) {
@@ -790,12 +788,19 @@ export function WidgetOverlay({
         setTelegramBroadcastStatus('unconfigured');
       }
       setCurrentStep('handoff');
-      await botSay('Thanks — your project brief is approved and ready for the Balance team. You can continue refining it, book a call, or talk to the team directly.');
+      await botSay(
+        finalizeResponse.delivered === true
+          ? 'Your brief was delivered to the Balance team.'
+          : finalizeResponse.queued === true
+            ? 'Your brief is queued for the Balance team.'
+            : 'Your brief was saved. Delivery to the Balance team is not yet confirmed.'
+      );
       await advanceStep('handoff', draftRef.current);
     } catch {
+      sessionDraft.finishApproval(approvalToken, 'error');
       if (cancelRef.current) return;
-      sessionDraft.finishApproval(false);
       setTelegramBroadcastStatus('unconfigured');
+      setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
       await botSay('Sorry — something went wrong saving your brief. Please try again.');
     }
   }
@@ -812,22 +817,36 @@ export function WidgetOverlay({
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
 
-    let updatedDraft = draft;
-
-    if (step.freeText || currentStep === 'intro') {
-      updatedDraft = applyTextToDraft(value, draft, currentStep);
-      setDraft(updatedDraft);
-      setBriefApproved(false);
-    } else if (step.field) {
-      updatedDraft = { ...draft, [step.field]: value };
-      setDraft(updatedDraft);
-      setBriefApproved(false);
+    if (currentStep === 'references') {
+      const referencesStatus = value === 'Skip' ? 'skipped' : 'added';
+      if (value !== 'Skip') {
+        const outcome = await addPrivateReference(value);
+        if (outcome.status !== 'saved') {
+          await botSay(`${outcome.message} Please try again, or choose Skip.`);
+          return;
+        }
+      } else {
+        const statusResult = await sessionDraft.updateDraft('referencesStatus', referencesStatus);
+        if (statusResult?.status !== 'saved') {
+          await botSay('I could not save Skip. Please try again.');
+          return;
+        }
+      }
+      if (referencesStatus === 'added') await botSay('Your reference link was saved.');
+      setCurrentStep('contact-name');
+      await advanceStep('contact-name', draftRef.current);
+      return;
     }
+
+    const updatedDraft = draft;
 
     const isLlmIntakeStep =
       currentStep === 'intro' ||
       currentStep === 'scope' ||
+      currentStep === 'objective' ||
       currentStep === 'service' ||
+      currentStep === 'audience' ||
+      currentStep === 'outputs' ||
       currentStep === 'timeline' ||
       currentStep === 'budget' ||
       currentStep === 'contact-name' ||
@@ -843,7 +862,10 @@ export function WidgetOverlay({
     if (
       currentStep === 'intro' ||
       currentStep === 'scope' ||
+      currentStep === 'objective' ||
       currentStep === 'service' ||
+      currentStep === 'audience' ||
+      currentStep === 'outputs' ||
       currentStep === 'timeline' ||
       currentStep === 'budget' ||
       currentStep === 'contact-name' ||
@@ -866,11 +888,6 @@ export function WidgetOverlay({
         eventName: 'step_advanced',
         properties: { from: currentStep, to: nextStepId }
       });
-    }
-
-    const summary = getSectionSummary(currentStep, updatedDraft);
-    if (summary) {
-      await botSay(summary, { delay: 250 });
     }
 
     if (nextStepId) {
@@ -908,9 +925,13 @@ export function WidgetOverlay({
       const isIntakeStep =
         currentStep === 'intro' ||
         currentStep === 'scope' ||
+        currentStep === 'objective' ||
         currentStep === 'service' ||
+        currentStep === 'audience' ||
+        currentStep === 'outputs' ||
         currentStep === 'timeline' ||
         currentStep === 'budget' ||
+        currentStep === 'references' ||
         currentStep === 'contact-name' ||
         currentStep === 'contact-email';
 
@@ -980,6 +1001,11 @@ export function WidgetOverlay({
         await ensureSession();
         appendUserMessage(trimmed);
         await handleLLMResponse(messagesRef.current);
+        return;
+      }
+
+      if (!isTeamConnected && currentStep === 'references') {
+        await processFlowAnswer(trimmed);
         return;
       }
 
@@ -1112,7 +1138,7 @@ export function WidgetOverlay({
     await sleep(500);
     if (cancelRef.current) return;
 
-    await botSay(`Got it! I\u2019ve received ${files.length === 1 ? `**${files[0].name}**` : `${files.length} files`}. Our team will review them alongside your project details.`);
+    await botSay(`Got it! I\u2019ve received ${files.length === 1 ? `**${files[0].name}**` : `${files.length} files`} for this temporary draft.`);
     setAllowAttachment(false);
 
     await sleep(400);
@@ -1140,6 +1166,17 @@ export function WidgetOverlay({
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
   const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
+  const briefReady = entryPath === 'ai' && !isTeamConnected && isBriefReadyForApproval(draft);
+  const optionalAnswerActions =
+    currentStep === 'objective' || currentStep === 'timeline'
+      ? [OPTIONAL_ANSWER_ACTIONS[0]]
+      : currentStep === 'audience' || currentStep === 'outputs'
+        ? [OPTIONAL_ANSWER_ACTIONS[0], OPTIONAL_ANSWER_ACTIONS[1]]
+        : currentStep === 'budget'
+          ? [OPTIONAL_ANSWER_ACTIONS[2]]
+          : currentStep === 'references'
+            ? [OPTIONAL_ANSWER_ACTIONS[1]]
+            : [];
 
   return (
     <div
@@ -1159,6 +1196,7 @@ export function WidgetOverlay({
           aria-label="Balance Assist"
           aria-labelledby="balance-assist-dialog-title"
           tabIndex={-1}
+          className="balance-widget-wrap balance-widget-motion"
           style={{
             position: 'absolute',
             bottom: '72px',
@@ -1201,6 +1239,22 @@ export function WidgetOverlay({
 
           <WidgetOverlayHeader isTeamConnected={isTeamConnected} onClose={handleClose} />
 
+          {entryPath === 'ai' && hasStarted && !isTeamConnected && (
+            <IntakeStageProgress currentStageId={getCurrentIntakeStage(draft).id} />
+          )}
+
+          {briefReady && (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label="Brief ready"
+              className="balance-widget-wrap"
+              style={{ padding: '8px 14px', color: brandTokens.colors.warmGold, borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`, fontSize: 11, lineHeight: 1.5 }}
+            >
+              {getReviewPrompt(isMobile)}
+            </div>
+          )}
+
           {isMobile && !isTeamConnected && hasProjectIntent && (
             <div
               role="tablist"
@@ -1214,6 +1268,8 @@ export function WidgetOverlay({
             >
               <button
                 role="tab"
+                type="button"
+                className="balance-widget-action"
                 aria-selected={tabMode === 'chat'}
                 aria-controls="widget-chat-panel"
                 id="widget-chat-tab"
@@ -1238,6 +1294,8 @@ export function WidgetOverlay({
               </button>
               <button
                 role="tab"
+                type="button"
+                className="balance-widget-action"
                 aria-selected={tabMode === 'brief'}
                 aria-controls="widget-brief-panel"
                 id="widget-brief-tab"
@@ -1263,6 +1321,48 @@ export function WidgetOverlay({
             </div>
           )}
 
+          {approvalError && !isTeamConnected && hasProjectIntent && (
+            <div
+              role="alert"
+              className="balance-widget-wrap"
+              style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '8px 14px', color: '#fca5a5', borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`, fontSize: 11 }}
+            >
+              <span style={{ flex: '1 1 180px' }}>{approvalError}</span>
+              <button
+                type="button"
+                className="balance-widget-action"
+                aria-label="Retry sending brief"
+                onClick={() => void handleApproveBrief()}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                className="balance-widget-action balance-widget-wrap"
+                onClick={() => void handleTeamConnect()}
+              >
+                Talk to the team without AI
+              </button>
+              <a href="mailto:hello@balancestudio.tv" style={{ color: '#fca5a5' }}>
+                Email the team
+              </a>
+              <button
+                type="button"
+                className="balance-widget-action"
+                onClick={() => {
+                  if (!configuredCalendlyUrl) {
+                    void botSay('Scheduling is currently unavailable. Please email the Balance team to arrange a time.');
+                    return;
+                  }
+                  setCalendlyUrl(configuredCalendlyUrl);
+                  setView('calendly');
+                }}
+              >
+                Book a call
+              </button>
+            </div>
+          )}
+
           <div
             style={{
               flex: 1,
@@ -1272,12 +1372,15 @@ export function WidgetOverlay({
               position: 'relative'
             }}
           >
-            {!isTeamConnected && hasProjectIntent && !(isMobile && tabMode !== 'brief') && (
+            {!isTeamConnected && hasProjectIntent && (
               <div
                 data-testid="review-rail"
-                id={isMobile ? 'widget-brief-panel' : undefined}
+                id="widget-brief-panel"
                 role={isMobile ? 'tabpanel' : undefined}
                 aria-labelledby={isMobile ? 'widget-brief-tab' : undefined}
+                aria-hidden={isMobile && tabMode !== 'brief' ? 'true' : undefined}
+                hidden={isMobile && tabMode !== 'brief'}
+                inert={isMobile && tabMode !== 'brief' ? true : undefined}
                 style={{
                   width: isMobile ? '100%' : 280,
                   flexShrink: 0,
@@ -1292,13 +1395,15 @@ export function WidgetOverlay({
                   mode={railMode}
                   onApprove={handleApproveBrief}
                   onContinueRefining={() => {
-                    setBriefApproved(false);
                     setRailMode('essentials');
                   }}
                   onChange={handleDraftEdit}
-                  telegramBroadcastStatus={telegramBroadcastStatus}
-                  crmQueued={crmQueued}
-                  crmRevision={approval.crmRevision}
+                  provenance={sessionDraft.fieldProvenance}
+                  referenceLinks={referenceLinks}
+                  onAddReference={addPrivateReference}
+                  onRemoveReference={removePrivateReference}
+                  transferStatus={telegramBroadcastStatus === 'sent' ? 'delivered' : telegramBroadcastStatus === 'queued' ? 'queued' : 'saved'}
+                  approvalInFlight={sessionDraft.approvalInFlight}
                   requiresReapproval={approval.crmRevision !== undefined && !briefApproved}
                   onBookCatchUp={() => {
                     if (!configuredCalendlyUrl) {
@@ -1313,24 +1418,26 @@ export function WidgetOverlay({
               </div>
             )}
 
-            {!(isMobile && tabMode !== 'chat') && (
-              <div
-                id={isMobile ? 'widget-chat-panel' : undefined}
-                role={isMobile ? 'tabpanel' : undefined}
-                aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
-                style={{
-                  flex: 1,
-                  overflowY: 'auto',
-                  overflowX: 'hidden',
-                  padding: '16px 14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '14px',
-                  minWidth: 0,
-                  maxWidth: '100%',
-                  position: 'relative'
-                }}
-              >
+            <div
+              id="widget-chat-panel"
+              role={isMobile ? 'tabpanel' : undefined}
+              aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
+              aria-hidden={isMobile && tabMode !== 'chat' ? 'true' : undefined}
+              hidden={isMobile && tabMode !== 'chat'}
+              inert={isMobile && tabMode !== 'chat' ? true : undefined}
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                padding: '16px 14px',
+                display: isMobile && tabMode !== 'chat' ? 'none' : 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+                minWidth: 0,
+                maxWidth: '100%',
+                position: 'relative'
+              }}
+            >
                 {showNoticeGate ? (
                   <DataUseNotice onConsent={chooseAi} onHuman={chooseHuman} onLeave={handleClose} />
                 ) : showStartChoices ? (
@@ -1430,9 +1537,32 @@ export function WidgetOverlay({
                 )}
 
                 <div ref={messagesEndRef} />
-              </div>
-            )}
+            </div>
           </div>
+
+          {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 12px 0' }}>
+              {optionalAnswerActions.map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  disabled={isTyping}
+                  onClick={() => { void processFlowAnswer(action, action); }}
+                  style={{
+                    minHeight: 44,
+                    padding: '8px 12px',
+                    borderRadius: 999,
+                    border: `1px solid ${brandTokens.colors.border}`,
+                    background: 'transparent',
+                    color: brandTokens.colors.lightText,
+                    cursor: isTyping ? 'default' : 'pointer'
+                  }}
+                >
+                  {action}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Input Bar */}
           {canInteract && (
@@ -1524,8 +1654,23 @@ export function WidgetOverlay({
                           overflowY: 'auto'
                         }}
                       >
+                        {referenceLinks.length > 0 && (
+                          <div aria-label="Saved reference links" style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+                            {referenceLinks.map((link) => (
+                              <a
+                                key={link.url}
+                                href={link.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere' }}
+                              >
+                                {link.url}
+                              </a>
+                            ))}
+                          </div>
+                        )}
                         <AttachmentDropzone
-                          onAddLink={appendReferenceLink}
+                          onAddLink={addPrivateReference}
                           onAddFile={appendReferenceFile}
                           onFileAnalyzed={handleFileAnalyzed}
                           sessionId={sessionId}
@@ -1573,12 +1718,14 @@ export function WidgetOverlay({
                 <input
                   type="text"
                   value={inputValue}
+                  maxLength={MAX_PROJECT_SCOPE_CHARACTERS}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={humanStatus === 'sending'}
                   placeholder={humanRequested ? 'Message the team request...' : 'Type your message...'}
                   style={{
                     flex: 1,
+                    minWidth: 0,
                     padding: '10px 14px',
                     borderRadius: '20px',
                     border: `1px solid ${brandTokens.colors.subtleBorder}`,
@@ -1617,7 +1764,7 @@ export function WidgetOverlay({
                 </button>
               </div>
 
-              <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} onConnect={handleTeamConnect} />
+              <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} calendlyUrl={configuredCalendlyUrl} onConnect={handleTeamConnect} />
               {humanRequested && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} deliveryUnavailable={humanStatus === 'unavailable'} />}
             </>
           )}

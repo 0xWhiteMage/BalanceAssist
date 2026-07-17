@@ -1,7 +1,13 @@
+import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
+
 const ALLOWED_KEYS = [
   'service',
   'projectType',
   'projectScope',
+  'projectObjective',
+  'audience',
+  'intendedOutputs',
+  'referencesStatus',
   'scopePolished',
   'timelineBand',
   'budgetBand',
@@ -66,6 +72,10 @@ export function sanitizeDraftUpdates(input: Record<string, unknown> | null | und
       result[key] = normalizeService(trimmed);
       continue;
     }
+    if (key === 'referencesStatus') {
+      if (trimmed === 'added' || trimmed === 'skipped') result[key] = trimmed;
+      continue;
+    }
     if (key === 'contactEmail' && !EMAIL_REGEX.test(trimmed)) {
       result[key] = '';
       continue;
@@ -76,6 +86,10 @@ export function sanitizeDraftUpdates(input: Record<string, unknown> | null | und
     }
     if (key === 'contactCompany') {
       result[key] = normalizeCompany(trimmed).slice(0, MAX_TEXT_LENGTH);
+      continue;
+    }
+    if (key === 'projectScope') {
+      if (trimmed.length <= MAX_PROJECT_SCOPE_CHARACTERS) result[key] = trimmed;
       continue;
     }
     result[key] = trimmed.slice(0, MAX_TEXT_LENGTH);
