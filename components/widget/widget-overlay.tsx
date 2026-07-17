@@ -18,11 +18,10 @@ import { ReviewPanel } from '@/components/widget/review-panel';
 import { AttachmentDropzone, type ReferenceFile, type ReferenceLink } from '@/components/widget/attachment-dropzone';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
-import { applyTextToDraft, getDraftSummaryLines, getNextConversationStep } from '@/lib/conversation/extract';
+import { getNextConversationStep } from '@/lib/conversation/extract';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
-import { detectProjectIntent } from '@/lib/conversation/project-intent';
 import { addReferenceLink, chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
@@ -64,31 +63,6 @@ function resolveBotTexts(stepId: ConversationStepId, draft: LeadDraft): string[]
   const step = conversationSteps[stepId];
   const raw = step.botMessages;
   return typeof raw === 'function' ? raw(draft) : raw;
-}
-
-function getSectionSummary(currentStep: ConversationStepId, draft: LeadDraft): string | null {
-  const lines = getDraftSummaryLines(draft);
-  if (lines.length === 0) return null;
-
-  if (currentStep === 'scope' || currentStep === 'service') {
-    return `So far I have:\n\n${lines
-      .filter((line) => line.startsWith('Project scope:') || line.startsWith('Service:'))
-      .map((line) => `• ${line}`)
-      .join('\n')}\n\nAnything to correct before we move on?`;
-  }
-
-  if (currentStep === 'timeline' || currentStep === 'budget') {
-    return `So far I have:\n\n${lines
-      .filter((line) => line.startsWith('Timeline:') || line.startsWith('Budget:') || line.startsWith('Service:'))
-      .map((line) => `• ${line}`)
-      .join('\n')}\n\nDoes that look right?`;
-  }
-
-  if (currentStep === 'contact-name' || currentStep === 'contact-email') {
-    return `I now have the core brief:\n\n${lines.map((line) => `• ${line}`).join('\n')}\n\nAnything you'd like me to correct before I summarise it for the team?`;
-  }
-
-  return null;
 }
 
 function createAttachment(file: File) {
@@ -162,7 +136,7 @@ export function WidgetOverlay({
   const [currentStep, setCurrentStep] = useState<ConversationStepId>('intro');
   const sessionDraft = useWidgetSessionDraft({ createSession, getCurrentSession, fetchProjectDraft, updateProjectDraft, resetProject, requestProjectDeletion });
   const {
-    draft, setDraft, noticeConsent, setNoticeConsent, hasProjectIntent, setHasProjectIntent,
+    draft, noticeConsent, setNoticeConsent, hasProjectIntent,
     briefApproved, setBriefApproved, sessionId, sessionUnavailable, isSessionExpired,
     draftVersion, setDraftVersion, approval
   } = sessionDraft;
@@ -180,7 +154,7 @@ export function WidgetOverlay({
   } = teamRelay;
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
   const [railMode, setRailMode] = useState<'essentials' | 'summary'>('essentials');
-  const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([]);
+  const referenceLinks = sessionDraft.referenceLinks;
   const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
@@ -222,7 +196,6 @@ export function WidgetOverlay({
   humanScheduleRequestOpenRef.current = humanScheduleRequestOpen;
 
   const applyCanonicalDraftState = sessionDraft.applyCanonicalDraft;
-  const hydrateCanonicalDraft = sessionDraft.hydrateDraft;
   const { messages: teamMessages, reset: resetTeamRelay } = teamRelay;
 
 
@@ -501,7 +474,6 @@ export function WidgetOverlay({
     setHasStarted(false);
     setEntryPath(null);
     setRailMode('essentials');
-    setReferenceLinks([]);
     setReferenceFiles([]);
     setAttachmentOpen(false);
     setView('chat');
@@ -519,8 +491,6 @@ export function WidgetOverlay({
       aiProcessingGeneration === aiProcessingGenerationRef.current &&
       !cancelRef.current &&
       !confidentialDiversionRef.current;
-    const latestUserText = [...history].reverse().find((message) => message.sender === 'user')?.text ?? '';
-
     try {
       const llmMessages = history
         .filter((message) => message.sender === 'user' && message.text.trim().length > 0)
@@ -574,11 +544,24 @@ export function WidgetOverlay({
         return;
       }
 
+      if (data.outcome === 'draft_save_failed') {
+        for (const reply of data.replies) await botSay(reply.text);
+        return;
+      }
+
+      if (data.outcome === 'draft_conflict') {
+        if (data.canonicalDraft && data.draftVersion !== undefined) {
+          applyCanonicalDraftState(data.canonicalDraft, data.draftVersion);
+          setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft));
+        }
+        for (const reply of data.replies) await botSay(reply.text);
+        return;
+      }
+
       const replyChunks: string[] = (() => {
         if (data.replies.length > 0) return data.replies.map((reply) => reply.text);
         return [CHAT_UNAVAILABLE_MESSAGE];
       })();
-      const draftUpdates: Record<string, string | boolean> = data.draftUpdates ?? {};
       const sharedWork = data.sharedWork
         ? {
             entries: data.sharedWork.entries.map((entry) => ({
@@ -590,31 +573,12 @@ export function WidgetOverlay({
           }
         : null;
 
-      if (Object.keys(draftUpdates).length > 0) {
-        const merged = applyTextToDraft(latestUserText, draftRef.current, stepRef.current);
-        for (const [key, value] of Object.entries(draftUpdates)) {
-          if (typeof value === 'boolean') {
-            (merged as Record<string, unknown>)[key] = value;
-          } else if (value && value.trim().length > 0) {
-            (merged as Record<string, unknown>)[key] = value;
-          }
-        }
-        if (!isCurrent()) return;
-        setDraft(merged);
-        if (!isCurrent()) return;
-        setHasProjectIntent(detectProjectIntent(merged));
-        if (!isCurrent()) return;
-        setBriefApproved(false);
-
-        const nextStep = getNextConversationStep(merged);
+      if (data.canonicalDraft && data.draftVersion !== undefined) {
+        applyCanonicalDraftState(data.canonicalDraft, data.draftVersion);
+        const nextStep = getNextConversationStep({ ...createDefaultLeadDraft(), ...data.canonicalDraft } as LeadDraft);
         if (nextStep !== stepRef.current) {
           if (!isCurrent()) return;
           setCurrentStep(nextStep);
-        }
-        // The chat route persists authenticated updates. Replace optimistic values with its canonical version.
-        if (sessionId) {
-          await hydrateCanonicalDraft(sessionId, isCurrent);
-          if (!isCurrent()) return;
         }
       }
 
@@ -622,6 +586,10 @@ export function WidgetOverlay({
         const isFirst = i === 0;
         const chunk = replyChunks[i];
         await botSay(chunk, isFirst && sharedWork ? { sharedWork } : undefined);
+        if (!isCurrent()) return;
+      }
+      for (const recap of data.stageRecaps ?? []) {
+        await botSay(recap);
         if (!isCurrent()) return;
       }
     } catch {
@@ -696,16 +664,6 @@ export function WidgetOverlay({
     ]);
     if (!editableKeys.has(key as keyof LeadDraft)) return;
 
-    const nextDraft = { ...draft, [key]: value } as LeadDraft;
-    setDraft(nextDraft);
-    setHasProjectIntent(detectProjectIntent(nextDraft));
-    setBriefApproved(false);
-
-    const nextStep = getNextConversationStep(nextDraft);
-    if (nextStep !== currentStep) {
-      setCurrentStep(nextStep);
-    }
-
     const activeSessionId = sessionId;
     if (!activeSessionId) {
       return;
@@ -723,6 +681,7 @@ export function WidgetOverlay({
 
       if (result.ok) {
         applyCanonicalDraftState(result.draft, result.draftVersion);
+        setCurrentStep(getNextConversationStep({ ...createDefaultLeadDraft(), ...result.draft } as LeadDraft));
         return;
       }
 
@@ -737,7 +696,7 @@ export function WidgetOverlay({
   }
 
   async function appendReferenceLink(link: ReferenceLink) {
-    setReferenceLinks((prev) => [...prev, link]);
+    sessionDraft.appendReferenceLink(link);
     setBriefApproved(false);
   }
 
@@ -862,17 +821,7 @@ export function WidgetOverlay({
       return;
     }
 
-    let updatedDraft = draft;
-
-    if (step.freeText || currentStep === 'intro') {
-      updatedDraft = applyTextToDraft(value, draft, currentStep);
-      setDraft(updatedDraft);
-      setBriefApproved(false);
-    } else if (step.field) {
-      updatedDraft = { ...draft, [step.field]: value };
-      setDraft(updatedDraft);
-      setBriefApproved(false);
-    }
+    const updatedDraft = draft;
 
     const isLlmIntakeStep =
       currentStep === 'intro' ||
@@ -922,11 +871,6 @@ export function WidgetOverlay({
         eventName: 'step_advanced',
         properties: { from: currentStep, to: nextStepId }
       });
-    }
-
-    const summary = getSectionSummary(currentStep, updatedDraft);
-    if (summary) {
-      await botSay(summary, { delay: 250 });
     }
 
     if (nextStepId) {
@@ -1623,6 +1567,21 @@ export function WidgetOverlay({
                           overflowY: 'auto'
                         }}
                       >
+                        {referenceLinks.length > 0 && (
+                          <div aria-label="Saved reference links" style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+                            {referenceLinks.map((link) => (
+                              <a
+                                key={link.url}
+                                href={link.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere' }}
+                              >
+                                {link.url}
+                              </a>
+                            ))}
+                          </div>
+                        )}
                         <AttachmentDropzone
                           onAddLink={appendReferenceLink}
                           onAddFile={appendReferenceFile}

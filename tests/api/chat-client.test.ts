@@ -53,6 +53,57 @@ describe('chatRequest client', () => {
     expect(result!.briefReady).toBe(true);
   });
 
+  test('returns validated canonical saved progress', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: 'Who is this for?',
+      canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
+      draftVersion: 6,
+      currentStage: 'audience',
+      stageRecaps: ['So far: Canonical launch film; objective: Build awareness.'],
+      briefReady: false
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    await expect(chatRequest({ messages: [{ role: 'user', content: 'launch film' }] })).resolves.toEqual({
+      replies: [{ text: 'Who is this for?' }],
+      canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
+      draftVersion: 6,
+      currentStage: 'audience',
+      stageRecaps: ['So far: Canonical launch film; objective: Build awareness.'],
+      briefReady: false,
+      draftUpdates: {},
+      sharedWork: null
+    });
+  });
+
+  test('returns a typed conflict with the winning canonical draft', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: 'This brief changed elsewhere, so I reloaded the latest saved version. Please reapply your change.',
+      outcome: 'draft_conflict',
+      canonicalDraft: { projectScope: 'Winning draft' },
+      draftVersion: 8,
+      currentStage: 'project',
+      stageRecaps: [],
+      briefReady: false
+    }), { status: 409, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    const result = await chatRequest({ messages: [{ role: 'user', content: 'my change' }] });
+    expect(result?.outcome).toBe('draft_conflict');
+    expect(result?.canonicalDraft).toEqual({ projectScope: 'Winning draft' });
+    expect(result?.draftVersion).toBe(8);
+  });
+
+  test('returns a stable typed save failure', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: 'I could not save that answer. Please try again, or talk to the team without AI.',
+      outcome: 'draft_save_failed'
+    }), { status: 500, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+
+    const { chatRequest } = await import('@/lib/api/client');
+    expect((await chatRequest({ messages: [{ role: 'user', content: 'my change' }] }))?.outcome).toBe('draft_save_failed');
+  });
+
   test('falls back to a single fallback bubble when both shapes are empty', async () => {
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify({ message: '', messages: [], briefReady: false }), {

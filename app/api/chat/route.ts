@@ -1,7 +1,7 @@
 import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
-import { getCurrentIntakeStage } from '@/lib/conversation/intake-stage';
+import { formatIntakeStageRecap, getCurrentIntakeStage, getIntakeStageIndex, INTAKE_STAGES } from '@/lib/conversation/intake-stage';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-responses';
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
@@ -364,9 +364,13 @@ async function loadAuthenticatedDraftState(session: Awaited<ReturnType<typeof re
 async function persistAuthenticatedDraftState(
   state: Awaited<ReturnType<typeof loadAuthenticatedDraftState>>,
   draftUpdates: Record<string, string | boolean>
-) {
+): Promise<
+  | { ok: true; draft: VersionedDraft; draftVersion: number }
+  | { ok: false; conflict: true; draft: VersionedDraft; draftVersion: number }
+  | { ok: false; conflict: false }
+> {
   if (!state.authenticated || !state.supabase || !state.sessionId) {
-    return;
+    return { ok: false, conflict: false };
   }
 
   let nextDraft = { ...state.versionedDraft };
@@ -397,7 +401,7 @@ async function persistAuthenticatedDraftState(
       continue;
     }
 
-    nextDraft = updateField(nextDraft, field, value, 'user-stated');
+    nextDraft = updateField(nextDraft, field, value, field === 'scopePolished' ? 'inferred' : 'user-stated');
     changed = true;
   }
 
@@ -405,17 +409,39 @@ async function persistAuthenticatedDraftState(
     const fields = Object.entries(nextDraft)
       .filter(([field, entry]) => state.versionedDraft[field]?.value !== entry.value || state.versionedDraft[field]?.provenance !== entry.provenance)
       .map(([field, entry]) => ({ field, value: entry.value, provenance: entry.provenance }));
-    await state.supabase.rpc('update_session_draft', {
+    const { data, error } = await state.supabase.rpc('update_session_draft', {
       p_session_id: state.sessionId,
       p_expected_draft_version: state.draftVersion,
       p_fields: fields
     });
+    if (error) return { ok: false, conflict: false };
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row !== 'object') return { ok: false, conflict: false };
+    const result = row as { draft?: unknown; draft_version?: unknown; conflict?: unknown };
+    if (typeof result.draft_version !== 'number') return { ok: false, conflict: false };
+    const savedDraft = normalizeVersionedDraft(result.draft);
+    return result.conflict === true
+      ? { ok: false, conflict: true, draft: savedDraft, draftVersion: result.draft_version }
+      : { ok: true, draft: savedDraft, draftVersion: result.draft_version };
   } else {
-    await state.supabase
+    const { error } = await state.supabase
       .from('sessions')
       .update({ last_activity_at: new Date().toISOString(), draft_expires_at: temporaryDraftExpiry().toISOString() })
       .eq('id', state.sessionId);
+    if (error) return { ok: false, conflict: false };
+    return { ok: true, draft: state.versionedDraft, draftVersion: state.draftVersion };
   }
+}
+
+function canonicalProgress(draft: VersionedDraft, draftVersion: number) {
+  const canonicalDraft = getVisibleDraftValues(draft);
+  const values = toLeadDraftState(canonicalDraft);
+  return {
+    canonicalDraft,
+    draftVersion,
+    currentStage: getCurrentIntakeStage(values).id,
+    briefReady: isBriefReadyForApproval(values)
+  };
 }
 
 function buildLlmContext(context: ChatContext, promptDraft: Record<string, string>, priorDraft: Partial<LeadDraft>) {
@@ -570,11 +596,42 @@ export async function POST(request: Request) {
     }
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
-    const mergedDraft = { ...llmContext.priorDraft, ...draftUpdates };
-    const briefReady = isBriefReadyForApproval(mergedDraft);
-    const missingFields = missingReviewFields(mergedDraft);
+    let persisted: Awaited<ReturnType<typeof persistAuthenticatedDraftState>>;
+    try {
+      persisted = await persistAuthenticatedDraftState(draftState, draftUpdates);
+    } catch {
+      return jsonWithCors({
+        outcome: 'draft_save_failed',
+        message: 'I could not save that answer. Please try again, or talk to the team without AI.'
+      }, { status: 500 }, request);
+    }
+    if (!persisted.ok) {
+      if (persisted.conflict) {
+        const progress = canonicalProgress(persisted.draft, persisted.draftVersion);
+        return jsonWithCors({
+          outcome: 'draft_conflict',
+          message: 'This brief changed elsewhere, so I reloaded the latest saved version. Please reapply your change.',
+          ...progress,
+          stageRecaps: []
+        }, { status: 409 }, request);
+      }
+      return jsonWithCors({
+        outcome: 'draft_save_failed',
+        message: 'I could not save that answer. Please try again, or talk to the team without AI.'
+      }, { status: 500 }, request);
+    }
 
-    await persistAuthenticatedDraftState(draftState, draftUpdates);
+    const progress = canonicalProgress(persisted.draft, persisted.draftVersion);
+    const savedValues = toLeadDraftState(progress.canonicalDraft);
+    const previousStageIndex = getIntakeStageIndex(llmContext.priorDraft);
+    const currentStageIndex = getIntakeStageIndex(savedValues);
+    const stageRecaps = INTAKE_STAGES
+      .slice(previousStageIndex, currentStageIndex)
+      .flatMap((stage) => {
+        const recap = formatIntakeStageRecap(stage.id, savedValues);
+        return recap ? [recap] : [];
+      });
+    const missingFields = missingReviewFields(savedValues);
 
     void logLlmEvent(sessionId, category, Object.keys(draftUpdates).length > 0, requestId);
 
@@ -583,8 +640,9 @@ export async function POST(request: Request) {
       return jsonWithCors({
         messages: replyChunks,
         draftUpdates,
-        briefReady,
-        reviewPrompt: briefReady ? REVIEW_PROMPT : null,
+        ...progress,
+        stageRecaps,
+        reviewPrompt: progress.briefReady ? REVIEW_PROMPT : null,
         missingFields,
         sharedWork: sharedWork ?? undefined,
         truncated
@@ -594,8 +652,9 @@ export async function POST(request: Request) {
     return jsonWithCors({
       message: replyText,
       draftUpdates,
-      briefReady,
-      reviewPrompt: briefReady ? REVIEW_PROMPT : null,
+      ...progress,
+      stageRecaps,
+      reviewPrompt: progress.briefReady ? REVIEW_PROMPT : null,
       missingFields,
       sharedWork: sharedWork ?? undefined,
       truncated

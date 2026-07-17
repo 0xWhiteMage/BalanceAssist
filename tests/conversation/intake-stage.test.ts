@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  formatIntakeStageRecap,
   getCurrentIntakeStage,
   INTAKE_STAGES
 } from '@/lib/conversation/intake-stage';
@@ -99,5 +100,51 @@ describe('intake stage model', () => {
 
     expect(getCurrentIntakeStage(draft).id).toBe('references-contact');
     expect(draft.referencesStatus).toBe('');
+  });
+});
+
+describe('intake stage recaps', () => {
+  test('formats the completed project stage from original canonical wording', () => {
+    expect(formatIntakeStageRecap('project', {
+      ...createDefaultLeadDraft(),
+      projectScope: 'A launch film for the new chair',
+      projectObjective: 'Build awareness',
+      scopePolished: 'A polished chair campaign'
+    })).toBe('So far: A launch film for the new chair; objective: Build awareness.');
+  });
+
+  test('formats audience and planning stages without inferred facts', () => {
+    expect(formatIntakeStageRecap('audience', {
+      ...createDefaultLeadDraft(),
+      audience: 'Young adults',
+      intendedOutputs: 'Hero film and cut-downs'
+    })).toBe('So far: audience: Young adults; intended outputs: Hero film and cut-downs.');
+    expect(formatIntakeStageRecap('planning', {
+      ...createDefaultLeadDraft(),
+      timelineBand: 'Not sure yet',
+      budgetBand: 'Prefer not to share'
+    })).toBe('So far: timeline: Not sure yet; budget: Prefer not to share.');
+  });
+
+  test('omits absent fields and keeps referencesStatus factual', () => {
+    expect(formatIntakeStageRecap('project', {
+      ...createDefaultLeadDraft(),
+      projectObjective: 'Build awareness',
+      scopePolished: 'Never substitute this'
+    })).toBe('So far: objective: Build awareness.');
+    expect(formatIntakeStageRecap('references-contact', {
+      ...createDefaultLeadDraft(),
+      referencesStatus: 'skipped',
+      contactEmail: 'hello@example.com'
+    })).toBe('So far: references: Skipped; contact email: hello@example.com.');
+    expect(formatIntakeStageRecap('references-contact', createDefaultLeadDraft())).toBeNull();
+  });
+
+  test('caps displayed canonical values at the server field limit', () => {
+    const recap = formatIntakeStageRecap('project', {
+      ...createDefaultLeadDraft(),
+      projectScope: 'x'.repeat(220)
+    });
+    expect(recap).toBe(`So far: ${'x'.repeat(200)}.`);
   });
 });

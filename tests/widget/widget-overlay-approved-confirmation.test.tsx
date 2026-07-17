@@ -101,6 +101,14 @@ function mockWidgetFetch() {
           contactCompany: 'Acme',
           contactEmail: 'jayden@example.com'
         },
+        canonicalDraft: {
+          service: 'production', projectType: 'Video', projectScope: '30s animation for social media',
+          timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden',
+          contactCompany: 'Acme', contactEmail: 'jayden@example.com'
+        },
+        draftVersion: 1,
+        currentStage: 'project',
+        stageRecaps: [],
         briefReady: true,
         reviewPrompt: 'Your brief is ready. Tap the tab on the right to review.',
         missingFields: []
@@ -335,7 +343,16 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
         return makeJsonResponse({ sessionId: 'mock-session-id', capability: 'mock-session-id.mock-cap', expiresAt: new Date(Date.now() + 86400000).toISOString(), persisted: true });
       }
       if (url.includes('/api/chat')) {
-        return makeJsonResponse({ message: 'Ready.', draftUpdates: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' }, briefReady: true, missingFields: [] });
+        return makeJsonResponse({
+          message: 'Ready.',
+          draftUpdates: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' },
+          canonicalDraft: { service: 'production', projectType: 'Video', projectScope: '30s animation', timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactCompany: 'Acme', contactEmail: 'jayden@example.com' },
+          draftVersion: 1,
+          currentStage: 'project',
+          stageRecaps: [],
+          briefReady: true,
+          missingFields: []
+        });
       }
       if (url.includes('/api/projects/mock-session-id/consent')) {
         return makeJsonResponse({ ok: false }, 500);

@@ -33,8 +33,12 @@ export const chatResponsePayloadSchema = z
   .object({
     message: z.string().optional(),
     messages: z.array(z.string()).min(1).optional(),
-    outcome: z.literal('confidential_diversion').optional(),
+    outcome: z.enum(['confidential_diversion', 'draft_conflict', 'draft_save_failed']).optional(),
     draftUpdates: z.record(z.string()).optional(),
+    canonicalDraft: z.record(z.string()).optional(),
+    draftVersion: z.number().int().nonnegative().optional(),
+    currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']).optional(),
+    stageRecaps: z.array(z.string()).optional(),
     briefReady: z.boolean().optional(),
     reviewPrompt: z.string().nullable().optional(),
     missingFields: z.array(z.string()).optional(),

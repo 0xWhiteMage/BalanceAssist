@@ -182,5 +182,9 @@ describe('FIELD_LABELS', () => {
     expect(FIELD_LABELS.service).toBe('Service');
     expect(FIELD_LABELS.projectType).toBe('Project type');
     expect(FIELD_LABELS.contactEmail).toBe('Contact email');
+    expect(FIELD_LABELS.projectObjective).toBe('Project objective');
+    expect(FIELD_LABELS.audience).toBe('Audience');
+    expect(FIELD_LABELS.intendedOutputs).toBe('Intended outputs');
+    expect(FIELD_LABELS.scopePolished).toBe('AI-drafted summary');
   });
 });

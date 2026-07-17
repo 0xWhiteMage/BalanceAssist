@@ -10,6 +10,7 @@ export const INTAKE_STAGES = [
 ] as const;
 
 const hasValue = (value: string | undefined) => Boolean(value?.trim());
+const MAX_RECAP_VALUE_LENGTH = 200;
 
 export function getCurrentIntakeStage(draft: Partial<LeadDraft>) {
   if (
@@ -29,4 +30,32 @@ export function getCurrentIntakeStage(draft: Partial<LeadDraft>) {
     return INTAKE_STAGES[2];
   }
   return INTAKE_STAGES[3];
+}
+
+export function getIntakeStageIndex(draft: Partial<LeadDraft>): number {
+  return INTAKE_STAGES.findIndex((stage) => stage.id === getCurrentIntakeStage(draft).id);
+}
+
+function recapValue(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, MAX_RECAP_VALUE_LENGTH) : null;
+}
+
+export function formatIntakeStageRecap(stageId: IntakeStageId, draft: Partial<LeadDraft>): string | null {
+  const fields: Array<[string | null, string | undefined]> = stageId === 'project'
+    ? [[null, draft.projectScope], ['objective', draft.projectObjective]]
+    : stageId === 'audience'
+      ? [['audience', draft.audience], ['intended outputs', draft.intendedOutputs]]
+      : stageId === 'planning'
+        ? [['timeline', draft.timelineBand], ['budget', draft.budgetBand]]
+        : [
+            ['references', draft.referencesStatus === 'added' ? 'Added' : draft.referencesStatus === 'skipped' ? 'Skipped' : undefined],
+            ['contact name', draft.contactName],
+            ['contact email', draft.contactEmail]
+          ];
+  const facts = fields.flatMap(([label, value]) => {
+    const safeValue = recapValue(value);
+    return safeValue ? [`${label ? `${label}: ` : ''}${safeValue}`] : [];
+  });
+  return facts.length > 0 ? `So far: ${facts.join('; ')}.` : null;
 }

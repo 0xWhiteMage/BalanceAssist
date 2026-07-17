@@ -51,6 +51,43 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.draftVersion).toBe(7);
   });
 
+  test('applies a winning conflict and leaves canonical state unchanged on failure', async () => {
+    const updateDraft = vi.fn()
+      .mockResolvedValueOnce({ ok: false, conflict: true, draftVersion: 9, fieldCount: 1, draft: { projectScope: 'Winning draft' } })
+      .mockResolvedValueOnce({ ok: false, conflict: false });
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),
+      getCurrentSession: vi.fn(async () => null), fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: updateDraft,
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.ensureSession(); });
+
+    let conflictResult;
+    await act(async () => { conflictResult = await result.current.updateDraft('projectScope', 'Losing change'); });
+    expect(conflictResult).toMatchObject({ ok: false, conflict: true });
+    expect(result.current.draft.projectScope).toBe('Winning draft');
+    expect(result.current.draftVersion).toBe(9);
+
+    await act(async () => { await result.current.updateDraft('projectScope', 'Unsaved change'); });
+    expect(result.current.draft.projectScope).toBe('Winning draft');
+    expect(result.current.draftVersion).toBe(9);
+  });
+
+  test('hydrates restored reference links into the shared visible state', async () => {
+    const restoredLinks = [{ kind: 'vimeo' as const, url: 'https://vimeo.com/123' }];
+    const persistedLinks = [{ ...restoredLinks[0], id: 'reference-1', sessionId: 'session-1' }];
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => ({ draftVersion: 3, fieldCount: 1, draft: { referencesStatus: 'added' }, referenceLinks: persistedLinks })),
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    await act(async () => { await result.current.hydrateDraft('session-1'); });
+    expect(result.current.referenceLinks).toEqual(restoredLinks);
+    act(() => result.current.appendReferenceLink({ kind: 'youtube', url: 'https://youtube.com/watch?v=1' }));
+    expect(result.current.referenceLinks).toEqual([...restoredLinks, { kind: 'youtube', url: 'https://youtube.com/watch?v=1' }]);
+  });
+
   test('clears the approval lock after a failed approval so it can retry', async () => {
     const { result } = renderHook(() => useWidgetSessionDraft({
       createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),

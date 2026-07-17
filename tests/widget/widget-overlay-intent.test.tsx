@@ -195,8 +195,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     expect(screen.queryByText('STALE DELAYED AI REPLY')).toBeNull();
   }, 15_000);
 
-  test('does not apply deferred canonical hydration after AI generation invalidation', async () => {
-    const pendingHydration = deferred<Response>();
+  test('does not request post-chat canonical hydration after AI generation invalidation', async () => {
     const requests: string[] = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -205,10 +204,13 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
         return new Response(JSON.stringify({
           message: 'Updating the brief.',
           draftUpdates: { service: 'production' },
+          canonicalDraft: { service: 'production' },
+          draftVersion: 1,
+          currentStage: 'project',
+          stageRecaps: [],
           briefReady: false
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
-      if (url.includes('/api/projects/mock-session/draft') && !init?.method) return pendingHydration.promise;
       if (url.includes('/consent')) {
         return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
       }
@@ -222,25 +224,11 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     const input = await startAiConversation();
     fireEvent.change(input, { target: { value: 'An ordinary production project' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(requests.some((url) => url.includes('/api/projects/mock-session/draft'))).toBe(true));
+    await screen.findByText('Updating the brief.');
 
     fireEvent.click(screen.getByRole('button', { name: /talk to a human/i }));
     await screen.findByPlaceholderText(/message the team request/i);
-    await act(async () => {
-      pendingHydration.resolve(new Response(JSON.stringify({
-        sessionId: 'mock-session',
-        draftVersion: 9,
-        fieldCount: 2,
-        draft: {
-          service: { value: 'production', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' },
-          projectScope: { value: 'STALE HYDRATED SCOPE', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' }
-        }
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      await pendingHydration.promise;
-      await Promise.resolve();
-    });
-
-    expect(screen.queryByText('STALE HYDRATED SCOPE')).toBeNull();
+    expect(requests.some((url) => url.includes('/api/projects/mock-session/draft'))).toBe(false);
   }, 15_000);
 
   test('requires explicit human-only consent after diversion and never retries or relays blocked history', async () => {
@@ -376,6 +364,13 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
               contactName: 'Jayden',
               contactEmail: 'jayden@example.com'
             },
+            canonicalDraft: {
+              service: 'production', projectType: 'Animation', projectScope: '30s animation', scopePolished: '30s animation',
+              timelineBand: '1-2-months', budgetBand: '20k-50k', contactName: 'Jayden', contactEmail: 'jayden@example.com'
+            },
+            draftVersion: 1,
+            currentStage: 'project',
+            stageRecaps: [],
             briefReady: true,
             reviewPrompt: 'Your brief is ready.',
             missingFields: []
@@ -487,6 +482,10 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
                 projectScope: '30s animation',
                 scopePolished: '30s animation'
               },
+              canonicalDraft: { service: 'production', projectType: 'Video', projectScope: '30s animation', scopePolished: '30s animation' },
+              draftVersion: 1,
+              currentStage: 'project',
+              stageRecaps: [],
               briefReady: false,
               reviewPrompt: null,
               missingFields: ['timelineBand', 'budgetBand', 'contactName', 'contactEmail', 'contactCompany']
@@ -630,6 +629,13 @@ describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
               scopePolished:
                 "Brand film for Heineken — making them look premium for a new launch"
             },
+            canonicalDraft: {
+              projectScope: "It's a brand film for Heineken — making them look premium for a new launch",
+              scopePolished: "Brand film for Heineken — making them look premium for a new launch"
+            },
+            draftVersion: 1,
+            currentStage: 'project',
+            stageRecaps: [],
             briefReady: false,
             reviewPrompt: null,
             missingFields: ['projectType', 'service', 'timelineBand', 'budgetBand', 'contact']
@@ -683,6 +689,72 @@ describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
   });
 });
 
+describe('canonical chat response ownership', () => {
+  test('renders only the saved canonical draft and its deterministic recap', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'Who is this for?',
+          draftUpdates: { projectScope: 'OPTIMISTIC TOOL VALUE' },
+          canonicalDraft: { projectScope: 'Canonical launch film', projectObjective: 'Build awareness' },
+          draftVersion: 4,
+          currentStage: 'audience',
+          stageRecaps: ['So far: Canonical launch film; objective: Build awareness.'],
+          briefReady: false
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'A local launch idea' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    expect(await screen.findByText('So far: Canonical launch film; objective: Build awareness.', {}, { timeout: 7000 })).toBeVisible();
+    const rail = await screen.findByTestId('review-rail', {}, { timeout: 7000 });
+    expect(rail.textContent).toContain('Canonical launch film');
+    expect(rail.textContent).not.toContain('OPTIMISTIC TOOL VALUE');
+    expect(rail.textContent).not.toContain('A local launch idea');
+  }, 20_000);
+
+  test('hydrates restored reference links into the visible overlay list', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/sessions/inspect')) {
+        return new Response(JSON.stringify({
+          exists: true,
+          session: { id: 'restored-session', status: 'open', source_url: 'https://example.com' }
+        }), { status: 200 });
+      }
+      if (url.includes('/api/projects/restored-session/draft') && init?.method !== 'PUT') {
+        return new Response(JSON.stringify({
+          draft: { referencesStatus: { value: 'added', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' } },
+          draftVersion: 3,
+          fieldCount: 1,
+          referenceLinks: [{ kind: 'vimeo', url: 'https://vimeo.com/123' }]
+        }), { status: 200 });
+      }
+      if (url.includes('/api/telegram/upload')) {
+        return new Response(JSON.stringify({ available: false }), { status: 200 });
+      }
+      if (url.includes('/api/events')) return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+    await startAiConversation();
+    fireEvent.click(screen.getByRole('button', { name: 'Attach references' }));
+
+    expect(await screen.findByRole('link', { name: 'https://vimeo.com/123' })).toBeVisible();
+    expect(screen.getAllByText('https://vimeo.com/123')).toHaveLength(1);
+  }, 20_000);
+});
+
 describe('thesis-aligned optional intake actions', () => {
   test('routes the objective non-answer through chat without qualification or handoff', async () => {
     const chatBodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
@@ -697,6 +769,12 @@ describe('thesis-aligned optional intake actions', () => {
             ? 'What should this project achieve?'
             : 'Who is this for?',
           draftUpdates: chatBodies.length === 1 ? { projectScope: 'Launch film' } : { projectObjective: 'Not sure yet' },
+          canonicalDraft: chatBodies.length === 1
+            ? { projectScope: 'Launch film' }
+            : { projectScope: 'Launch film', projectObjective: 'Not sure yet' },
+          draftVersion: chatBodies.length,
+          currentStage: chatBodies.length === 1 ? 'project' : 'audience',
+          stageRecaps: chatBodies.length === 1 ? [] : ['So far: Launch film; objective: Not sure yet.'],
           briefReady: false,
           reviewPrompt: null,
           missingFields: []
@@ -742,6 +820,13 @@ describe('thesis-aligned optional intake actions', () => {
             timelineBand: 'Not sure yet',
             budgetBand: 'Prefer not to share'
           },
+          canonicalDraft: {
+            projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults',
+            intendedOutputs: 'Hero film', timelineBand: 'Not sure yet', budgetBand: 'Prefer not to share'
+          },
+          draftVersion: 1,
+          currentStage: 'references-contact',
+          stageRecaps: [],
           briefReady: false,
           reviewPrompt: null,
           missingFields: []
@@ -814,6 +899,13 @@ describe('thesis-aligned optional intake actions', () => {
             timelineBand: 'Not sure yet',
             budgetBand: 'Prefer not to share'
           },
+          canonicalDraft: {
+            projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults',
+            intendedOutputs: 'Hero film', timelineBand: 'Not sure yet', budgetBand: 'Prefer not to share'
+          },
+          draftVersion: 1,
+          currentStage: 'references-contact',
+          stageRecaps: [],
           briefReady: false,
           reviewPrompt: null,
           missingFields: []

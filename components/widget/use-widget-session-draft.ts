@@ -10,6 +10,7 @@ import type { ProjectDraftResponse, SessionResponse } from '@/lib/api/client';
 type DraftUpdate = { field: string; value: string; provenance: 'user-stated' | 'inferred' | 'confirmed' | 'cleared' };
 type DraftUpdateResult = ({ ok: true } & ProjectDraftResponse) | ({ ok: false; conflict: true } & ProjectDraftResponse) | { ok: false; conflict: false };
 type BootstrapValidity = () => boolean;
+type VisibleReferenceLink = Pick<NonNullable<ProjectDraftResponse['referenceLinks']>[number], 'kind' | 'url'>;
 
 const alwaysValid: BootstrapValidity = () => true;
 
@@ -31,7 +32,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const [draftVersion, setDraftVersion] = useState(0);
   const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
-  const [referenceLinks, setReferenceLinks] = useState<NonNullable<ProjectDraftResponse['referenceLinks']>>([]);
+  const [referenceLinks, setReferenceLinks] = useState<VisibleReferenceLink[]>([]);
   const [approval, setApproval] = useState<{
     approvedDraftVersion?: number;
     approvalInputHash?: string;
@@ -79,6 +80,10 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     }
   }, []);
 
+  const appendReferenceLink = useCallback((link: VisibleReferenceLink) => {
+    setReferenceLinks((current) => current.some((item) => item.url === link.url) ? current : [...current, link]);
+  }, []);
+
   const setActiveSession = useCallback((session: SessionResponse, isValid: BootstrapValidity = alwaysValid) => {
     if (!isValid()) return false;
     sessionIdRef.current = session.sessionId;
@@ -97,7 +102,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (!operationIsValid()) return;
     if (canonical && (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0)) {
       if (!operationIsValid()) return;
-      setReferenceLinks(canonical.referenceLinks ?? []);
+      setReferenceLinks((canonical.referenceLinks ?? []).map(({ kind, url }) => ({ kind, url })));
       if (!operationIsValid()) return;
       applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
     }
@@ -225,7 +230,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, draftVersion,
     hasProjectIntent, briefApproved, setBriefApproved, ensureSession, loadOrCreateSession, invalidateBootstrap,
-    applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, reset,
+    applyCanonicalDraft, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),
     requestProjectDeletion: () => sessionIdRef.current ? dependencies.requestProjectDeletion(sessionIdRef.current) : Promise.resolve({ ok: false })

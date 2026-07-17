@@ -479,10 +479,14 @@ export type ChatRequestPayload = {
 
 export type ChatResponse = {
   replies: ChatReplyItem[];
-  outcome?: 'confidential_diversion' | 'provider_unavailable';
+  outcome?: 'confidential_diversion' | 'provider_unavailable' | 'draft_conflict' | 'draft_save_failed';
   error?: 'Chat service unavailable';
   detail?: 'chat_provider_unavailable';
   draftUpdates: Record<string, string | boolean>;
+  canonicalDraft?: Record<string, string>;
+  draftVersion?: number;
+  currentStage?: 'project' | 'audience' | 'planning' | 'references-contact';
+  stageRecaps?: string[];
   briefReady: boolean;
   sharedWork: ChatSharedWork | null;
 };
@@ -495,8 +499,12 @@ const chatProviderUnavailableSchema = z.object({
 const chatResponseSchema = z.object({
   message: z.string().optional(),
   messages: z.array(z.string()).optional(),
-  outcome: z.literal('confidential_diversion').optional(),
+  outcome: z.enum(['confidential_diversion', 'draft_conflict', 'draft_save_failed']).optional(),
   draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(),
+  canonicalDraft: z.record(z.string()).optional(),
+  draftVersion: z.number().int().nonnegative().optional(),
+  currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']).optional(),
+  stageRecaps: z.array(z.string()).optional(),
   briefReady: z.boolean().optional(),
   sharedWork: z.object({ entries: z.array(z.object({
     title: z.string(), url: z.string(), description: z.string().optional(), image_url: z.string().optional(),
@@ -539,11 +547,13 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
       sharedWork: null
     };
   }
-  if (!response.ok) return null;
-
   const parsed = chatResponseSchema.safeParse(responseBody);
   if (!parsed.success) return null;
   const data = parsed.data;
+  if (!response.ok && !(
+    (response.status === 409 && data.outcome === 'draft_conflict') ||
+    (response.status === 500 && data.outcome === 'draft_save_failed')
+  )) return null;
 
   const textChunks: string[] = (() => {
     if (Array.isArray(data.messages) && data.messages.length > 0) {
@@ -557,8 +567,12 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
 
   return {
     replies: textChunks.map((text) => ({ text })),
-    outcome: data.outcome,
+    ...(data.outcome ? { outcome: data.outcome } : {}),
     draftUpdates: data.draftUpdates ?? {},
+    ...(data.canonicalDraft ? { canonicalDraft: data.canonicalDraft } : {}),
+    ...(data.draftVersion !== undefined ? { draftVersion: data.draftVersion } : {}),
+    ...(data.currentStage ? { currentStage: data.currentStage } : {}),
+    ...(data.stageRecaps ? { stageRecaps: data.stageRecaps } : {}),
     briefReady: Boolean(data.briefReady),
     sharedWork: data.sharedWork ?? null
   };

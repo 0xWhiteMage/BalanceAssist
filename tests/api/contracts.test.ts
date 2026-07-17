@@ -34,6 +34,33 @@ test('chat response payload accepts a multi-bubble messages array', () => {
   expect(result.success).toBe(true);
 });
 
+test('chat response payload validates canonical saved progress', () => {
+  const result = chatResponsePayloadSchema.safeParse({
+    message: 'What comes next?',
+    canonicalDraft: { projectScope: 'A launch film', projectObjective: 'Build awareness' },
+    draftVersion: 4,
+    currentStage: 'audience',
+    stageRecaps: ['So far: A launch film; objective: Build awareness.'],
+    briefReady: false
+  });
+  expect(result.success).toBe(true);
+  expect(chatResponsePayloadSchema.safeParse({
+    message: 'Invalid stage', canonicalDraft: {}, draftVersion: 1, currentStage: 'qualification', stageRecaps: []
+  }).success).toBe(false);
+});
+
+test('chat response payload validates stable persistence outcomes', () => {
+  expect(chatResponsePayloadSchema.safeParse({
+    message: 'This brief changed elsewhere, so I reloaded the latest saved version. Please reapply your change.',
+    outcome: 'draft_conflict', canonicalDraft: { projectScope: 'Winning draft' }, draftVersion: 8,
+    currentStage: 'project', stageRecaps: [], briefReady: false
+  }).success).toBe(true);
+  expect(chatResponsePayloadSchema.safeParse({
+    message: 'I could not save that answer. Please try again, or talk to the team without AI.',
+    outcome: 'draft_save_failed'
+  }).success).toBe(true);
+});
+
 test('chat response payload validates the confidential diversion outcome', () => {
   expect(chatResponsePayloadSchema.safeParse({
     message: 'Use the human-only path.',

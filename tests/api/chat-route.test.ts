@@ -70,7 +70,18 @@ describe('POST /api/chat', () => {
       ok: true,
       auth: { sessionId: 'test-session', capability: 'test-session.secret' },
       supabase: {
-        rpc: async () => ({ data: [], error: null }),
+        rpc: async (_name: string, args: { p_expected_draft_version: number; p_fields: Array<{ field: string; value: string; provenance: string }> }) => ({
+          data: [{
+            draft: Object.fromEntries(args.p_fields.map((field) => [field.field, {
+              value: field.value,
+              provenance: field.provenance,
+              updatedAt: '2026-07-17T00:00:00.000Z'
+            }])),
+            draft_version: args.p_expected_draft_version + 1,
+            conflict: false
+          }],
+          error: null
+        }),
         from: () => ({
           select: () => ({
             eq: () => ({
@@ -229,6 +240,111 @@ describe('POST /api/chat', () => {
     const res = await POST(req);
     return { res, data: await res.json() };
   }
+
+  test('returns canonical saved progress and deterministic recaps from the RPC result', async () => {
+    const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 3 });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'test-session', capability: 'test-session.secret' },
+      supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Who is this for?', 'record_brief_updates', JSON.stringify({
+      service: '', projectType: '', projectScope: 'A launch film', projectObjective: 'Build awareness',
+      audience: '', intendedOutputs: '', referencesStatus: '', scopePolished: '', timelineBand: '', budgetBand: '',
+      contactName: '', contactCompany: '', contactEmail: ''
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'A launch film that should Build awareness' }],
+      context: { step: 'budget', capturedFields: [] }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data).toMatchObject({
+      canonicalDraft: { projectScope: 'A launch film that should Build awareness', projectObjective: 'Build awareness' },
+      draftVersion: 4,
+      currentStage: 'audience',
+      stageRecaps: ['So far: A launch film that should Build awareness; objective: Build awareness.'],
+      briefReady: false
+    });
+    expect(harness.sessionUpdates).toHaveLength(1);
+  });
+
+  test('returns the winning canonical draft on a persistence conflict without an optimistic recap', async () => {
+    const winningDraft = {
+      projectScope: { value: 'Winning launch film', provenance: 'confirmed', updatedAt: '2026-07-17T00:00:00.000Z' }
+    };
+    const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 2 });
+    harness.supabase.rpc = vi.fn(async () => ({
+      data: [{ draft: winningDraft, draft_version: 7, conflict: true }], error: null
+    })) as typeof harness.supabase.rpc;
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Saved.', 'record_brief_updates', JSON.stringify({
+      service: '', projectType: '', projectScope: 'Losing launch film', projectObjective: '', audience: '',
+      intendedOutputs: '', referencesStatus: '', scopePolished: '', timelineBand: '', budgetBand: '', contactName: '',
+      contactCompany: '', contactEmail: ''
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'Losing launch film' }] });
+
+    expect(res.status).toBe(409);
+    expect(data).toEqual(expect.objectContaining({
+      outcome: 'draft_conflict',
+      message: 'This brief changed elsewhere, so I reloaded the latest saved version. Please reapply your change.',
+      canonicalDraft: { projectScope: 'Winning launch film' },
+      draftVersion: 7,
+      currentStage: 'project',
+      stageRecaps: []
+    }));
+  });
+
+  test('returns a stable save failure without claiming canonical progress', async () => {
+    const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 2 });
+    harness.supabase.rpc = vi.fn(async () => ({ data: null, error: { message: 'database unavailable' } })) as unknown as typeof harness.supabase.rpc;
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Saved.', 'record_brief_updates', JSON.stringify({
+      service: '', projectType: '', projectScope: 'A launch film', projectObjective: '', audience: '', intendedOutputs: '',
+      referencesStatus: '', scopePolished: '', timelineBand: '', budgetBand: '', contactName: '', contactCompany: '', contactEmail: ''
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'A launch film' }] });
+
+    expect(res.status).toBe(500);
+    expect(data).toEqual({
+      outcome: 'draft_save_failed',
+      message: 'I could not save that answer. Please try again, or talk to the team without AI.'
+    });
+    expect(data).not.toHaveProperty('stageRecaps');
+    expect(data).not.toHaveProperty('canonicalDraft');
+  });
+
+  test('keeps the save failure stable when the persistence call throws', async () => {
+    const harness = createChatSupabase({ id: 'test-session', draft: {}, draft_version: 2 });
+    harness.supabase.rpc = vi.fn(async () => { throw new Error('connection lost'); }) as unknown as typeof harness.supabase.rpc;
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Saved.', 'record_brief_updates', JSON.stringify({
+      service: '', projectType: '', projectScope: 'A launch film', projectObjective: '', audience: '', intendedOutputs: '',
+      referencesStatus: '', scopePolished: '', timelineBand: '', budgetBand: '', contactName: '', contactCompany: '', contactEmail: ''
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'A launch film' }] });
+
+    expect(res.status).toBe(500);
+    expect(data).toEqual({
+      outcome: 'draft_save_failed',
+      message: 'I could not save that answer. Please try again, or talk to the team without AI.'
+    });
+  });
 
   function safelySerializeLogCalls(calls: unknown[][]): string {
     const seen = new WeakSet<object>();
