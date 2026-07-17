@@ -38,6 +38,10 @@ if (cli.error || cli.status !== 0) {
     mkdirSync(diagnosticsDir, { recursive: true });
     const started = run('supabase', ['start']);
     if (started.status !== 0) {
+      const startupDiagnostics = `${started.stdout ?? ''}\n${started.stderr ?? ''}`
+        .replace(/(?:anon|service_role|jwt|secret|password|key)[^\r\n]*/gi, '[redacted]')
+        .slice(-12000);
+      writeFileSync(`${diagnosticsDir}/startup.txt`, startupDiagnostics || 'Supabase start returned no diagnostics.\n');
       console.error('Local Supabase stack failed to start. See CI diagnostics when running in GitHub Actions.');
       process.exitCode = 1;
     } else {

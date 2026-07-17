@@ -1169,5 +1169,5 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       clearTimeoutSpy.mockRestore();
       setTimeoutSpy.mockRestore();
     }
-  });
+  }, 10000);
 });

@@ -237,7 +237,7 @@ describe('WidgetOverlay accessibility', () => {
 
   test('uses the transcript log as the only live announcement mechanism for transcript updates', async () => {
     stubFetch();
-    const { container, getByRole } = render(<WidgetOverlay autoOpen={true} />);
+    const { container, findByRole, getByRole } = render(<WidgetOverlay autoOpen={true} />);
     fireEvent.click(getByRole('button', { name: 'Build a brief with AI' }));
     fireEvent.click(getByRole('button', { name: 'Continue with AI' }));
 
@@ -248,7 +248,7 @@ describe('WidgetOverlay accessibility', () => {
 
     expect(transcript).toHaveAttribute('aria-live', 'polite');
     expect(transcript?.parentElement).not.toHaveAttribute('aria-live');
-    expect(getByRole('textbox', { name: 'Message Balance Assist' })).toBeVisible();
+    expect(await findByRole('textbox', { name: 'Message Balance Assist' })).toBeVisible();
   });
 
   test('close button has accessible name', () => {

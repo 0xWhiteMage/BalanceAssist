@@ -59,7 +59,9 @@ BEGIN
         AND NOT tgisinternal
         AND tgenabled = 'O'
         AND tgfoid = 'public.guard_event_session_active()'::regprocedure
-        AND pg_get_triggerdef(oid) ~* 'BEFORE INSERT ON public.events FOR EACH ROW EXECUTE FUNCTION public.guard_event_session_active\(\)'
+        AND tgtype = 7
+        AND tgnargs = 0
+        AND tgqual IS NULL
     )
     OR NOT EXISTS (
       SELECT 1 FROM public.schema_migrations

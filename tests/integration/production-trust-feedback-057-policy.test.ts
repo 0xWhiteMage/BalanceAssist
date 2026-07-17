@@ -32,6 +32,9 @@ describe('production trust feedback 057 policy', () => {
     expect(artifact).toContain("version = '056' AND filename = '056_trust_centered_session_controls.sql'");
     expect(artifact).toContain("tgenabled = 'O'");
     expect(artifact).toContain("tgfoid = 'public.guard_event_session_active()'::regprocedure");
+    expect(artifact).toContain('tgtype = 7');
+    expect(artifact).toContain('tgnargs = 0');
+    expect(artifact).toContain('tgqual IS NULL');
     expect(artifact).toContain("RAISE EXCEPTION 'trust feedback migration 057 verification failed'");
     expect(artifact.trimEnd()).toMatch(/COMMIT;$/);
   });
