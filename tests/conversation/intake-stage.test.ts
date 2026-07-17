@@ -42,6 +42,18 @@ describe('intake stage model', () => {
     expect(getCurrentIntakeStage({ ...createDefaultLeadDraft(), ...values }).id).toBe(expected);
   });
 
+  test.each([
+    { projectScope: 'A launch film' },
+    { projectType: 'Animation' },
+    { service: 'production' as const }
+  ])('accepts any approved project-need field with an objective', (projectNeed) => {
+    expect(getCurrentIntakeStage({
+      ...createDefaultLeadDraft(),
+      ...projectNeed,
+      projectObjective: 'Build awareness'
+    }).id).toBe('audience');
+  });
+
   test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
     'treats the literal uncertainty answer %s as answered',
     (answer) => {

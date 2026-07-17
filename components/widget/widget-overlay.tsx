@@ -827,7 +827,10 @@ export function WidgetOverlay({
     const isLlmIntakeStep =
       currentStep === 'intro' ||
       currentStep === 'scope' ||
+      currentStep === 'objective' ||
       currentStep === 'service' ||
+      currentStep === 'audience' ||
+      currentStep === 'outputs' ||
       currentStep === 'timeline' ||
       currentStep === 'budget' ||
       currentStep === 'contact-name' ||
@@ -843,7 +846,10 @@ export function WidgetOverlay({
     if (
       currentStep === 'intro' ||
       currentStep === 'scope' ||
+      currentStep === 'objective' ||
       currentStep === 'service' ||
+      currentStep === 'audience' ||
+      currentStep === 'outputs' ||
       currentStep === 'timeline' ||
       currentStep === 'budget' ||
       currentStep === 'contact-name' ||
@@ -908,7 +914,10 @@ export function WidgetOverlay({
       const isIntakeStep =
         currentStep === 'intro' ||
         currentStep === 'scope' ||
+        currentStep === 'objective' ||
         currentStep === 'service' ||
+        currentStep === 'audience' ||
+        currentStep === 'outputs' ||
         currentStep === 'timeline' ||
         currentStep === 'budget' ||
         currentStep === 'contact-name' ||

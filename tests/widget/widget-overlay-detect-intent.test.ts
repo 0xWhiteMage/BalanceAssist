@@ -35,10 +35,13 @@ describe('detectProjectIntent', () => {
   test.each([
     ['projectObjective', { projectObjective: 'Build launch awareness' }],
     ['audience', { audience: 'Young adults' }],
-    ['intendedOutputs', { intendedOutputs: 'Hero film and cut-downs' }],
-    ['scopePolished', { scopePolished: '30s brand animation' }]
+    ['intendedOutputs', { intendedOutputs: 'Hero film and cut-downs' }]
   ] as const)('returns false when only %s is populated', (_field, values) => {
     expect(detectProjectIntent(withOverrides(values))).toBe(false);
+  });
+
+  test('restores project intent from a concrete persisted legacy polished scope', () => {
+    expect(detectProjectIntent(withOverrides({ scopePolished: '30s brand animation' }))).toBe(true);
   });
 
   test('returns true when projectScope alone is populated', () => {

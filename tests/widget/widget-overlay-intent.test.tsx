@@ -480,7 +480,7 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
         if (callIndex === 1) {
           return new Response(
             JSON.stringify({
-              message: 'Got it. What is your timeline?',
+              message: 'Got it. What should this project achieve?',
               draftUpdates: {
                 service: 'production',
                 projectType: 'Video',
@@ -528,16 +528,19 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
     fireEvent.change(input, { target: { value: 'I want a 30s animation for social media' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    // Wait for the LLM reply and the draft merge to complete.
+    // Wait for the draft merge and for the delayed bot operation to release input.
     await waitFor(() => {
-      expect(screen.getByText(/Got it\. What is your timeline\?/i)).toBeInTheDocument();
-    }, { timeout: 4000 });
+      expect(screen.getAllByText(/30s animation/i).length).toBeGreaterThan(0);
+      expect(input).not.toBeDisabled();
+    }, { timeout: 7000 });
 
     // Now send another message; the captured fields should include
     // projectScope, projectType, and service because the LLM set them
     // on the previous turn and the widget merged them into the draft.
-    fireEvent.change(input, { target: { value: 'next' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.change(input, { target: { value: 'Build launch awareness' } });
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
+    await waitFor(() => expect(sendButton).not.toBeDisabled());
+    fireEvent.click(sendButton);
 
     await waitFor(() => {
       expect(chatBodies.length).toBeGreaterThanOrEqual(2);
@@ -696,6 +699,7 @@ describe('intake short replies stay on the LLM path', () => {
               message: 'Got it. What kind of support do you need from Balance Studio?',
               draftUpdates: {
                 projectScope: '30s animation for social media',
+                projectObjective: 'Build launch awareness',
                 scopePolished: '30s animation for social media'
               },
               briefReady: false,
@@ -775,6 +779,7 @@ describe('intake short replies stay on the LLM path', () => {
               message: 'Got it. What kind of support do you need from Balance Studio?',
               draftUpdates: {
                 projectScope: '30s animation for social media',
+                projectObjective: 'Build launch awareness',
                 scopePolished: '30s animation for social media'
               },
               briefReady: false,

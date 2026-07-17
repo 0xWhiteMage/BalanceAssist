@@ -22,7 +22,19 @@ test('chooses the next missing conversation step dynamically', () => {
   const draft = createDefaultLeadDraft();
 
   expect(getNextConversationStep(draft)).toBe('scope');
+  expect(getNextConversationStep({ ...draft, service: 'production' })).toBe('objective');
+  expect(getNextConversationStep({ ...draft, projectType: 'Animation' })).toBe('objective');
   expect(getNextConversationStep({ ...draft, projectScope: 'Launch film' })).toBe('objective');
+  expect(getNextConversationStep({
+    ...draft,
+    service: 'production',
+    projectObjective: 'Build awareness'
+  })).toBe('audience');
+  expect(getNextConversationStep({
+    ...draft,
+    projectType: 'Animation',
+    projectObjective: 'Build awareness'
+  })).toBe('service');
   expect(getNextConversationStep({
     ...draft,
     projectScope: 'Launch film',
@@ -112,7 +124,7 @@ test('uses stable prompts and excludes qualification from the user journey', () 
   expect(conversationSteps.objective).toMatchObject({
     botMessages: ['What should this project achieve? Not sure yet is a valid answer.'],
     field: 'projectObjective',
-    next: 'audience'
+    next: 'service'
   });
   expect(conversationSteps.audience).toMatchObject({
     botMessages: ['Who is this for? You can choose Not sure yet or Skip.'],
