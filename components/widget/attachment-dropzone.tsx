@@ -2,11 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { classifyUrl } from '@/lib/uploads/url-detect';
 import { brandTokens } from '@/lib/brand-tokens';
-import {
-  createAttachmentConsent,
-  hasAnalysisConsent,
-  type AttachmentConsent
-} from '@/lib/uploads/consent';
+import { hasAnalysisConsent, type AttachmentConsent } from '@/lib/uploads/consent';
 import {
   PRIVATE_ANALYSIS_UPLOAD_POLICY,
   validateFile,
@@ -58,13 +54,8 @@ export function AttachmentDropzone({
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
-  const [localConsent, setLocalConsent] = useState<AttachmentConsent | null>(consent ?? null);
   const [privateStorageAvailable, setPrivateStorageAvailable] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setLocalConsent(consent ?? null);
-  }, [consent]);
 
   useEffect(() => {
     let active = true;
@@ -75,7 +66,7 @@ export function AttachmentDropzone({
     return () => { active = false; };
   }, []);
 
-  const effectiveConsent = consent ?? localConsent;
+  const effectiveConsent = consent ?? null;
   const acceptedFormats = `${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.slice(0, -1).join(', ')}, and ${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.at(-1)}`;
   const maxFileSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFileSizeBytes / (1024 * 1024);
   const maxTotalSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxTotalSizeBytes / (1024 * 1024);
@@ -103,22 +94,6 @@ export function AttachmentDropzone({
     }
     setError(null);
     fileInputRef.current?.click();
-  }
-
-  function updateConsent(nextValues: { aiAnalysis: boolean; producerShare: boolean }) {
-    if (consent !== undefined) {
-      return;
-    }
-
-    setLocalConsent(createAttachmentConsent(nextValues.aiAnalysis, nextValues.producerShare));
-    setError(null);
-  }
-
-  function setAiAnalysis(nextChecked: boolean) {
-    updateConsent({
-      aiAnalysis: nextChecked,
-      producerShare: effectiveConsent?.producerShare === true
-    });
   }
 
   function updateFileStatus(fileName: string, status: FileStatus, error?: string) {
@@ -178,7 +153,7 @@ export function AttachmentDropzone({
     const consentToUse = effectiveConsent ?? null;
 
     if (!hasAnalysisConsent(consentToUse)) {
-      setError('Please confirm that Balance Assist may analyse these files before uploading.');
+      setError('File analysis is available after you choose the AI brief path.');
       return;
     }
 
@@ -255,30 +230,9 @@ export function AttachmentDropzone({
         </div>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
           {privateStorageAvailable
-            ? 'Files are retained privately only to analyse this draft, for up to 24 hours, and are never sent to the Balance team.'
+            ? 'Files stay private for up to 24 hours. Supported text is analysed by DeepSeek for this draft and never sent to the Balance team. Use the human-only path for protected material.'
             : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gap: 8,
-          padding: 10,
-          borderRadius: 10,
-          border: `1px solid ${brandTokens.colors.subtleBorder}`,
-          background: 'rgba(255, 255, 255, 0.03)'
-        }}
-      >
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: brandTokens.colors.lightText }}>
-          <input
-            type="checkbox"
-            checked={effectiveConsent?.aiAnalysis === true}
-            onChange={(event) => setAiAnalysis(event.target.checked)}
-            disabled={consent !== undefined}
-          />
-          <span>Balance Assist may analyse these files to help draft my project brief.</span>
-        </label>
       </div>
 
       <form onSubmit={handleUrlSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -323,20 +277,25 @@ export function AttachmentDropzone({
         </button>
       </form>
 
-      <div
+      <details
         id="private-analysis-upload-disclosure"
         data-testid="private-analysis-upload-disclosure"
         style={{ fontSize: 11, color: brandTokens.colors.mutedText, lineHeight: 1.5 }}
       >
-        Use non-confidential files only. Accepted: {acceptedFormats}; up to{' '}
-        {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFiles} files, {maxFileSizeMb} MB each, and{' '}
-        {maxTotalSizeMb} MB total. Files are validated and stored privately for the temporary
-        retention period. TXT and PDF may yield up to{' '}
-        {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters.toLocaleString('en-US')} characters
-        of server-extracted text; accepted images and CSV may yield no extracted text. Any extracted
-        text used in AI mode is processed by DeepSeek. Consent, filename checks, private storage, and
-        extraction do not prove a file is non-confidential. Use the human-only path for protected material.
-      </div>
+        <summary style={{ minHeight: 32, padding: '7px 0', cursor: 'pointer', color: brandTokens.colors.lightText }}>
+          File limits and privacy
+        </summary>
+        <div>
+          Use non-confidential files only. Accepted: {acceptedFormats}; up to{' '}
+          {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFiles} files, {maxFileSizeMb} MB each, and{' '}
+          {maxTotalSizeMb} MB total. Files are validated and stored privately for the temporary
+          retention period. TXT and PDF may yield up to{' '}
+          {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters.toLocaleString('en-US')} characters
+          of server-extracted text; accepted images and CSV may yield no extracted text. Any extracted
+          text used in AI mode is processed by DeepSeek. Consent, filename checks, private storage, and
+          extraction do not prove a file is non-confidential. Use the human-only path for protected material.
+        </div>
+      </details>
 
       <button
         type="button"

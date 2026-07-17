@@ -32,7 +32,7 @@ describe('ReviewPanel', () => {
     expect(screen.getByRole('group', { name: 'Optional details' })).toBeInTheDocument();
     expect(screen.queryByText(/\d+ of \d+ captured/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('review-panel').textContent).not.toMatch(
-      /score|qualified|unqualified|misfit|crm|telegram|revision/i
+      /score|qualified|unqualified|misfit|crm|revision/i
     );
   });
 
@@ -79,6 +79,12 @@ describe('ReviewPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Sending brief to Balance');
     fireEvent.click(pendingButton);
     expect(onApprove).toHaveBeenCalledOnce();
+  });
+
+  test('discloses transfer destinations at the send boundary', () => {
+    render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" />);
+
+    expect(screen.getByRole('button', { name: 'Send brief to Balance' })).toHaveAccessibleDescription(/Telegram.*Monday\.com.*separate retention/i);
   });
 
   test('keeps editor labels persistent and gives inline actions shared mobile-safe classes', () => {

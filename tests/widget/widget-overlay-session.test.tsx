@@ -44,7 +44,6 @@ function deferred<T>() {
 
 async function continueWithAi() {
   fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 }
 
 async function startWithBalanceAssist() {
@@ -85,7 +84,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(requestLog.some((entry) => entry.url.includes('/api/sessions/inspect'))).toBe(false);
   });
 
-  test('creates a session only after Continue with AI and strips query strings, fragments, and detailed referrer data', async () => {
+  test('creates a session only after the informed AI choice and strips query strings, fragments, and detailed referrer data', async () => {
     const requestLog: RecordedRequest[] = [];
     window.history.replaceState({}, '', '/projects/launch-film?utm_source=ads#brief');
     Object.defineProperty(document, 'referrer', {
@@ -378,6 +377,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     const consentRequest = requestLog.find((entry) => entry.url.includes('/consent'));
     expect(consentRequest?.body).toMatchObject({ scope: 'human_contact', granted: true });
     expect(JSON.stringify(consentRequest?.body)).not.toContain('producer_transfer');
+    expect(screen.queryByRole('button', { name: 'Attach references' })).toBeNull();
   });
 
   test('does not continue a human bootstrap after the widget closes', async () => {
@@ -440,7 +440,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(createCalls).toBe(2);
   }, 10_000);
 
-  test('enables AI interaction before delayed intro output completes', async () => {
+  test('enables AI interaction without an artificial intro delay', async () => {
     global.fetch = makeFetchRecorder([
       ({ url, method }) => {
         if (url.includes('/api/sessions/inspect')) {
@@ -457,7 +457,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await startWithBalanceAssist();
 
     expect(await findChatInput()).toBeEnabled();
-    expect(screen.getByRole('status', { name: 'Balance Assist is typing' })).toBeVisible();
+    expect(screen.queryByRole('status', { name: 'Balance Assist is typing' })).toBeNull();
   });
 
   test('invalidates a pending AI restore on close and restarts cleanly on reopen', async () => {
@@ -635,7 +635,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   });
 
-  test('does not commit delayed consent-failure output after close and reopen', async () => {
+  test('does not duplicate immediate consent-failure output after close and reopen', async () => {
     const requestLog: RecordedRequest[] = [];
     global.fetch = makeFetchRecorder([
       ({ url, method, body }) => {
@@ -659,10 +659,10 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     fireEvent.click(screen.getByLabelText('Close Balance Assist'));
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1_900));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    expect(screen.queryByText('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.')).toBeNull();
+    expect(screen.getAllByText('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.')).toHaveLength(1);
     expect(screen.queryByPlaceholderText(/message the team request/i)).toBeNull();
     expect(requestLog.some((entry) => /\/api\/(telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   }, 10_000);
@@ -911,7 +911,6 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     render(<WidgetOverlay autoOpen={true} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 
     await waitFor(() => expect(inspectResolvers).toHaveLength(1));
     await act(async () => {

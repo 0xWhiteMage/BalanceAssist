@@ -27,7 +27,6 @@ test('passes axe with a named transcript, visible composer label, and modal-only
   expect(initialResults.violations).toEqual([]);
 
   await page.getByRole('button', { name: 'Build a brief with AI' }).click();
-  await page.getByRole('button', { name: 'Continue with AI' }).click();
   await expect(page.getByRole('log', { name: 'Conversation transcript' })).toBeVisible();
   const composerInput = page.getByRole('textbox', { name: 'Message Balance Assist' });
   await expect(composerInput).toBeVisible();

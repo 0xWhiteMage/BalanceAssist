@@ -16,7 +16,6 @@ import {
 } from '@/components/widget/widget-overlay-parts';
 import { ReviewPanel } from '@/components/widget/review-panel';
 import { TrustFeedback } from '@/components/widget/trust-feedback';
-import { IntakeStageProgress } from '@/components/widget/intake-stage-progress';
 import { AttachmentDropzone, type ReferenceFile } from '@/components/widget/attachment-dropzone';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
@@ -28,7 +27,6 @@ import { addReferenceLink, chatRequest, createSession, deleteReferenceLink, fetc
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { getReviewPrompt, isBriefReadyForApproval } from '@/lib/conversation/review-state';
-import { getCurrentIntakeStage } from '@/lib/conversation/intake-stage';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
@@ -44,10 +42,6 @@ let messageCounter = 0;
 function nextId() {
   messageCounter += 1;
   return `msg-${messageCounter}`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export const WIDGET_WIDTH_CHAT_ONLY = 'min(380px, calc(100vw - 48px))';
@@ -163,7 +157,6 @@ export function WidgetOverlay({
   } = sessionDraft;
   const [isTyping, setIsTyping] = useState(false);
   const [inputValue, setInputValue] = useState('');
-  const [allowAttachment, setAllowAttachment] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [entryPath, setEntryPath] = useState<'ai' | 'human' | null>(null);
   const [confidentialRecoveryOpen, setConfidentialRecoveryOpen] = useState(false);
@@ -186,6 +179,7 @@ export function WidgetOverlay({
   const [deletionStatus, setDeletionStatus] = useState<DeletionReceiptStatus | null>(null);
   const [deletionConfirmationPending, setDeletionConfirmationPending] = useState(false);
   const submitInFlightRef = useRef<boolean>(false);
+  const submitGenerationRef = useRef(0);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapGenerationRef = useRef(0);
@@ -279,7 +273,7 @@ export function WidgetOverlay({
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
-      const reducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const reducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches === true;
       messagesEndRef.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'end' });
     });
   }, []);
@@ -373,7 +367,6 @@ export function WidgetOverlay({
         sharedWork?: ChatMessage['sharedWork'];
         isDisclaimer?: boolean;
         isSystem?: boolean;
-        delay?: number;
         isValid?: () => boolean;
       }
     ): Promise<void> => {
@@ -389,9 +382,6 @@ export function WidgetOverlay({
       botSayGenerationRef.current = botSayGeneration;
       if (!isCurrent()) return;
       setIsTyping(true);
-      const delay = options?.delay ?? Math.min(400 + text.length * 6, 1800);
-      await sleep(delay);
-
       if (!isCurrent()) {
         if (botSayGenerationRef.current === botSayGeneration) setIsTyping(false);
         return;
@@ -447,7 +437,6 @@ export function WidgetOverlay({
       }
 
       if (!isCurrent()) return;
-      setAllowAttachment(Boolean(step.allowAttachment));
     },
     [botSay]
   );
@@ -494,6 +483,9 @@ export function WidgetOverlay({
       void logEvent({ sessionId, eventName: 'widget_closed' });
     }
     cancelRef.current = true;
+    submitGenerationRef.current += 1;
+    submitInFlightRef.current = false;
+    setIsTyping(false);
     cleanupAttachmentPreviews(messagesRef.current);
     restoreLauncherFocusRef.current = true;
     setIsOpen(false);
@@ -532,6 +524,9 @@ export function WidgetOverlay({
     sessionDraft.reset();
     teamRelay.reset();
     cancelRef.current = true;
+    submitGenerationRef.current += 1;
+    submitInFlightRef.current = false;
+    setIsTyping(false);
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
@@ -551,7 +546,6 @@ export function WidgetOverlay({
     setAttachmentOpen(false);
     setView('chat');
     setCalendlyUrl(null);
-    setAllowAttachment(false);
     setConfidentialRecoveryOpen(false);
     setApprovalError(null);
     confidentialDiversionRef.current = false;
@@ -578,6 +572,7 @@ export function WidgetOverlay({
 
       const capturedFields = computeCapturedFieldsFromDraft(draftRef.current);
 
+      setIsTyping(true);
       const data = await chatRequest({
         messages: llmMessages,
         context: {
@@ -588,6 +583,7 @@ export function WidgetOverlay({
         }
       });
       if (!isCurrent()) return;
+      setIsTyping(false);
       if (!data) {
         await botSay(CHAT_UNAVAILABLE_MESSAGE);
         if (!isCurrent()) return;
@@ -691,6 +687,9 @@ export function WidgetOverlay({
     const bootstrapGeneration = bootstrapGenerationRef.current;
     if (humanBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
     aiProcessingGenerationRef.current += 1;
+    submitGenerationRef.current += 1;
+    submitInFlightRef.current = false;
+    setIsTyping(false);
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
@@ -787,7 +786,7 @@ export function WidgetOverlay({
     const trimmed = extractedText.trim();
     if (!trimmed) return;
     appendUserMessage('Analyzed temporary attachment');
-    await botSay('Reading the temporary attachment — pulling out the key details…', { delay: 150 });
+    await botSay('Reading the temporary attachment and pulling out the key details.');
     if (cancelRef.current) return;
     const prompt = `Server-verified attachment analysis text:\n\n${trimmed.slice(0, 3000)}\n\nPlease extract any project brief fields from this text and update the brief. Tell the user what you found.`;
     const syntheticHistory: ChatMessage[] = [
@@ -1050,6 +1049,7 @@ export function WidgetOverlay({
     const trimmed = inputValue.trim();
     if (!trimmed || isTyping) return;
     submitInFlightRef.current = true;
+    const submitGeneration = ++submitGenerationRef.current;
     setInputValue('');
 
     try {
@@ -1131,7 +1131,7 @@ export function WidgetOverlay({
           return;
         }
 
-        if (sendResult === 'persisted') void teamRelay.poll();
+        if (sendResult === 'persisted') void teamRelay.poll().catch(() => undefined);
         return;
       }
 
@@ -1166,10 +1166,12 @@ export function WidgetOverlay({
         await botSay(CHAT_UNAVAILABLE_MESSAGE);
       }
     } finally {
-      if (!cancelRef.current) {
+      if (submitGeneration === submitGenerationRef.current && !cancelRef.current) {
         setIsTyping(false);
       }
-      submitInFlightRef.current = false;
+      if (submitGeneration === submitGenerationRef.current) {
+        submitInFlightRef.current = false;
+      }
     }
   }
 
@@ -1273,13 +1275,7 @@ export function WidgetOverlay({
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
 
-    await sleep(500);
-    if (cancelRef.current) return;
-
     await botSay(`Got it! I\u2019ve received ${files.length === 1 ? `**${files[0].name}**` : `${files.length} files`} for this temporary draft.`);
-    setAllowAttachment(false);
-
-    await sleep(400);
     if (cancelRef.current) return;
 
     await advanceStep('handoff', draftRef.current);
@@ -1364,11 +1360,7 @@ export function WidgetOverlay({
             onClose={handleClose}
           />
 
-          {entryPath === 'ai' && hasStarted && !isTeamConnected && (
-            <IntakeStageProgress currentStageId={getCurrentIntakeStage(draft).id} />
-          )}
-
-          {briefReady && (
+          {briefReady && isMobile && (
             <div
               role="status"
               aria-live="polite"
@@ -1542,6 +1534,7 @@ export function WidgetOverlay({
               aria-hidden={isMobile && tabMode !== 'chat' ? 'true' : undefined}
               hidden={isMobile && tabMode !== 'chat'}
               inert={isMobile && tabMode !== 'chat' ? true : undefined}
+              tabIndex={0}
               className="balance-widget-chat balance-widget-motion"
             >
                 {showNoticeGate ? (
@@ -1724,7 +1717,7 @@ export function WidgetOverlay({
                 <label htmlFor="balance-widget-message-input" className="balance-widget-input-label">
                   {humanRequested ? 'Message the Balance team' : 'Message Balance Assist'}
                 </label>
-                {!isTeamConnected && !deletionFrozen && (
+                {entryPath === 'ai' && !isTeamConnected && !deletionFrozen && (
                   <>
                     <button
                       type="button"
@@ -1760,6 +1753,14 @@ export function WidgetOverlay({
                           overflowY: 'auto'
                         }}
                       >
+                        <button
+                          type="button"
+                          className="balance-widget-action balance-attachment-close"
+                          aria-label="Close references"
+                          onClick={() => setAttachmentOpen(false)}
+                        >
+                          &#10005;
+                        </button>
                         {referenceLinks.length > 0 && (
                           <div aria-label="Saved reference links" style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
                             {referenceLinks.map((link) => (
@@ -1780,6 +1781,7 @@ export function WidgetOverlay({
                           onAddFile={appendReferenceFile}
                           onFileAnalyzed={handleFileAnalyzed}
                           sessionId={sessionId}
+                          consent={entryPath === 'ai' && noticeConsent ? { aiAnalysis: true, producerShare: false, consentedAt: noticeConsent.consentedAt } : null}
                           messageContext={inputValue}
                         />
                       </div>
@@ -1853,7 +1855,6 @@ export function WidgetOverlay({
             <circle cx="12" cy="10.5" r="1.2" fill={brandTokens.colors.warmGold} />
             <circle cx="16" cy="10.5" r="1.2" fill={brandTokens.colors.warmGold} />
           </svg>
-          <span>Balance Assist</span>
         </button>
       )}
     </div>

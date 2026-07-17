@@ -258,7 +258,7 @@ export function HumanFooter({
               fontFamily: brandTokens.typography.condensed,
               textTransform: 'uppercase',
               letterSpacing: '0.12em',
-              transition: 'all 0.15s ease'
+              transition: 'transform 120ms cubic-bezier(0.23, 1, 0.32, 1), border-color 150ms ease, background-color 150ms ease'
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = brandTokens.colors.warmGold;
@@ -422,6 +422,7 @@ export function ProjectBriefCard({
     requestAnimationFrame(() => editTriggerRef.current?.focus());
   };
 
+  const projectSummary = draft.scopePolished?.trim() ?? '';
   const rows: ReadonlyArray<{
     label: string;
     key: string;
@@ -429,6 +430,19 @@ export function ProjectBriefCard({
     display: string;
     multiline?: boolean;
   }> = [
+    ...(projectSummary && projectSummary !== draft.projectScope.trim()
+      ? [{
+          label: provenance.scopePolished === 'inferred'
+            ? 'AI-drafted summary'
+            : provenance.scopePolished === 'confirmed'
+              ? 'Edited draft'
+              : 'Project summary',
+          key: 'scopePolished',
+          raw: draft.scopePolished ?? '',
+          display: projectSummary,
+          multiline: true
+        }]
+      : []),
     {
       label: provenance.projectScope === 'user-stated'
         ? 'Original wording'
@@ -440,19 +454,6 @@ export function ProjectBriefCard({
       display: draft.projectScope.trim(),
       multiline: true
     },
-    ...(draft.scopePolished?.trim() && draft.scopePolished.trim() !== draft.projectScope.trim()
-      ? [{
-          label: provenance.scopePolished === 'inferred'
-            ? 'AI-drafted summary'
-            : provenance.scopePolished === 'confirmed'
-              ? 'Edited draft'
-              : 'Project summary',
-          key: 'scopePolished',
-          raw: draft.scopePolished,
-          display: draft.scopePolished.trim(),
-          multiline: true
-        }]
-      : []),
     {
       label: 'Project objective',
       key: 'projectObjective',

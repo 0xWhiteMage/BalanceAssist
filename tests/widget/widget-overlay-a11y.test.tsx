@@ -93,7 +93,6 @@ function stubReadyFetch() {
 
 async function startReadyAiIntake() {
   fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Continue with AI' }));
   const input = await screen.findByPlaceholderText(/Type your message/i, {}, { timeout: 5000 });
   await waitFor(() => {
     expect(screen.getByRole('dialog', { name: /balance assist/i })).toHaveTextContent(/What can I help you with today\?/i);
@@ -157,7 +156,7 @@ describe('WidgetOverlay accessibility', () => {
     expect(dialog.contains(focusedElement)).toBe(true);
   });
 
-  test('entry actions remain native enabled buttons in both disclosure states', () => {
+  test('entry actions remain native enabled buttons at the informed choice', () => {
     stubFetch();
     const { getByRole } = render(<WidgetOverlay autoOpen={true} />);
 
@@ -170,16 +169,6 @@ describe('WidgetOverlay accessibility', () => {
       expect(action).toHaveClass('balance-entry-action');
     }
 
-    fireEvent.click(getByRole('button', { name: 'Build a brief with AI' }));
-
-    const disclosedActions = ['Continue with AI', 'Talk to the team without AI', 'Leave'];
-    for (const name of disclosedActions) {
-      const action = getByRole('button', { name });
-      expect(action.tagName).toBe('BUTTON');
-      expect(action).toBeEnabled();
-      expect(action).toHaveAttribute('type', 'button');
-      expect(action).toHaveClass('balance-entry-action');
-    }
   });
 
   test('Tab key cycles focus within the widget (focus trap)', async () => {
@@ -239,7 +228,6 @@ describe('WidgetOverlay accessibility', () => {
     stubFetch();
     const { container, findByRole, getByRole } = render(<WidgetOverlay autoOpen={true} />);
     fireEvent.click(getByRole('button', { name: 'Build a brief with AI' }));
-    fireEvent.click(getByRole('button', { name: 'Continue with AI' }));
 
     await waitFor(() => {
       expect(container.querySelector('[role="log"]')).not.toBeNull();
@@ -266,14 +254,12 @@ describe('WidgetOverlay accessibility', () => {
     for (const control of controls) expect(control.closest('[inert]')).toBeNull();
   });
 
-  test('shows canonical intake progress throughout AI intake but not human-only intake', async () => {
+  test('does not add persistent stage chrome to either intake path', async () => {
     setMobileViewport(false);
     stubFetch();
     const { unmount } = render(<WidgetOverlay autoOpen={true} />);
     fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with AI' }));
-
-    expect(await screen.findByRole('list', { name: 'Intake stages' })).toBeVisible();
+    expect(screen.queryByRole('list', { name: 'Intake stages' })).toBeNull();
     unmount();
 
     stubFetch();
@@ -282,18 +268,16 @@ describe('WidgetOverlay accessibility', () => {
     expect(screen.queryByRole('list', { name: 'Intake stages' })).toBeNull();
   });
 
-  test('keeps progress visible across mobile tabs and implements arrow, Home, and End semantics', async () => {
+  test('implements mobile tab arrow, Home, and End semantics', async () => {
     setMobileViewport(true);
     stubReadyFetch();
     render(<WidgetOverlay autoOpen={true} />);
     await startReadyAiIntake();
 
-    const progress = screen.getByTestId('intake-stage-progress');
     const chat = screen.getByRole('tab', { name: 'Chat' });
     const brief = screen.getByRole('tab', { name: 'Brief' });
     const chatPanel = document.getElementById('widget-chat-panel');
     const briefPanel = document.getElementById('widget-brief-panel');
-    expect(progress).toBeVisible();
     expect(chatPanel).toBeVisible();
     expect(chatPanel).not.toHaveAttribute('aria-hidden');
     expect(briefPanel).toBeInTheDocument();
@@ -307,7 +291,6 @@ describe('WidgetOverlay accessibility', () => {
     fireEvent.keyDown(chat, { key: 'ArrowRight' });
     expect(brief).toHaveFocus();
     expect(brief).toHaveAttribute('aria-selected', 'true');
-    expect(progress).toBeVisible();
     expect(chatPanel).not.toBeVisible();
     expect(chatPanel).toHaveAttribute('aria-hidden', 'true');
     expect(chatPanel).toHaveAttribute('inert');

@@ -97,7 +97,8 @@ test('system prompt gives planning rationales and canonical non-answer policy', 
 test('system prompt preserves original wording and separates structured prose', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/projectScope.*unchanged original wording/i);
-  expect(prompt).toMatch(/scopePolished.*optional generated interpretation/i);
+  expect(prompt).toMatch(/scopePolished.*concise one-sentence brief summary/i);
+  expect(prompt).toMatch(/scopePolished.*must not add facts/i);
   expect(prompt).toMatch(/do not combine audience.*outputs.*projectScope/i);
   expect(prompt).toMatch(/never overwrite.*non-empty projectScope/i);
 });
@@ -127,7 +128,8 @@ test('briefReady: true injects a different BRIEF READY context line than briefRe
 test('system prompt forbids the model from inferring fields the user did not supply', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/NEVER INFER/i);
-  expect(prompt).toMatch(/do not invent.*timeline.*budget.*polished scope/i);
+  expect(prompt).toMatch(/do not invent.*timeline.*budget.*fact/i);
+  expect(prompt).toMatch(/scopePolished may paraphrase explicit project details/i);
   expect(prompt).toMatch(/empty string in the tool call/i);
 });
 

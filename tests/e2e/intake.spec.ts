@@ -2,7 +2,6 @@ import { test, expect, type Page } from '@playwright/test';
 
 async function enterAiIntake(page: Page) {
   await page.getByRole('button', { name: 'Build a brief with AI' }).click();
-  await page.getByRole('button', { name: 'Continue with AI' }).click();
 
   const input = page.getByPlaceholder(/Type your message|Message the team/i);
   await expect(input).toBeVisible();
@@ -323,14 +322,13 @@ test.describe('balance assist intake via persistent rail', () => {
 
     const rail = page.getByTestId('review-rail');
     await expect(rail).toHaveCount(0);
-    await expect(page.getByTestId('intake-stage-progress')).toContainText('Project and objective');
+    await expect(page.getByTestId('intake-stage-progress')).toHaveCount(0);
     await assertDirectContactRoutes(page);
 
     await input.fill(`${originalWording}. The objective is to introduce it to customers.`);
     await input.press('Enter');
 
     await expect(rail).toBeVisible();
-    await expect(page.getByTestId('intake-stage-progress')).toContainText('Stage 2 of 4');
     await expect(page.getByRole('log').getByText('Who is this for?', { exact: true })).toHaveCount(1);
     await expect(page.getByRole('log').getByText(stages[0].recap, { exact: true })).toBeVisible();
     await expect(rail.getByText('Original wording', { exact: true })).toBeVisible();
@@ -359,7 +357,6 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(rail.getByText(originalWording, { exact: true })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
-    await expect(page.getByTestId('intake-stage-progress')).toContainText('Stage 3 of 4');
     await expect(page.getByRole('log').getByText(stages[1].message, { exact: true })).toBeVisible();
     await expect(page.getByRole('log').getByText(stages[1].recap, { exact: true })).toBeVisible();
     await expect(rail.getByText('Not sure yet', { exact: true })).toBeVisible();
@@ -368,7 +365,6 @@ test.describe('balance assist intake via persistent rail', () => {
     await assertDirectContactRoutes(page);
 
     await page.getByRole('button', { name: 'Not sure yet', exact: true }).click();
-    await expect(page.getByTestId('intake-stage-progress')).toContainText('Stage 4 of 4');
     await expect(page.getByRole('log').getByText(stages[2].message, { exact: true })).toBeVisible();
     await expect(page.getByRole('log').getByText(stages[2].recap, { exact: true })).toBeVisible();
     await expect(rail.getByText('Prefer not to share', { exact: true })).toBeVisible();
@@ -378,7 +374,7 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(page.getByRole('log').getByText('Almost there. How should I address you?', { exact: true })).toBeVisible();
     await input.fill('Jayden from Acme, jayden@example.com');
     await input.press('Enter');
-    await expect(page.getByRole('status', { name: 'Brief ready' })).toContainText('Your core brief is ready');
+    await expect(page.getByRole('status', { name: 'Brief ready' })).toHaveCount(0);
     await expect(page.getByRole('log').getByText(stages[3].recap, { exact: true })).toBeVisible();
     const reviewPanel = page.getByTestId('review-panel');
     await expect(reviewPanel).toHaveAttribute('data-mode', 'summary');

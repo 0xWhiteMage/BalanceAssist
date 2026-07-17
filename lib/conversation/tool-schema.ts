@@ -16,7 +16,7 @@ export const recordBriefUpdatesSchema = z
     audience: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     intendedOutputs: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     referencesStatus: z.enum(['', 'added', 'skipped']).default('').describe(TEXT_FIELD_DESCRIPTION),
-    scopePolished: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    scopePolished: z.string().default('').describe(`${TEXT_FIELD_DESCRIPTION} When projectScope is present, provide a concise one-sentence summary using only explicitly stated project details.`),
     timelineBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     budgetBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     contactName: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
