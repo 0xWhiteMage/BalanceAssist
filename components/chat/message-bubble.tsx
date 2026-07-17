@@ -111,6 +111,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
             <BotAvatar />
             <div
+              className={`balance-message-bubble${message.isDisclaimer ? ' balance-message-bubble--disclaimer' : ''}`}
               style={{
                 maxWidth: '280px',
                 padding: '12px 16px',
@@ -214,6 +215,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
       <div
+        className="balance-message-bubble balance-message-bubble--user"
         style={{
           maxWidth: '260px',
           padding: '10px 14px',

@@ -83,7 +83,7 @@ export function ReviewPanel({
 
   return (
     <div
-      style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 14 }}
+      className="balance-review-panel"
       data-testid="review-panel"
       data-mode={mode}
       aria-label="Project brief review"
@@ -116,7 +116,7 @@ export function ReviewPanel({
         <div style={{ display: 'grid', gap: 6 }}>
           <button
             type="button"
-            className="balance-widget-action balance-widget-wrap"
+            className="balance-widget-action balance-widget-wrap balance-primary-action"
             data-testid="approve-button"
             onClick={() => { if (!approveDisabled) void onApprove(); }}
             disabled={approveDisabled}

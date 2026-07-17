@@ -21,30 +21,9 @@ export function WidgetOverlayHeader({
   onClose: () => void;
 }) {
   return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '14px 18px',
-        borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`,
-        flexShrink: 0,
-        background: 'rgba(16, 16, 16, 0.6)'
-      }}
-    >
+    <header className="balance-widget-header">
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div
-          style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: '50%',
-            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0
-          }}
-        >
+        <div className="balance-widget-header-mark">
           <Image
             src={balanceLogoUrl}
             alt="Balance logo"
@@ -55,36 +34,17 @@ export function WidgetOverlayHeader({
           />
         </div>
         <div>
-          <p id="balance-assist-dialog-title" style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: brandTokens.colors.lightText, letterSpacing: '0.02em' }}>
+          <p id="balance-assist-dialog-title" className="balance-widget-title">
             {isTeamConnected ? 'Balance Studio Team' : 'Balance Assist'}
           </p>
-          <p
-            style={{
-              margin: 0,
-              fontSize: '10px',
-              color: brandTokens.colors.warmGold,
-              textTransform: 'uppercase',
-              letterSpacing: '0.16em',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
+          <p className="balance-widget-eyebrow">
             {isTeamConnected ? 'Human relay' : 'AI brief assistant'}
           </p>
         </div>
       </div>
       <button
         onClick={onClose}
-        style={{
-          background: 'none',
-          border: 'none',
-          color: brandTokens.colors.mutedText,
-          cursor: 'pointer',
-          fontSize: '16px',
-          padding: '4px 8px',
-          lineHeight: 1
-        }}
+        className="balance-widget-action balance-widget-header-close"
         aria-label="Close chat"
       >
         &#10005;
@@ -95,18 +55,7 @@ export function WidgetOverlayHeader({
 
 export function BotAvatarSmall() {
   return (
-    <div
-      style={{
-        width: '28px',
-        height: '28px',
-        borderRadius: '50%',
-        background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0
-      }}
-    >
+    <div className="balance-widget-avatar">
       <Image
         src={balanceLogoUrl}
         alt="Balance logo"

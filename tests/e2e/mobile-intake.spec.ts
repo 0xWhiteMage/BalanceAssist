@@ -324,11 +324,24 @@ test.describe('mobile intake', () => {
       return selectors.map((selector) => {
         const element = document.querySelector<HTMLElement>(selector);
         if (!element) throw new Error(`Missing layout target ${selector}`);
-        return { selector, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth };
+        const bounds = element.getBoundingClientRect();
+        const overflowingDescendants = Array.from(element.querySelectorAll<HTMLElement>('*'))
+          .map((descendant) => {
+            const descendantBounds = descendant.getBoundingClientRect();
+            return {
+              element: descendant.tagName.toLowerCase(),
+              testId: descendant.dataset.testid ?? null,
+              className: descendant.className,
+              left: Math.round(descendantBounds.left),
+              right: Math.round(descendantBounds.right)
+            };
+          })
+          .filter(({ left, right }) => left < Math.floor(bounds.left) || right > Math.ceil(bounds.right));
+        return { selector, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, overflowingDescendants };
       });
     });
     for (const measurement of layout) {
-      expect(measurement.scrollWidth, measurement.selector).toBeLessThanOrEqual(measurement.clientWidth);
+      expect(measurement.scrollWidth, `${measurement.selector}: ${JSON.stringify(measurement.overflowingDescendants.slice(0, 8))}`).toBeLessThanOrEqual(measurement.clientWidth);
     }
 
     const sendBrief = page.getByRole('button', { name: 'Send brief to Balance' });
@@ -365,10 +378,21 @@ test.describe('mobile intake', () => {
     await expect(progress).toContainText('Stage 4 of 4');
     const motion = await page.locator('.balance-widget-motion').evaluateAll((elements) => elements.map((element) => {
       const style = getComputedStyle(element);
-      return { animationName: style.animationName, animationDuration: style.animationDuration };
+      return {
+        animationName: style.animationName,
+        animationDuration: style.animationDuration,
+        transitionDuration: style.transitionDuration,
+        transform: style.transform
+      };
     }));
     expect(motion.length).toBeGreaterThan(0);
-    expect(motion).toEqual(motion.map(() => ({ animationName: 'none', animationDuration: '0s' })));
+    expect(motion).toEqual(motion.map(() => ({
+      animationName: 'none',
+      animationDuration: '0s',
+      transitionDuration: '0s',
+      transform: 'none'
+    })));
+    await expect(page.locator('.balance-widget-chat')).toHaveCSS('scroll-behavior', 'auto');
     expect(chatCalls).toBe(4);
     expect(finalizeAttempts).toBe(2);
   });
@@ -457,13 +481,21 @@ test.describe('mobile intake', () => {
         dialogLeft: bounds.left,
         dialogRight: bounds.right,
         actionWidth: actionBounds.width,
-        actionHeight: actionBounds.height
+        actionHeight: actionBounds.height,
+        dialogTop: bounds.top,
+        dialogBottom: bounds.bottom,
+        dialogPosition: getComputedStyle(dialog).position,
+        dialogBorderRadius: Number.parseFloat(getComputedStyle(dialog).borderRadius)
       };
     });
 
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth);
     expect(layout.dialogLeft).toBeGreaterThanOrEqual(0);
     expect(layout.dialogRight).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.dialogTop).toBe(0);
+    expect(layout.dialogBottom).toBe(page.viewportSize()!.height);
+    expect(layout.dialogPosition).toBe('fixed');
+    expect(layout.dialogBorderRadius).toBe(0);
     expect(layout.actionWidth).toBeGreaterThanOrEqual(44);
     expect(layout.actionHeight).toBeGreaterThanOrEqual(44);
   });

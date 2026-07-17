@@ -1,6 +1,46 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
 
+test('uses an explicit editorial AI shell and labeled launcher', async ({ page }) => {
+  await page.goto('/preview');
+
+  const dialog = page.getByRole('dialog', { name: 'Balance Assist' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('AI brief assistant', { exact: true })).toBeVisible();
+
+  const shell = await dialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      left: bounds.left,
+      top: bounds.top,
+      right: bounds.right,
+      bottom: bounds.bottom,
+      position: style.position,
+      borderRadius: Number.parseFloat(style.borderRadius)
+    };
+  });
+  const viewport = page.viewportSize()!;
+  if (viewport.width <= 639) {
+    expect(shell).toMatchObject({ left: 0, top: 0, right: viewport.width, bottom: viewport.height, position: 'fixed', borderRadius: 0 });
+  } else {
+    expect(shell.left).toBeGreaterThan(0);
+    expect(shell.top).toBeGreaterThan(0);
+    expect(shell.right).toBeLessThanOrEqual(viewport.width);
+    expect(shell.bottom).toBeLessThanOrEqual(viewport.height);
+    expect(shell.borderRadius).toBeLessThanOrEqual(4);
+  }
+
+  await page.getByRole('button', { name: 'Close chat' }).click();
+  const launcher = page.getByRole('button', { name: 'Open Balance Assist' });
+  await expect(launcher).toBeVisible();
+  await expect(launcher).toContainText('Balance Assist');
+  const launcherBounds = await launcher.boundingBox();
+  expect(launcherBounds).not.toBeNull();
+  expect(launcherBounds!.width).toBeGreaterThanOrEqual(56);
+  expect(launcherBounds!.height).toBeGreaterThanOrEqual(56);
+});
+
 test('widget landing shows human escalation', async ({ page }) => {
   await page.goto('/widget');
   await expect(page.getByRole('button', { name: 'Talk to a human', exact: true })).toBeVisible();
