@@ -270,7 +270,7 @@ export async function uploadRequestedFiles(
 
     const response = await fetchWithTimeout('/api/telegram/upload', {
       method: 'POST',
-      headers: { 'x-session-id': sessionId },
+      headers: { 'x-session-id': sessionId, 'x-upload-mode': 'human' },
       body: form
     });
 

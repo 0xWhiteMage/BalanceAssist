@@ -57,15 +57,13 @@ function detectMimeFromBytes(buffer: ArrayBuffer): string | null {
 }
 
 function sniffPlainText(buffer: ArrayBuffer): boolean {
-  const bytes = new Uint8Array(buffer);
-  const sample = bytes.slice(0, 512);
-  for (let i = 0; i < sample.length; i++) {
-    const b = sample[i];
-    if (b === 0x00) return false;
-    if (b === 0x09 || b === 0x0a || b === 0x0d) continue;
-    if (b < 0x20 || b > 0x7e) return false;
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(buffer));
+  } catch {
+    return false;
   }
-  return true;
+  return !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(text);
 }
 
 function getExtension(filename: string): string {

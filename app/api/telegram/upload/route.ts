@@ -4,8 +4,14 @@ import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supab
 import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
 import { classifyConfidentialFilename } from '@/lib/privacy/confidential-intent';
 import { PRIVATE_ANALYSIS_UPLOAD_POLICY, validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
+import {
+  HUMAN_UPLOAD_POLICY,
+  safeHumanUploadMime,
+  validateHumanUploadBatch
+} from '@/lib/uploads/file-policy';
 
-const MAX_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
+const ANALYSIS_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
+const HUMAN_MULTIPART_BODY_BYTES = HUMAN_UPLOAD_POLICY.maxTotalSizeBytes + 1024 * 1024;
 
 class MultipartBodyTooLargeError extends Error {}
 
@@ -66,15 +72,26 @@ export async function POST(request: Request) {
     return authResult.response;
   }
 
+  const modeHeader = request.headers.get('x-upload-mode')?.trim();
+  if (!modeHeader) {
+    return jsonWithCors({ ok: false, code: 'upload_mode_required' }, { status: 400 }, request);
+  }
+  if (modeHeader !== 'analysis' && modeHeader !== 'human') {
+    return jsonWithCors({ ok: false, code: 'invalid_upload_mode' }, { status: 400 }, request);
+  }
+  const maxMultipartBodyBytes = modeHeader === 'analysis'
+    ? ANALYSIS_MULTIPART_BODY_BYTES
+    : HUMAN_MULTIPART_BODY_BYTES;
+
   const contentLength = request.headers.get('content-length');
-  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_MULTIPART_BODY_BYTES) {
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxMultipartBodyBytes) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
   }
 
   let form: FormData;
   try {
     const multipartRequest = request.body
-      ? new Request(request, { body: boundedBodyStream(request.body, MAX_MULTIPART_BODY_BYTES), duplex: 'half' } as RequestInit)
+      ? new Request(request, { body: boundedBodyStream(request.body, maxMultipartBodyBytes), duplex: 'half' } as RequestInit)
       : request;
     form = await multipartRequest.formData();
   } catch (error) {
@@ -85,13 +102,10 @@ export async function POST(request: Request) {
   }
 
   const modeValue = form.get('mode');
-  if (modeValue === null) {
-    return jsonWithCors({ ok: false, code: 'upload_mode_required' }, { status: 400 }, request);
+  if (modeValue !== modeHeader) {
+    return jsonWithCors({ ok: false, code: 'upload_mode_mismatch' }, { status: 400 }, request);
   }
-  if (modeValue !== 'analysis' && modeValue !== 'human') {
-    return jsonWithCors({ ok: false, code: 'invalid_upload_mode' }, { status: 400 }, request);
-  }
-  const mode = modeValue;
+  const mode = modeHeader;
 
   const files = form
     .getAll('files')
@@ -101,9 +115,10 @@ export async function POST(request: Request) {
   if (files.length === 0) {
     return jsonWithCors({ ok: false, error: 'Missing files' }, { status: 400 }, request);
   }
+  const activePolicy = mode === 'analysis' ? PRIVATE_ANALYSIS_UPLOAD_POLICY : HUMAN_UPLOAD_POLICY;
   if (
-    files.length > PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFiles ||
-    files.reduce((total, file) => total + file.size, 0) > PRIVATE_ANALYSIS_UPLOAD_POLICY.maxTotalSizeBytes
+    files.length > activePolicy.maxFiles ||
+    files.reduce((total, file) => total + file.size, 0) > activePolicy.maxTotalSizeBytes
   ) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
   }
@@ -145,15 +160,21 @@ export async function POST(request: Request) {
   let preflight: Array<{ buffer: ArrayBuffer; verifiedMime: string }>;
   try {
     const buffers = await Promise.all(files.map(readFileBuffer));
-    const batchValidation = validateFileBatch(files.map((file, index) => ({ file, buffer: buffers[index] })));
-    if (!batchValidation.ok) {
-      return jsonWithCors({ ok: false, code: 'file_validation_failed' }, { status: 422 }, request);
+    if (mode === 'analysis') {
+      const batchValidation = validateFileBatch(files.map((file, index) => ({ file, buffer: buffers[index] })));
+      if (!batchValidation.ok) throw new Error('file_validation_failed');
+      preflight = files.map((file, index) => {
+        const validation = validateFile(file, buffers[index]);
+        if (!validation.ok) throw new Error('file_validation_failed');
+        return { buffer: buffers[index], verifiedMime: validation.mime };
+      });
+    } else {
+      if (!validateHumanUploadBatch(files).ok) throw new Error('file_validation_failed');
+      preflight = files.map((file, index) => ({
+        buffer: buffers[index],
+        verifiedMime: safeHumanUploadMime(file.type)
+      }));
     }
-    preflight = files.map((file, index) => {
-      const validation = validateFile(file, buffers[index]);
-      if (!validation.ok) throw new Error('file_validation_failed');
-      return { buffer: buffers[index], verifiedMime: validation.mime };
-    });
   } catch {
     return jsonWithCors({ ok: false, code: 'file_validation_failed' }, { status: 422 }, request);
   }

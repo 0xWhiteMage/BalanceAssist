@@ -34,6 +34,7 @@ async function post(form: FormData, headers: HeadersInit = {}) {
         origin: 'https://www.balancestudio.tv',
         'x-session-capability': 'capability',
         'x-session-id': sessionId,
+        'x-upload-mode': String(form.get('mode') ?? 'analysis'),
         ...headers
       }
     }));
@@ -155,6 +156,7 @@ describe('POST /api/telegram/upload private storage', () => {
         origin: 'https://www.balancestudio.tv',
         'x-session-capability': 'capability',
         'x-session-id': sessionId,
+        'x-upload-mode': 'analysis',
         'content-type': 'multipart/form-data; boundary=bound'
       },
       body,
@@ -164,8 +166,35 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(response.status).toBe(413);
   });
 
+  test('requires a valid mode header before parsing multipart data', async () => {
+    const formDataSpy = vi.spyOn(Request.prototype, 'formData');
+    const { POST } = await import('@/app/api/telegram/upload/route');
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: {
+        origin: 'https://www.balancestudio.tv',
+        'x-session-capability': 'capability',
+        'x-session-id': sessionId
+      }
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'upload_mode_required' });
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  test('rejects a mode header and form mismatch', async () => {
+    const response = await post(formWith(new File(['brief'], 'brief.txt', { type: 'text/plain' }), 'analysis'), {
+      'x-upload-mode': 'human'
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'upload_mode_mismatch' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
   test.each([
-    [null, 'upload_mode_required'],
+    [null, 'upload_mode_mismatch'],
     ['preview', 'invalid_upload_mode']
   ])('rejects multipart mode %j', async (mode, code) => {
     const form = new FormData();
@@ -234,6 +263,44 @@ describe('POST /api/telegram/upload private storage', () => {
       verifiedMime: 'application/pdf',
       extractText: false
     }));
+  });
+
+  test.each([
+    ['brief.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+    ['edit.mov', 'video/quicktime'],
+    ['assets.zip', 'application/zip']
+  ])('human mode accepts validated %s without AI magic or extraction', async (name, type) => {
+    useConsents([{ scope: 'producer_transfer', granted: true }]);
+    const response = await post(formWith(new File(['human-only bytes'], name, { type }), 'human'));
+
+    expect(response.status).toBe(200);
+    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
+      verifiedMime: type,
+      extractText: false
+    }));
+  });
+
+  test('human mode rejects executable extensions before storage', async () => {
+    useConsents([{ scope: 'producer_transfer', granted: true }]);
+    const response = await post(formWith(new File(['MZ'], 'malware.exe', { type: 'application/octet-stream' }), 'human'));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'file_validation_failed' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test('human mode permits a near-50 MB contract under its multipart ceiling without allocating it', async () => {
+    useConsents([{ scope: 'producer_transfer', granted: true }]);
+    const file = new File(['bounded fixture'], 'large.mov', { type: 'video/quicktime' });
+    Object.defineProperty(file, 'size', { value: 50 * 1024 * 1024 });
+
+    const response = await post(formWith(file, 'human'), {
+      'content-length': String(50 * 1024 * 1024 + 256 * 1024)
+    });
+
+    expect(response.status).toBe(200);
+    expect(storePrivateUploadMock).toHaveBeenCalledOnce();
   });
 
   test('preflights every file before the first storage side effect', async () => {

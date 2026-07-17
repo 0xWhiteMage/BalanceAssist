@@ -238,7 +238,10 @@ export function AttachmentDropzone({
     const res = await fetch('/api/telegram/upload', {
       method: 'POST',
       credentials: 'include',
-      headers: sessionId ? { 'x-session-id': sessionId } : undefined,
+      headers: {
+        'x-upload-mode': 'analysis',
+        ...(sessionId ? { 'x-session-id': sessionId } : {})
+      },
       body: fd
     });
     if (!res.ok) {

@@ -363,4 +363,5 @@ test('forwards only the server-derived analysis payload to the draft callback', 
   await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Server-verified brief text'));
   const uploadCall = vi.mocked(global.fetch).mock.calls.find(([, init]) => init?.method === 'POST' && init.body instanceof FormData);
   expect((uploadCall?.[1]?.body as FormData).get('mode')).toBe('analysis');
+  expect(new Headers(uploadCall?.[1]?.headers).get('x-upload-mode')).toBe('analysis');
 });

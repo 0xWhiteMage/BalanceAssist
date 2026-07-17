@@ -82,10 +82,18 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
 
 export const UPLOAD_ACCEPT_ATTRIBUTE = ALLOWED_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
-export const HUMAN_UPLOAD_GUIDANCE =
-  'Accepted: documents, presentations, images, video, audio, design/project files, and archives up to 50 MB. Executables and scripts are blocked.';
+export const HUMAN_UPLOAD_POLICY = {
+  allowedExtensions: ALLOWED_UPLOAD_EXTENSIONS,
+  maxFiles: 5,
+  maxFileSizeBytes: MAX_UPLOAD_SIZE_BYTES,
+  maxTotalSizeBytes: 50 * 1024 * 1024,
+  accept: UPLOAD_ACCEPT_ATTRIBUTE
+} as const;
 
-export const HUMAN_UPLOAD_SUMMARY = 'Accepted: docs, decks, images, video, audio, design files, archives · max 50 MB · no executables or scripts.';
+export const HUMAN_UPLOAD_GUIDANCE =
+  'Accepted: documents, presentations, images, video, audio, design/project files, and archives; up to 5 files, 50 MB each, and 50 MB total. Executables and scripts are blocked.';
+
+export const HUMAN_UPLOAD_SUMMARY = 'Accepted: docs, decks, images, video, audio, design files, archives · 5 files max · 50 MB each · 50 MB total · no executables or scripts.';
 
 function getExtension(filename: string): string {
   const trimmed = filename.trim();
@@ -118,4 +126,30 @@ export function validateUploadFile(file: { name: string; size: number }): {
   }
 
   return { ok: true };
+}
+
+export function validateHumanUploadBatch(files: Array<{ name: string; size: number }>): {
+  ok: boolean;
+  reason?: string;
+} {
+  if (files.length === 0 || files.length > HUMAN_UPLOAD_POLICY.maxFiles) {
+    return { ok: false, reason: `Please upload between 1 and ${HUMAN_UPLOAD_POLICY.maxFiles} files.` };
+  }
+  if (files.some((file) => !validateUploadFile(file).ok)) {
+    return { ok: false, reason: 'One or more files are not supported.' };
+  }
+  if (files.reduce((total, file) => total + file.size, 0) > HUMAN_UPLOAD_POLICY.maxTotalSizeBytes) {
+    return { ok: false, reason: 'Total file size exceeds the 50 MB limit.' };
+  }
+  return { ok: true };
+}
+
+export function safeHumanUploadMime(value: string): string {
+  if (
+    value.length <= 127 &&
+    /^(?:application|audio|image|text|video)\/[a-z0-9][a-z0-9.+-]{0,99}$/i.test(value)
+  ) {
+    return value.toLowerCase();
+  }
+  return 'application/octet-stream';
 }

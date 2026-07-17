@@ -56,7 +56,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const { POST } = await import('@/app/api/telegram/upload/route');
     const response = await POST(new Request('http://localhost/api/telegram/upload', {
       method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555' }
+      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
     }));
     formDataSpy.mockRestore();
 
@@ -90,7 +90,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const { POST } = await import('@/app/api/telegram/upload/route');
     const response = await POST(new Request('http://localhost/api/telegram/upload', {
       method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555' }
+      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
     }));
     const body = await response.json();
     formDataSpy.mockRestore();
@@ -119,7 +119,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const { POST } = await import('@/app/api/telegram/upload/route');
     const response = await POST(new Request('http://localhost/api/telegram/upload', {
       method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555' }
+      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
     }));
     formDataSpy.mockRestore();
 
@@ -146,7 +146,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const { POST } = await import('@/app/api/telegram/upload/route');
     const response = await POST(new Request('http://localhost/api/telegram/upload', {
       method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555' }
+      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
     }));
     formDataSpy.mockRestore();
 
@@ -165,7 +165,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const { POST } = await import('@/app/api/telegram/upload/route');
     const response = await POST(new Request('http://localhost/api/telegram/upload', {
       method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555' }
+      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
     }));
     formDataSpy.mockRestore();
 

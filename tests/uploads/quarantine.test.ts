@@ -180,6 +180,33 @@ describe('validateFile', () => {
     expect(validateFile(file, buf).ok).toBe(false);
   });
 
+  test.each(['brief.txt', 'brief.csv'])('accepts strict UTF-8 Unicode and BOM throughout %s', (name) => {
+    const buf = new TextEncoder().encode('\uFEFFClient says “launch in 東京”\nBudget,5000').buffer;
+    const file = makeFileWithBytes(name, [], '');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(true);
+  });
+
+  test('rejects invalid UTF-8 in text files', () => {
+    const buf = new Uint8Array([0x66, 0x6f, 0x80]).buffer;
+    const file = makeFileWithBytes('brief.txt', [], 'text/plain');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(false);
+  });
+
+  test.each([
+    new Uint8Array([...new Uint8Array(600).fill(0x61), 0x00]).buffer,
+    new Uint8Array([...new Uint8Array(600).fill(0x61), 0xff]).buffer,
+    new TextEncoder().encode(`${'a'.repeat(600)}\u0085tail`).buffer
+  ])('rejects disallowed binary or control data after the old 512-byte prefix', (buf) => {
+    const file = makeFileWithBytes('brief.txt', [], 'application/octet-stream');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(false);
+  });
+
   test('rejects unknown file type', () => {
     const buf = new ArrayBuffer(50);
     const view = new Uint8Array(buf);
