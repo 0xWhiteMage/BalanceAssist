@@ -113,8 +113,16 @@ test.describe('balance assist intake via persistent rail', () => {
     const canonicalDraft: Record<string, string> = {};
     const provenance: Record<string, string> = {};
     const chatRequests: Array<{ messages?: Array<{ content?: string }> }> = [];
-    const consentRequests: Array<{ scope?: string; granted?: boolean }> = [];
-    const requestOrder: string[] = [];
+    const expectedConsent = {
+      scope: 'producer_transfer',
+      granted: true,
+      noticeVersion: '1.1'
+    } as const;
+    const consentRequests: Array<Record<string, unknown>> = [];
+    const requestOrder: Array<
+      | { kind: 'consent'; payload: Record<string, unknown> }
+      | { kind: 'finalize'; attempt: number }
+    > = [];
     let draftVersion = 0;
     let finalizeAttempts = 0;
 
@@ -217,8 +225,23 @@ test.describe('balance assist intake via persistent rail', () => {
     });
 
     await page.route(`**/api/projects/${sessionId}/consent`, async (route) => {
-      consentRequests.push(await route.request().postDataJSON());
-      requestOrder.push('consent');
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      consentRequests.push(payload);
+      requestOrder.push({ kind: 'consent', payload });
+      const exactPayload =
+        route.request().method() === 'POST' &&
+        Object.keys(payload).sort().join(',') === 'granted,noticeVersion,scope' &&
+        payload.scope === expectedConsent.scope &&
+        payload.granted === expectedConsent.granted &&
+        payload.noticeVersion === expectedConsent.noticeVersion;
+      if (!exactPayload) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ ok: false, consent: { producerTransfer: false } })
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -255,7 +278,7 @@ test.describe('balance assist intake via persistent rail', () => {
 
     await page.route('**/api/leads/finalize', async (route) => {
       finalizeAttempts += 1;
-      requestOrder.push(`finalize-${finalizeAttempts}`);
+      requestOrder.push({ kind: 'finalize', attempt: finalizeAttempts });
       if (finalizeAttempts === 1) {
         await route.fulfill({
           status: 503,
@@ -348,9 +371,20 @@ test.describe('balance assist intake via persistent rail', () => {
     await page.getByRole('button', { name: 'Retry sending brief' }).click();
     await expect(page.getByTestId('approve-confirmation')).toContainText('Queued for the Balance team');
     await expect(page.getByTestId('approve-confirmation')).not.toContainText(/delivered|reviewed/i);
-    expect(requestOrder.slice(0, 4)).toEqual(['consent', 'finalize-1', 'consent', 'finalize-2']);
+    expect(requestOrder.slice(0, 4)).toEqual([
+      { kind: 'consent', payload: expectedConsent },
+      { kind: 'finalize', attempt: 1 },
+      { kind: 'consent', payload: expectedConsent },
+      { kind: 'finalize', attempt: 2 }
+    ]);
 
     const samePanel = page.getByTestId('review-panel');
+    const reviewPanelHandle = await samePanel.elementHandle();
+    expect(reviewPanelHandle).not.toBeNull();
+    await samePanel.evaluate((node) => {
+      node.dataset.e2eIdentity = 'desktop-review-panel';
+      (window as Window & { __desktopReviewPanel?: HTMLElement }).__desktopReviewPanel = node;
+    });
     await samePanel.getByRole('button', { name: 'Edit project objective' }).click();
     await page.getByRole('textbox', { name: 'Project objective' }).fill('Build awareness and prompt sign-ups.');
     await page.getByRole('button', { name: 'Save project objective' }).click();
@@ -359,7 +393,19 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(reapproveButton).toBeVisible();
     await reapproveButton.click();
     await expect(page.getByTestId('approve-confirmation')).toContainText('Queued for the Balance team');
-    expect(requestOrder.slice(-2)).toEqual(['consent', 'finalize-3']);
+    expect(requestOrder.slice(-2)).toEqual([
+      { kind: 'consent', payload: expectedConsent },
+      { kind: 'finalize', attempt: 3 }
+    ]);
+    expect(await samePanel.evaluate((node) =>
+      node.dataset.e2eIdentity === 'desktop-review-panel' &&
+      (window as Window & { __desktopReviewPanel?: HTMLElement }).__desktopReviewPanel === node
+    )).toBe(true);
+    expect(await reviewPanelHandle!.evaluate((node) =>
+      node.isConnected && node.dataset.e2eIdentity === 'desktop-review-panel'
+    )).toBe(true);
+
+    expect(consentRequests).toEqual([expectedConsent, expectedConsent, expectedConsent]);
 
     expect(chatRequests).toHaveLength(4);
     expect(chatRequests.map((request) => request.messages?.at(-1)?.content)).toEqual([
