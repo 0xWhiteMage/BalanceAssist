@@ -5,8 +5,11 @@ const DRAFT_LINE_PATTERN = /:::draft:::\s*(?:<json>)?\s*(\{[\s\S]*?\})\s*(?:<\/j
 const TEMPORAL_EXPRESSION = String.raw`(?:today|tomorrow|tonight|(?:next|this)\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?)`;
 const DURATION_NUMBER = String.raw`(?:\d{1,3}|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?|(?:one|two|three|four|five|six|seven|eight|nine)\s+hundred)`;
 const DURATION_EXPRESSION = String.raw`${DURATION_NUMBER}\s+(?:business\s+)?(?:days?|weeks?|months?)`;
+const CURRENCY_AMOUNT = String.raw`(?:(?:s?\$|£|€)\s*\d[\d,]*(?:\.\d{2})?|(?:sgd|usd|eur|gbp)\s*\d[\d,]*(?:\.\d{2})?|\d[\d,]*(?:\.\d{2})?\s*(?:dollars?|pounds?|euros?))`;
 const MONEY_WORD = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)`;
 const BALANCE_PRICE_SUBJECT = String.raw`(?:(?:the\s+)?(?:final|fixed|guaranteed)\s+(?:price|pricing|quote|fee|cost)(?!\s+(?:you|the user)\s+(?:entered|provided|stated|supplied))|(?:our|balance(?:'s)?)\s+(?:(?:final|fixed|guaranteed)\s+)?(?:price|pricing|quote|fee|cost)|(?:the\s+)?quote(?=\s+(?:is|comes?\s+to|totals?|equals?)))`;
+const DIRECT_PRICE_PATTERN = new RegExp(String.raw`\b(?:price|fee|cost)\s+is\s+${CURRENCY_AMOUNT}\b`, 'i');
+const USER_PRICE_ATTRIBUTION_PATTERN = /\b(?:you\s+(?:entered|stated)|your\s+budget|client[- ]provided)\b/i;
 
 const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
   {
@@ -14,7 +17,7 @@ const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> =
     response: "I can't provide legal or contract advice. A Balance producer must review legal and contract terms directly."
   },
   {
-    pattern: new RegExp(String.raw`\b${BALANCE_PRICE_SUBJECT}\b[^.\n]{0,40}(?:(?:s?\$|£|€)\s*\d[\d,]*(?:\.\d{2})?|(?:sgd|usd|eur|gbp)\s*\d[\d,]*(?:\.\d{2})?|\d[\d,]*(?:\.\d{2})?\s*(?:dollars?|pounds?|euros?))\b`, 'i'),
+    pattern: new RegExp(String.raw`\b${BALANCE_PRICE_SUBJECT}\b[^.\n]{0,40}${CURRENCY_AMOUNT}\b`, 'i'),
     response: 'Final pricing is set by Balance producers after they review the scope.'
   },
   {
@@ -31,6 +34,10 @@ const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> =
   },
   {
     pattern: new RegExp(String.raw`\b(?:the|your|this) (?:project|deliverable|film|video) will be (?:ready|complete|finished)\s+(?:(?:(?:by|on)\s+)?${TEMPORAL_EXPRESSION}|(?:within|in)\s+${DURATION_EXPRESSION})\b`, 'i'),
+    response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
+  },
+  {
+    pattern: new RegExp(String.raw`\bwe (?:can|will) have (?:it|(?:the\s+)?(?:film|video|project)) ready\s+(?:by\s+${TEMPORAL_EXPRESSION}|(?:in|within)\s+${DURATION_EXPRESSION})\b`, 'i'),
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
@@ -125,6 +132,12 @@ function parseAssistantReply(reply: string): {
 
 function matchesRefusal(reply: string, userMessage: string): string | null {
   const normalizedReply = reply.normalize('NFKC').replace(/[’‘`]/g, "'");
+  const hasDirectPriceCommitment = normalizedReply
+    .split(/(?:[.!?](?:\s+|$)|\n+)/)
+    .some((sentence) => DIRECT_PRICE_PATTERN.test(sentence) && !USER_PRICE_ATTRIBUTION_PATTERN.test(sentence));
+  if (hasDirectPriceCommitment) {
+    return 'Final pricing is set by Balance producers after they review the scope.';
+  }
   for (const { pattern, response } of PRODUCER_BOUNDARY_PATTERNS) {
     if (pattern.test(normalizedReply)) return response;
   }
