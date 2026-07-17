@@ -56,6 +56,14 @@ describe('classifyConfidentialIntent', () => {
     expect(classifyConfidentialIntent(input)).toBe(expected);
   });
 
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['This launch is embargoed.', 'unreleased'],
+    ['It has not been announced yet.', 'unreleased'],
+    ['This file has PII.', 'personal-data']
+  ])('classifies bounded governance predicate %j as %s', (input, expected) => {
+    expect(classifyConfidentialIntent(input)).toBe(expected);
+  });
+
   test.each<[string, 'personal-data']>([
     ['This file contains personally identifiable information.', 'personal-data'],
     ['I need to upload personally identifiable information.', 'personal-data']
@@ -253,13 +261,23 @@ describe('classifyConfidentialIntent', () => {
 
   test.each<[string, 'confidential']>([
     ['This brief is conf\u0456dential.', 'confidential'],
-    ['I am sending confident\u0456al client documents.', 'confidential']
+    ['I am sending confident\u0456al client documents.', 'confidential'],
+    ['This brief is \u0441\u043Enfidential.', 'confidential'],
+    ['This brief is \u0441\u043Enf\u0456dent\u0456al.', 'confidential']
   ])('normalizes a scoped Cyrillic lookalike in protected keyword %j as %s', (input, expected) => {
     expect(classifyConfidentialIntent(input)).toBe(expected);
   });
 
-  test('normalizes a scoped Cyrillic lookalike in a protected filename', () => {
-    expect(classifyConfidentialFilename('conf\u0456dential-brief.pdf')).toBe('confidential');
+  test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
+    ['conf\u0456dential-brief.pdf', 'confidential'],
+    ['\u0441\u043Enfidential-brief.pdf', 'confidential'],
+    ['p\u0456i.csv', 'personal-data']
+  ])('normalizes a scoped Cyrillic lookalike in protected filename %j as %s', (input, expected) => {
+    expect(classifyConfidentialFilename(input)).toBe(expected);
+  });
+
+  test('normalizes a scoped Cyrillic lookalike in PII prose', () => {
+    expect(classifyConfidentialIntent('This file has p\u0456i.')).toBe('personal-data');
   });
 
   test.each<[string, Exclude<ConfidentialIntentResult, 'allow'>]>([
@@ -286,12 +304,21 @@ describe('classifyConfidentialIntent', () => {
     'The campaign has already been released.',
     'The candidate personalised the confidentially word.',
     'The word m\u0456xed is ordinary.',
+    'The \u0441\u043Enference pilot reviewed a picture.',
+    'The p\u0456lot reviewed a p\u0456cture.',
     'The class action is unconditional.',
     'We need a release form for filming.',
     'Please contact me about the project.'
   ])('allows benign, negated, and substring near-matches: %j', (input) => {
     expect(classifyConfidentialIntent(input)).toBe('allow');
   });
+
+  test.each(['\u0441\u043Enference.pdf', 'p\u0456lot.pdf', 'p\u0456cture.jpg', 'cand\u0456date.pdf'])(
+    'allows benign mixed-script filename %j',
+    (input) => {
+      expect(classifyConfidentialFilename(input)).toBe('allow');
+    }
+  );
 
   test.each([
     'This is sensitive to light.',

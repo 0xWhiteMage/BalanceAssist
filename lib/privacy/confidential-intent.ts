@@ -55,7 +55,9 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
     category: 'unreleased',
     patterns: [
       /\b(?:this|that|it) (?:is|are) (?:an? )?embargoed (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/,
+      /\b(?:project|campaign|product|film|video|footage|media|assets?|creative|launch) (?:is|are) embargoed\b/,
       /\b(?:shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:an? |the |our |my |client )?embargoed (?:project|campaign|product|film|video|footage|media|assets?|creative|launch)\b/,
+      /\b(?:this|that|it) (?:has|have) not been announced yet\b/,
       /\b(?:project|campaign|product|film|video|footage|media|assets?|creative|launch) (?:has|have) not been announced yet\b/,
       /\b(?:project|campaign|product|film|video|footage|media|assets?|creative|launch) (?:is|are|was|were) not announced yet\b/,
       /\b(?:this|that|the|our|my|client|an?) (?:project|campaign|product|film|video|footage|media|asset|assets|creative|launch) (?:is|are) (?:unreleased|pre release|unannounced)\b/,
@@ -69,7 +71,7 @@ const CATEGORY_PATTERNS: ReadonlyArray<{
     patterns: [
       /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:pii|passport (?:numbers?|details)|identity documents?)\b/,
       /\b(?:contains?|includes?|shar(?:e|ing)|send(?:ing)?|upload(?:ing)?|provid(?:e|ing)|process(?:ing)?) (?:private )?(?:personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)\b/,
-      /\b(?:this|that|the|our|my|client) (?:attached )?(?:brief|file|document|material)? ?(?:contains?|includes?|has) (?:private )?(?:personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)\b/
+      /\b(?:this|that|the|our|my|client) (?:attached )?(?:brief|file|document|material)? ?(?:contains?|includes?|has) (?:private )?(?:pii|personal data|personally identifiable information|personally identifying information|identifying details|contact details|contact information)\b/
     ]
   },
   {
@@ -168,10 +170,15 @@ function removeDefaultIgnorables(value: string): string {
   return value.replace(/\p{Default_Ignorable_Code_Point}/gu, '');
 }
 
+function normalizeProtectedTermLookalikes(value: string): string {
+  return value.replace(/\p{L}+/gu, (token) => {
+    const skeleton = token.replace(/\u043e/g, 'o').replace(/\u0441/g, 'c').replace(/\u0456/g, 'i');
+    return skeleton === 'confidential' || skeleton === 'pii' ? skeleton : token;
+  });
+}
+
 function normalizeForClassification(value: string): string {
-  return removeDefaultIgnorables(value.normalize('NFKC'))
-    .toLowerCase()
-    .replace(/conf[i\u0456]dent[i\u0456]al/g, 'confidential')
+  return normalizeProtectedTermLookalikes(removeDefaultIgnorables(value.normalize('NFKC')).toLowerCase())
     .replace(/[’‘`]/g, "'")
     .replace(/\bn\s*[.\-]?\s*d\s*[.\-]?\s*a\b/g, 'nda')
     .replace(/[‐‑‒–—−-]+/g, ' ')
