@@ -13,13 +13,6 @@ type ZipEntry = {
   dataOffset: number;
 };
 
-function getExtension(filename: string): string {
-  const trimmed = filename.trim();
-  const lastDot = trimmed.lastIndexOf('.');
-  if (lastDot < 0 || lastDot === trimmed.length - 1) return '';
-  return trimmed.slice(lastDot + 1).toLowerCase();
-}
-
 // Minimal central-directory-based ZIP reader. OOXML files (.pptx/.docx) are ZIP
 // archives of XML parts; we walk the End-of-Central-Directory record to find each
 // entry's compressed bytes without pulling in a dependency.
@@ -214,17 +207,12 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
-export function extractTextFromBuffer(buffer: Buffer, filename: string): string {
-  const ext = getExtension(filename);
+export function extractTextFromBuffer(buffer: Buffer, verifiedMime: string): string {
   let text = '';
-  if (ext === 'txt') {
+  if (verifiedMime === 'text/plain') {
     text = buffer.toString('utf8');
-  } else if (ext === 'pdf') {
+  } else if (verifiedMime === 'application/pdf') {
     text = extractFromPdf(buffer);
-  } else if (ext === 'pptx') {
-    text = extractFromPptx(buffer);
-  } else if (ext === 'docx') {
-    text = extractFromDocx(buffer);
   }
   return normalizeWhitespace(text).slice(0, PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters);
 }

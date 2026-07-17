@@ -195,6 +195,7 @@ describe('chatRequest client', () => {
 
     expect(result).toEqual({ ok: true });
     const form = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('mode')).toBe('human');
     expect(form.get('consent')).toBeNull();
     expect(form.get('sessionId')).toBeNull();
     expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.headers).toEqual({ 'x-session-id': 'session-123' });

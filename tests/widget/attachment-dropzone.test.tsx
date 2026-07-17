@@ -48,7 +48,7 @@ test('discloses the exact AI formats, limits, extraction behavior, and DeepSeek 
   expect(disclosure).toHaveTextContent(/do not prove.*non-confidential/i);
   expect(container.querySelector('input[type="file"]')).toHaveAttribute(
     'accept',
-    'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv'
+    'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,.txt,.csv'
   );
 });
 
@@ -361,4 +361,6 @@ test('forwards only the server-derived analysis payload to the draft callback', 
   fireEvent.change(input, { target: { files: [new File(['client text'], 'brief.txt', { type: 'text/plain' })] } });
 
   await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledWith('brief.txt', 'Server-verified brief text'));
+  const uploadCall = vi.mocked(global.fetch).mock.calls.find(([, init]) => init?.method === 'POST' && init.body instanceof FormData);
+  expect((uploadCall?.[1]?.body as FormData).get('mode')).toBe('analysis');
 });

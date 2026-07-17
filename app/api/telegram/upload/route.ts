@@ -3,11 +3,17 @@ import { requireSession } from '@/lib/api/require-session';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
 import { classifyConfidentialFilename } from '@/lib/privacy/confidential-intent';
-import { PRIVATE_ANALYSIS_UPLOAD_POLICY } from '@/lib/uploads/quarantine';
+import { PRIVATE_ANALYSIS_UPLOAD_POLICY, validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 
 const MAX_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
 
 class MultipartBodyTooLargeError extends Error {}
+
+async function readFileBuffer(file: File): Promise<ArrayBuffer> {
+  return typeof file.arrayBuffer === 'function'
+    ? file.arrayBuffer()
+    : new Response(file).arrayBuffer();
+}
 
 function boundedBodyStream(body: ReadableStream<Uint8Array>, maxBytes: number) {
   const reader = body.getReader();
@@ -78,6 +84,15 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, error: 'Invalid form data' }, { status: 400 }, request);
   }
 
+  const modeValue = form.get('mode');
+  if (modeValue === null) {
+    return jsonWithCors({ ok: false, code: 'upload_mode_required' }, { status: 400 }, request);
+  }
+  if (modeValue !== 'analysis' && modeValue !== 'human') {
+    return jsonWithCors({ ok: false, code: 'invalid_upload_mode' }, { status: 400 }, request);
+  }
+  const mode = modeValue;
+
   const files = form
     .getAll('files')
     .concat(form.getAll('file'))
@@ -93,12 +108,14 @@ export async function POST(request: Request) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
   }
 
-  try {
-    if (files.some((file) => classifyConfidentialFilename(file.name) !== 'allow')) {
+  if (mode === 'analysis') {
+    try {
+      if (files.some((file) => classifyConfidentialFilename(file.name) !== 'allow')) {
+        return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+      }
+    } catch {
       return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
     }
-  } catch {
-    return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
   }
 
   const sessionId = authResult.auth.sessionId;
@@ -116,17 +133,46 @@ export async function POST(request: Request) {
   if (consentError) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 503 }, request);
   }
-  const analysisConsent = (consents ?? []).find((entry: { scope?: unknown }) => entry.scope === 'analysis') as { granted?: unknown } | undefined;
-  if (analysisConsent?.granted !== true) {
-    return jsonWithCors({ ok: false, code: 'analysis_consent_required' }, { status: 403 }, request);
+  const requiredScope = mode === 'analysis' ? 'analysis' : 'producer_transfer';
+  const requiredConsent = (consents ?? []).find(
+    (entry: { scope?: unknown }) => entry.scope === requiredScope
+  ) as { granted?: unknown } | undefined;
+  if (requiredConsent?.granted !== true) {
+    const code = mode === 'analysis' ? 'analysis_consent_required' : 'producer_transfer_consent_required';
+    return jsonWithCors({ ok: false, code }, { status: 403 }, request);
+  }
+
+  let preflight: Array<{ buffer: ArrayBuffer; verifiedMime: string }>;
+  try {
+    const buffers = await Promise.all(files.map(readFileBuffer));
+    const batchValidation = validateFileBatch(files.map((file, index) => ({ file, buffer: buffers[index] })));
+    if (!batchValidation.ok) {
+      return jsonWithCors({ ok: false, code: 'file_validation_failed' }, { status: 422 }, request);
+    }
+    preflight = files.map((file, index) => {
+      const validation = validateFile(file, buffers[index]);
+      if (!validation.ok) throw new Error('file_validation_failed');
+      return { buffer: buffers[index], verifiedMime: validation.mime };
+    });
+  } catch {
+    return jsonWithCors({ ok: false, code: 'file_validation_failed' }, { status: 422 }, request);
   }
 
   const stored: Array<{ objectKey: string; mimeType: string; extractedText: string }> = [];
   try {
-    for (const file of files) {
-      stored.push(await storePrivateUpload({ client: authResult.supabase as unknown as PrivateStorageClient, bucket, sessionId, file }));
+    for (const file of preflight) {
+      stored.push(await storePrivateUpload({
+        client: authResult.supabase as unknown as PrivateStorageClient,
+        bucket,
+        sessionId,
+        ...file,
+        extractText: mode === 'analysis'
+      }));
     }
-    return jsonWithCors({ ok: true, status: 'stored', analyses: stored.map(({ mimeType, extractedText }) => ({ mimeType, extractedText })) }, undefined, request);
+    const response = mode === 'analysis'
+      ? { ok: true, status: 'stored', analyses: stored.map(({ mimeType, extractedText }) => ({ mimeType, extractedText })) }
+      : { ok: true, status: 'stored' };
+    return jsonWithCors(response, undefined, request);
   } catch (error) {
     const compensated = await Promise.all(stored.map(({ objectKey }) => deletePrivateUpload({
       client: authResult.supabase as unknown as PrivateStorageClient,

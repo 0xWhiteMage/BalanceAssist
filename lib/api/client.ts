@@ -263,6 +263,7 @@ export async function uploadRequestedFiles(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const form = new FormData();
+    form.set('mode', 'human');
     for (const file of files) {
       form.append('files', file, file.name);
     }

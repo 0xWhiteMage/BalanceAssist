@@ -15,8 +15,9 @@ vi.mock('@/lib/uploads/private-storage', () => ({
   PrivateStorageError: class PrivateStorageError extends Error {}
 }));
 
-function formWith(file: File) {
+function formWith(file: File, mode: 'analysis' | 'human' = 'analysis') {
   const form = new FormData();
+  form.set('mode', mode);
   form.append('files', file);
   return form;
 }
@@ -42,6 +43,20 @@ async function post(form: FormData, headers: HeadersInit = {}) {
 }
 
 describe('POST /api/telegram/upload private storage', () => {
+  function useConsents(consents: Array<{ scope: string; granted: boolean }>) {
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId, capability: 'capability' },
+      supabase: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: consents, error: null })) }))
+          }))
+        }))
+      }
+    });
+  }
+
   beforeEach(() => {
     process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
     requireSessionMock.mockImplementation(async (request: Request, expectedSessionId?: string) => {
@@ -149,6 +164,21 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(response.status).toBe(413);
   });
 
+  test.each([
+    [null, 'upload_mode_required'],
+    ['preview', 'invalid_upload_mode']
+  ])('rejects multipart mode %j', async (mode, code) => {
+    const form = new FormData();
+    if (mode) form.set('mode', mode);
+    form.append('files', new File(['brief'], 'brief.txt', { type: 'text/plain' }));
+
+    const response = await post(form);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ ok: false, code });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
   test('stores an analysis-consented file without producer delivery', async () => {
     const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
     const file = new File([bytes], 'launch-brief.pdf', { type: 'application/pdf' });
@@ -156,7 +186,11 @@ describe('POST /api/telegram/upload private storage', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, status: 'stored', analyses: [{ mimeType: 'application/pdf', extractedText: 'Launch film scope' }] });
-    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ bucket: 'temporary-attachments', file }));
+    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
+      bucket: 'temporary-attachments',
+      verifiedMime: 'application/pdf',
+      extractText: true
+    }));
   });
 
   test('rejects producer-only consent and never invokes delivery', async () => {
@@ -176,13 +210,70 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(storePrivateUploadMock).not.toHaveBeenCalled();
   });
 
+  test('human mode requires producer-transfer consent rather than analysis consent', async () => {
+    useConsents([{ scope: 'analysis', granted: true }]);
+
+    const response = await post(formWith(new File(['human'], 'ordinary.txt', { type: 'text/plain' }), 'human'));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'producer_transfer_consent_required' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test('human mode permits a protected filename and stores without extraction', async () => {
+    useConsents([{ scope: 'producer_transfer', granted: true }]);
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const response = await post(formWith(
+      new File([bytes], 'confidential-client-brief.pdf', { type: 'application/pdf' }),
+      'human'
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, status: 'stored' });
+    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
+      verifiedMime: 'application/pdf',
+      extractText: false
+    }));
+  });
+
+  test('preflights every file before the first storage side effect', async () => {
+    const form = new FormData();
+    form.set('mode', 'analysis');
+    form.append('files', new File(['valid text'], 'first.txt', { type: 'text/plain' }));
+    form.append('files', new File([new Uint8Array([0x00, 0x4d, 0x5a])], 'second.txt', { type: 'text/plain' }));
+
+    const response = await post(form);
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'file_validation_failed' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
+  });
+
+  test('reads each file once during preflight and passes verified bytes to storage', async () => {
+    const bytes = new TextEncoder().encode('valid text');
+    const file = new File([bytes], 'brief.txt', { type: 'text/plain' });
+    const arrayBufferSpy = vi.fn(async () => bytes.buffer);
+    Object.defineProperty(file, 'arrayBuffer', { value: arrayBufferSpy });
+
+    const response = await post(formWith(file));
+
+    expect(response.status).toBe(200);
+    expect(arrayBufferSpy).toHaveBeenCalledOnce();
+    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
+      buffer: bytes.buffer,
+      verifiedMime: 'text/plain',
+      extractText: true
+    }));
+    expect(storePrivateUploadMock.mock.calls[0]?.[0]).not.toHaveProperty('file');
+  });
+
   test('rejects invalid files before private persistence', async () => {
-    storePrivateUploadMock.mockRejectedValueOnce(new Error('validation failed'));
     const file = new File([new Uint8Array([0x4d, 0x5a])], 'payload.pdf', { type: 'application/pdf' });
     const response = await post(formWith(file));
 
-    expect(response.status).toBe(503);
-    expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ file }));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'file_validation_failed' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
   });
 
   test('compensates earlier stored files when a later file fails', async () => {
@@ -190,6 +281,7 @@ describe('POST /api/telegram/upload private storage', () => {
       .mockResolvedValueOnce({ status: 'stored', objectKey: 'opaque-one', mimeType: 'text/plain', extractedText: 'first', retentionExpiresAt: '2026-07-15T00:00:00.000Z' })
       .mockRejectedValueOnce(new Error('storage failed'));
     const form = new FormData();
+    form.set('mode', 'analysis');
     form.append('files', new File(['first'], 'first.txt', { type: 'text/plain' }));
     form.append('files', new File(['second'], 'second.txt', { type: 'text/plain' }));
 
@@ -203,6 +295,7 @@ describe('POST /api/telegram/upload private storage', () => {
     storePrivateUploadMock.mockResolvedValueOnce({ status: 'stored', objectKey: 'opaque-one', mimeType: 'text/plain', extractedText: 'first', retentionExpiresAt: '2026-07-15T00:00:00.000Z' }).mockRejectedValueOnce(new Error('storage failed'));
     deletePrivateUploadMock.mockResolvedValueOnce(false);
     const form = new FormData();
+    form.set('mode', 'analysis');
     form.append('files', new File(['first'], 'first.txt', { type: 'text/plain' }));
     form.append('files', new File(['second'], 'second.txt', { type: 'text/plain' }));
 

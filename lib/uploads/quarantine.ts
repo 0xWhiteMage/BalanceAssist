@@ -2,7 +2,7 @@ export type FileQuarantineResult = { ok: true; mime: string } | { ok: false; rea
 
 export const PRIVATE_ANALYSIS_UPLOAD_POLICY = {
   acceptedFormats: ['PNG', 'JPEG', 'GIF', 'WebP', 'PDF', 'TXT', 'CSV'],
-  accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv',
+  accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,.txt,.csv',
   maxFiles: 5,
   maxFileSizeBytes: 10 * 1024 * 1024,
   maxTotalSizeBytes: 25 * 1024 * 1024,
@@ -15,7 +15,8 @@ const {
   maxFiles: MAX_FILES
 } = PRIVATE_ANALYSIS_UPLOAD_POLICY;
 
-const ALLOWED_MIMES = PRIVATE_ANALYSIS_UPLOAD_POLICY.accept.split(',');
+const ALLOWED_MIMES = PRIVATE_ANALYSIS_UPLOAD_POLICY.accept.split(',').filter((value) => !value.startsWith('.'));
+const COMMON_TEXT_MIMES = ['', 'application/octet-stream'] as const;
 
 const MAGIC_BYTES: Array<{ mime: string; bytes: number[] }> = [
   { mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47] },
@@ -67,6 +68,11 @@ function sniffPlainText(buffer: ArrayBuffer): boolean {
   return true;
 }
 
+function getExtension(filename: string): string {
+  const lastDot = filename.trim().lastIndexOf('.');
+  return lastDot < 0 ? '' : filename.trim().slice(lastDot + 1).toLowerCase();
+}
+
 export function validateFile(file: File, buffer: ArrayBuffer): FileQuarantineResult {
   if (file.size === 0) {
     return { ok: false, reason: 'File is empty.' };
@@ -78,6 +84,7 @@ export function validateFile(file: File, buffer: ArrayBuffer): FileQuarantineRes
 
   const detectedMime = detectMimeFromBytes(buffer);
   const declaredMime = file.type || '';
+  const extension = getExtension(file.name);
 
   if (detectedMime) {
     if (!ALLOWED_MIMES.includes(detectedMime)) {
@@ -86,11 +93,19 @@ export function validateFile(file: File, buffer: ArrayBuffer): FileQuarantineRes
     return { ok: true, mime: detectedMime };
   }
 
-  if (declaredMime === 'text/plain' && sniffPlainText(buffer)) {
+  if (
+    extension === 'txt' &&
+    (declaredMime === 'text/plain' || COMMON_TEXT_MIMES.includes(declaredMime as (typeof COMMON_TEXT_MIMES)[number])) &&
+    sniffPlainText(buffer)
+  ) {
     return { ok: true, mime: 'text/plain' };
   }
 
-  if (declaredMime === 'text/csv' && sniffPlainText(buffer)) {
+  if (
+    extension === 'csv' &&
+    ['text/csv', 'application/csv', 'text/comma-separated-values', 'application/vnd.ms-excel', ...COMMON_TEXT_MIMES].includes(declaredMime) &&
+    sniffPlainText(buffer)
+  ) {
     return { ok: true, mime: 'text/csv' };
   }
 

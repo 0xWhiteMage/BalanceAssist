@@ -49,6 +49,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
 
   test('never calls Telegram while accepting an analysis-consented upload', async () => {
     const form = new FormData();
+    form.set('mode', 'analysis');
     form.append('files', new File(['Draft-only analysis'], 'brief.txt', { type: 'text/plain' }));
     const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 
@@ -79,6 +80,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
       supabase: { from: fromMock }
     });
     const form = new FormData();
+    form.set('mode', 'analysis');
     form.append('files', new File(['do not process'], filename, { type: 'text/plain' }));
     const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -109,6 +111,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
       supabase: { from: fromMock }
     });
     const form = new FormData();
+    form.set('mode', 'analysis');
     form.append('files', new File(['safe'], 'ordinary-brief.txt', { type: 'text/plain' }));
     form.append('files', new File(['protected'], '.nda.txt', { type: 'text/plain' }));
     const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
@@ -136,6 +139,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
       supabase: { from: fromMock }
     });
     const form = new FormData();
+    form.set('mode', 'analysis');
     form.append('files', new File(['safe'], 'ordinary-brief.txt', { type: 'text/plain' }));
     const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 
@@ -154,6 +158,7 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
 
   test('allows a benign filename near-match through consent and storage', async () => {
     const form = new FormData();
+    form.set('mode', 'analysis');
     form.append('files', new File(['ordinary'], 'personal-project.txt', { type: 'text/plain' }));
     const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 

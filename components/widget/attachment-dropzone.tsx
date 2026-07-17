@@ -230,6 +230,7 @@ export function AttachmentDropzone({
     setError(null);
 
     const fd = new FormData();
+    fd.set('mode', 'analysis');
     for (const file of fileArray) {
       updateFileStatus(file.name, 'validating');
       fd.append('files', file, file.name);

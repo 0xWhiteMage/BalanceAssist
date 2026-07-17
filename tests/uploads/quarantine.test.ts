@@ -69,7 +69,7 @@ function makeTextBuffer(content: string): ArrayBuffer {
 test('exports the exact private AI analysis formats and limits', () => {
   expect(PRIVATE_ANALYSIS_UPLOAD_POLICY).toEqual({
     acceptedFormats: ['PNG', 'JPEG', 'GIF', 'WebP', 'PDF', 'TXT', 'CSV'],
-    accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv',
+    accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,.txt,.csv',
     maxFiles: 5,
     maxFileSizeBytes: 10 * 1024 * 1024,
     maxTotalSizeBytes: 25 * 1024 * 1024,
@@ -154,6 +154,30 @@ describe('validateFile', () => {
     const file = makeFileWithBytes('data.csv', [], 'text/csv');
     Object.defineProperty(file, 'size', { value: buf.byteLength });
     expect(validateFile(file, buf)).toEqual({ ok: true, mime: 'text/csv' });
+  });
+
+  test.each([
+    ['notes.txt', ''],
+    ['notes.txt', 'application/octet-stream'],
+    ['data.csv', ''],
+    ['data.csv', 'application/vnd.ms-excel']
+  ])('accepts cross-browser text file %s declared as %j', (name, type) => {
+    const buf = makeTextBuffer('project,launch film');
+    const file = makeFileWithBytes(name, [], type);
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf)).toEqual({
+      ok: true,
+      mime: name.endsWith('.csv') ? 'text/csv' : 'text/plain'
+    });
+  });
+
+  test('rejects binary bytes spoofed as a cross-browser text file', () => {
+    const buf = new Uint8Array([0x00, 0x4d, 0x5a]).buffer;
+    const file = makeFileWithBytes('brief.txt', [], 'application/octet-stream');
+    Object.defineProperty(file, 'size', { value: buf.byteLength });
+
+    expect(validateFile(file, buf).ok).toBe(false);
   });
 
   test('rejects unknown file type', () => {
