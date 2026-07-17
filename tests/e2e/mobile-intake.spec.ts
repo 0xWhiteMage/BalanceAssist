@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import path from 'node:path';
 
 async function enterAiIntake(page: Page) {
@@ -12,7 +12,343 @@ async function enterAiIntake(page: Page) {
   return input;
 }
 
+async function assertMinimumTarget(locator: Locator) {
+  await expect(locator).toBeVisible();
+  const bounds = await locator.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.width).toBeGreaterThanOrEqual(44);
+  expect(bounds!.height).toBeGreaterThanOrEqual(44);
+}
+
+async function assertDirectContactRoutes(page: Page) {
+  await assertMinimumTarget(page.getByRole('button', { name: 'Talk to the team without AI', exact: true }));
+  await expect(page.getByRole('link', { name: 'Email the team', exact: true })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+  await expect(page.getByRole('link', { name: 'Book a call', exact: true })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+}
+
+function versionedDraft(draft: Record<string, string>, provenance: Record<string, string>) {
+  const updatedAt = '2026-07-17T10:00:00.000Z';
+  return Object.fromEntries(Object.entries(draft).map(([field, value]) => [
+    field,
+    { value, provenance: provenance[field] ?? 'user-stated', updatedAt }
+  ]));
+}
+
 test.describe('mobile intake', () => {
+  test('covers the staged intake copy, reflow, keyboard tabs, errors, and targets at 320px', async ({ page }) => {
+    const sessionId = 'mobile-thesis-session';
+    const originalWording = 'A launch film for our accessibility initiative that introduces the programme to customers across regional communities and partner organisations';
+    const aiSummary = 'An uplifting and inclusive launch film that explains the accessibility programme clearly for customers, community partners, and regional teams.';
+    const canonicalDraft: Record<string, string> = {};
+    const provenance: Record<string, string> = {};
+    const savedEdits: Array<{ field: string; value: string }> = [];
+    let draftVersion = 0;
+    let chatCalls = 0;
+    let finalizeAttempts = 0;
+
+    type StageFixture = {
+      currentStage: 'audience' | 'planning' | 'references-contact';
+      message: string;
+      recap: string;
+      updates: Record<string, string>;
+      inferred: readonly string[];
+    };
+    const stages: readonly StageFixture[] = [
+      {
+        currentStage: 'audience',
+        message: 'Who is this for?',
+        recap: `So far: ${originalWording}; objective: Introduce the initiative to customers.`,
+        updates: {
+          projectScope: originalWording,
+          scopePolished: aiSummary,
+          projectObjective: 'Introduce the initiative to customers.',
+          projectType: 'Film',
+          service: 'production'
+        },
+        inferred: ['scopePolished']
+      },
+      {
+        currentStage: 'planning',
+        message: 'Timeline helps with planning and feasibility, while budget helps us suggest realistic formats and scope. What timeline are you working with?',
+        recap: 'So far: audience: Not sure yet; intended outputs: Skip.',
+        updates: { audience: 'Not sure yet', intendedOutputs: 'Skip' },
+        inferred: []
+      },
+      {
+        currentStage: 'references-contact',
+        message: 'Would you like to add any references, or Skip?',
+        recap: 'So far: timeline: Not sure yet; budget: Prefer not to share.',
+        updates: { timelineBand: 'Not sure yet', budgetBand: 'Prefer not to share' },
+        inferred: []
+      },
+      {
+        currentStage: 'references-contact',
+        message: 'Your core brief is ready. Review it in the Brief tab before sending it to Balance.',
+        recap: 'So far: references: Skipped; contact name: Jayden; contact email: jayden@example.com.',
+        updates: {
+          referencesStatus: 'skipped',
+          contactName: 'Jayden',
+          contactCompany: 'Acme',
+          contactEmail: 'jayden@example.com'
+        },
+        inferred: []
+      }
+    ];
+
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.route('**/api/sessions/inspect', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, exists: false })
+    }));
+    await page.route('**/api/sessions', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ sessionId, persisted: true })
+    }));
+    await page.route(`**/api/projects/${sessionId}/draft`, async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            sessionId,
+            draft: versionedDraft(canonicalDraft, provenance),
+            draftVersion,
+            fieldCount: Object.keys(canonicalDraft).length,
+            referenceLinks: [],
+            canonicalReferenceSetHash: 'mobile-references-v1'
+          })
+        });
+        return;
+      }
+
+      const body = route.request().postDataJSON() as {
+        fields?: Array<{ field: string; value: string; provenance: string }>;
+        expectedDraftVersion?: number;
+      };
+      expect(body.expectedDraftVersion).toBe(draftVersion);
+      for (const field of body.fields ?? []) {
+        canonicalDraft[field.field] = field.value;
+        provenance[field.field] = field.provenance;
+        savedEdits.push({ field: field.field, value: field.value });
+      }
+      draftVersion += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessionId,
+          draft: versionedDraft(canonicalDraft, provenance),
+          draftVersion,
+          fieldCount: Object.keys(canonicalDraft).length
+        })
+      });
+    });
+    await page.route(`**/api/projects/${sessionId}/consent`, (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, consent: { producerTransfer: true } })
+    }));
+    await page.route('**/api/chat', async (route) => {
+      const stage = stages[chatCalls];
+      if (!stage) throw new Error(`Unexpected mobile chat request ${chatCalls + 1}`);
+      chatCalls += 1;
+      Object.assign(canonicalDraft, stage.updates);
+      for (const field of Object.keys(stage.updates)) {
+        provenance[field] = stage.inferred.includes(field) ? 'inferred' : 'user-stated';
+      }
+      draftVersion += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          outcome: 'draft_persisted',
+          message: stage.message,
+          draftUpdates: stage.updates,
+          canonicalDraft,
+          canonicalProvenance: provenance,
+          draftVersion,
+          currentStage: stage.currentStage,
+          stageRecaps: [stage.recap],
+          briefReady: chatCalls === stages.length,
+          reviewPrompt: chatCalls === stages.length ? 'Your core brief is ready. Review it in the Brief tab before sending.' : null,
+          missingFields: []
+        })
+      });
+    });
+    await page.route('**/api/leads/finalize', async (route) => {
+      finalizeAttempts += 1;
+      if (finalizeAttempts === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Temporary send failure' })
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          sessionId,
+          qualificationStatus: 'qualified',
+          persisted: true,
+          queued: true,
+          delivered: false,
+          retryable: true,
+          crmQueued: true,
+          crmRevision: 1,
+          approvedDraftVersion: draftVersion
+        })
+      });
+    });
+
+    await page.goto('/preview');
+    const input = await enterAiIntake(page);
+    const sendMessage = page.getByRole('button', { name: 'Send message' });
+    const progress = page.getByTestId('intake-stage-progress');
+    await expect(progress).toContainText('Stage 1 of 4');
+    await expect(progress).toContainText('Project and objective');
+    await assertDirectContactRoutes(page);
+    await assertMinimumTarget(sendMessage);
+
+    await input.fill(`${originalWording}. The objective is to introduce it to customers.`);
+    await input.press('Enter');
+    await expect(progress).toContainText('Stage 2 of 4');
+    await expect(page.getByRole('log').getByText(stages[0].recap, { exact: true })).toBeVisible();
+    await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
+    await assertDirectContactRoutes(page);
+
+    const tablist = page.getByRole('tablist', { name: 'Widget sections' });
+    const chatTab = page.getByRole('tab', { name: 'Chat', exact: true });
+    const briefTab = page.getByRole('tab', { name: 'Brief', exact: true });
+    const chatPanel = page.getByRole('tabpanel', { name: 'Chat' });
+    const briefPanel = page.getByRole('tabpanel', { name: 'Brief' });
+    await expect(tablist).toBeVisible();
+    await expect(chatPanel).toBeVisible();
+    await expect(briefPanel).toBeHidden();
+    await assertMinimumTarget(chatTab);
+    await assertMinimumTarget(briefTab);
+    await chatTab.focus();
+    await chatTab.press('ArrowRight');
+    await expect(briefTab).toBeFocused();
+    await expect(briefTab).toHaveAttribute('aria-selected', 'true');
+    await briefTab.press('ArrowLeft');
+    await expect(chatTab).toBeFocused();
+    await chatTab.press('End');
+    await expect(briefTab).toBeFocused();
+    await briefTab.press('Home');
+    await expect(chatTab).toBeFocused();
+    await expect(chatTab).toHaveAttribute('aria-selected', 'true');
+
+    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await expect(progress).toContainText('Stage 3 of 4');
+    await assertMinimumTarget(page.getByRole('button', { name: 'Not sure yet', exact: true }));
+    await assertDirectContactRoutes(page);
+    await page.getByRole('button', { name: 'Not sure yet', exact: true }).click();
+    await expect(progress).toContainText('Stage 4 of 4');
+    await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
+    await assertDirectContactRoutes(page);
+    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await expect(page.getByRole('log').getByText('Almost there. How should I address you?', { exact: true })).toBeVisible();
+    await assertDirectContactRoutes(page);
+    await input.fill('Jayden from Acme, jayden@example.com');
+    await input.press('Enter');
+
+    const reviewDirection = page.getByRole('status', { name: 'Brief ready' });
+    await expect(reviewDirection).toHaveText('Your core brief is ready. Review it in the Brief tab.');
+    await expect(reviewDirection).not.toContainText(/\b(left|right|panel|rail)\b/i);
+    await briefTab.click();
+    await expect(briefPanel).toBeVisible();
+    await expect(chatPanel).toBeHidden();
+    const review = page.getByTestId('review-panel');
+    const originalRow = review.locator('[data-testid="brief-row"][data-row-key="projectScope"]');
+    const summaryRow = review.locator('[data-testid="brief-row"][data-row-key="scopePolished"]');
+    await expect(originalRow).toContainText('Original wording');
+    await expect(summaryRow).toContainText('AI-drafted summary');
+    await expect(originalRow).toContainText(originalWording);
+    await expect(summaryRow).toContainText(aiSummary);
+
+    const editOriginal = page.getByRole('button', { name: 'Edit original wording' });
+    const editSummary = page.getByRole('button', { name: 'Edit ai-drafted summary' });
+    await assertMinimumTarget(editOriginal);
+    await assertMinimumTarget(editSummary);
+    await editSummary.click();
+    await assertMinimumTarget(page.getByRole('button', { name: 'Save ai-drafted summary' }));
+    await assertMinimumTarget(page.getByRole('button', { name: 'Cancel editing ai-drafted summary' }));
+    await page.getByRole('button', { name: 'Cancel editing ai-drafted summary' }).click();
+    await editOriginal.click();
+    const originalEditor = page.getByRole('textbox', { name: 'Original wording' });
+    await originalEditor.press('Control+End');
+    await originalEditor.press('Enter');
+    await originalEditor.type('Keep the regional examples in the final film.');
+    await expect(originalEditor).toHaveValue(`${originalWording}\nKeep the regional examples in the final film.`);
+    const saveOriginal = page.getByRole('button', { name: 'Save original wording' });
+    const cancelOriginal = page.getByRole('button', { name: 'Cancel editing original wording' });
+    await assertMinimumTarget(saveOriginal);
+    await assertMinimumTarget(cancelOriginal);
+    await saveOriginal.click();
+    await expect(originalRow).toContainText('User-edited wording');
+    await expect(originalRow).toContainText('Keep the regional examples in the final film.');
+    expect(savedEdits).toContainEqual({
+      field: 'projectScope',
+      value: `${originalWording}\nKeep the regional examples in the final film.`
+    });
+
+    const layout = await page.evaluate(() => {
+      const selectors = [
+        'html',
+        '[role="dialog"][aria-label="Balance Assist"]',
+        '[data-testid="intake-stage-progress"]',
+        '#widget-brief-panel',
+        '[data-testid="review-panel"]',
+        '[data-row-key="projectScope"]',
+        '[data-row-key="scopePolished"]'
+      ];
+      return selectors.map((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) throw new Error(`Missing layout target ${selector}`);
+        return { selector, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth };
+      });
+    });
+    for (const measurement of layout) {
+      expect(measurement.scrollWidth, measurement.selector).toBeLessThanOrEqual(measurement.clientWidth);
+    }
+
+    const sendBrief = page.getByRole('button', { name: 'Send brief to Balance' });
+    await assertMinimumTarget(sendBrief);
+    await sendBrief.click();
+    const failure = page.getByRole('alert').filter({ hasText: 'The brief was not sent' });
+    const retry = page.getByRole('button', { name: 'Retry sending brief' });
+    await expect(failure).toContainText('The brief was not sent. Please retry or talk to the team without AI.');
+    await expect(failure).not.toContainText(/\b(left|right|panel|rail)\b/i);
+    await assertMinimumTarget(retry);
+    await assertMinimumTarget(failure.getByRole('button', { name: 'Talk to the team without AI', exact: true }));
+    await chatTab.click();
+    await expect(chatPanel).toBeVisible();
+    await expect(failure).toBeVisible();
+    await expect(retry).toBeVisible();
+    await briefTab.click();
+    await expect(briefTab).toHaveAttribute('aria-selected', 'true');
+    await expect(failure).toBeVisible();
+    await expect(retry).toBeVisible();
+    await retry.click();
+
+    await expect(page.getByTestId('approve-confirmation')).toContainText('Queued for the Balance team');
+    await expect(progress).toContainText('Stage 4 of 4');
+    const motion = await page.locator('.balance-widget-motion').evaluateAll((elements) => elements.map((element) => {
+      const style = getComputedStyle(element);
+      return { animationName: style.animationName, animationDuration: style.animationDuration };
+    }));
+    expect(motion.length).toBeGreaterThan(0);
+    expect(motion).toEqual(motion.map(() => ({ animationName: 'none', animationDuration: '0s' })));
+    expect(chatCalls).toBe(4);
+    expect(finalizeAttempts).toBe(2);
+  });
+
   test('gives the producer-requested human upload a 44px keyboard target', async ({ page }) => {
     let uploadMode: string | null = null;
     page.on('dialog', (dialog) => dialog.accept());
@@ -282,7 +618,7 @@ test.describe('mobile intake', () => {
     await expect(briefTab).toBeFocused();
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
 
-    const human = page.getByRole('button', { name: 'Talk to a human' });
+    const human = page.getByRole('button', { name: 'Talk to the team without AI', exact: true });
     await expect(human).toBeVisible();
     await expect(human).toHaveClass(/balance-widget-action/);
     const humanBounds = await human.boundingBox();
