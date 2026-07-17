@@ -191,10 +191,35 @@ test.each([
 });
 
 test.each([
+  'Your budget is SGD 8,000, and the price is SGD 12,000.',
+  'You entered SGD 8,000, while the fee is SGD 10,000.',
+  'Although your budget is SGD 8,000, the cost is SGD 10,000.',
+  'The price is twelve thousand dollars.',
+  'The fee will be five thousand dollars.'
+])('overrides exact subject-local pricing finding: %s', (providerReply) => {
+  const result = sanitizeReply(providerReply, 'What can Balance commit to?', {
+    toolCallArguments: { budgetBand: 'Injected amount' }
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(/pricing.*producer/i);
+  expect(result.draft).toEqual({});
+});
+
+test('overrides a direct assertion with unrelated trailing attribution', () => {
+  const providerReply = 'The price is SGD 12,000, matching your budget.';
+  const result = sanitizeReply(providerReply, 'What did I enter?');
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(/pricing.*producer/i);
+});
+
+test.each([
   'The price you entered is SGD 12,000.',
   'You stated the fee is USD 5,000.',
-  'The price is SGD 12,000, matching your budget.',
+  'Your stated fee is USD 5,000.',
   'The client-provided cost is EUR 4,000.',
+  'The price the client provided is EUR 4,000.',
   'The price is expressed in dollars.',
   'The price will be expressed in dollars.',
   'The cost equals the budget you entered.',

@@ -7,9 +7,10 @@ const DURATION_NUMBER = String.raw`(?:\d{1,3}|(?:one|two|three|four|five|six|sev
 const DURATION_EXPRESSION = String.raw`${DURATION_NUMBER}\s+(?:business\s+)?(?:days?|weeks?|months?)`;
 const CURRENCY_AMOUNT = String.raw`(?:(?:s?\$|£|€)\s*\d[\d,]*(?:\.\d{2})?|(?:sgd|usd|eur|gbp)\s*\d[\d,]*(?:\.\d{2})?|\d[\d,]*(?:\.\d{2})?\s*(?:dollars?|pounds?|euros?))`;
 const MONEY_WORD = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)`;
+const MONEY_AMOUNT = String.raw`(?:${CURRENCY_AMOUNT}|(?:${MONEY_WORD}[\s-]+){1,6}(?:dollars?|pounds?|euros?))`;
 const BALANCE_PRICE_SUBJECT = String.raw`(?:(?:the\s+)?(?:final|fixed|guaranteed)\s+(?:price|pricing|quote|fee|cost)(?!\s+(?:you|the user)\s+(?:entered|provided|stated|supplied))|(?:our|balance(?:'s)?)\s+(?:(?:final|fixed|guaranteed)\s+)?(?:price|pricing|quote|fee|cost)|(?:the\s+)?quote(?=\s+(?:is|comes?\s+to|totals?|equals?)))`;
-const DIRECT_PRICE_PATTERN = new RegExp(String.raw`\b(?:price|fee|cost)\s+(?:is|will be|comes? to|totals?|equals?)\s+${CURRENCY_AMOUNT}\b`, 'i');
-const USER_PRICE_ATTRIBUTION_PATTERN = /\b(?:you\s+(?:entered|stated)|your\s+budget|client[- ]provided)\b/i;
+const DIRECT_PRICE_PATTERN = new RegExp(String.raw`\b(?:price|fee|cost)\s+(?:is|will be|comes? to|totals?|equals?)\s+${MONEY_AMOUNT}\b`, 'gi');
+const USER_PRICE_SUBJECT_PREFIX_PATTERN = /(?:\b(?:you|the user)\s+(?:entered|provided|stated|supplied)(?:\s+the)?|\byour\s+(?:entered|provided|stated|supplied)|\b(?:the\s+)?client[- ]provided)\s*$/i;
 
 const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
   {
@@ -132,9 +133,10 @@ function parseAssistantReply(reply: string): {
 
 function matchesRefusal(reply: string, userMessage: string): string | null {
   const normalizedReply = reply.normalize('NFKC').replace(/[’‘`]/g, "'");
-  const hasDirectPriceCommitment = normalizedReply
-    .split(/(?:[.!?](?:\s+|$)|\n+|;|\bbut\b|\bhowever\b)/i)
-    .some((clause) => DIRECT_PRICE_PATTERN.test(clause) && !USER_PRICE_ATTRIBUTION_PATTERN.test(clause));
+  const hasDirectPriceCommitment = Array.from(normalizedReply.matchAll(DIRECT_PRICE_PATTERN)).some((match) => {
+    const prefix = normalizedReply.slice(0, match.index);
+    return !USER_PRICE_SUBJECT_PREFIX_PATTERN.test(prefix);
+  });
   if (hasDirectPriceCommitment) {
     return 'Final pricing is set by Balance producers after they review the scope.';
   }

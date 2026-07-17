@@ -2,15 +2,15 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Evaluate direct pricing at clause scope and recognize curly-apostrophe `we'll have ... ready` commitments while preserving inline attribution and benign non-commitments.
+**Goal:** Detect every structurally direct numeric or spelled-out pricing assertion while exempting only attribution attached to that same subject.
 
-**Architecture:** Normalize apostrophes, then split replies into bounded clauses at sentence boundaries, contrast words, and semicolons. Evaluate direct pricing and attribution within each clause using a shared currency expression, and extend the ready-commitment subject to include `we'll`.
+**Architecture:** Match each `price|fee|cost` subject immediately followed by an assertion verb and money amount across the normalized reply. Inspect only the text immediately preceding each matched subject for attached attribution, removing clause splitting and connector enumeration.
 
 **Tech Stack:** TypeScript, Vitest, ESLint
 
 ---
 
-### Task 1: Apply clause-level commitment semantics
+### Task 1: Apply subject-local pricing attribution
 
 **Files:**
 - Modify: `tests/conversation/reply-sanitize.test.ts`
@@ -18,17 +18,17 @@
 
 **Step 1: Write the failing tests**
 
-Add the approved exact matrix for `We’ll have it ready by Friday`, direct pricing with `will be`, `comes to`, `totals`, and `equals`, plus attribution followed by a contrasting commitment clause. Retain existing inline and same-clause attribution controls and benign non-commitments.
+Add the review's five exact direct-assertion cases, including conjunction variants and spelled-out money. Retain subject-local controls such as `you stated the fee`, `your stated fee`, and `client-provided fee`, structurally interrupted attribution, and benign non-money language.
 
 **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run tests/conversation/reply-sanitize.test.ts`
 
-Expected: the new curly-apostrophe, pricing-verb, and attribution-separated commitment cases fail because they are not overridden; existing precision cases pass.
+Expected: the three conjunction cases fail because broad attribution suppresses them, and the two spelled-out direct assertions fail because the direct matcher accepts only numeric amounts.
 
 **Step 3: Write the minimal implementation**
 
-Split normalized replies at sentence boundaries, `but`, `however`, and semicolons. Evaluate the expanded `price|fee|cost` commitment grammar and attribution allowlist per clause. Extend the concrete ready pattern from `we can|will` to `we'll|we can|we will`.
+Create a numeric-or-spelled money expression and find each direct pricing assertion in the full normalized reply. For each match, inspect only its immediate prefix for attribution attached to the matched subject. Remove separator splitting and broad attribution suppression.
 
 **Step 4: Run focused tests to verify GREEN**
 
