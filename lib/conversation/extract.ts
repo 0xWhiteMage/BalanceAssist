@@ -219,16 +219,16 @@ export function applyTextToDraft(text: string, currentDraft: LeadDraft, currentS
 
 export function getNextConversationStep(draft: LeadDraft): ConversationStepId {
   const hasProjectNeed = Boolean(
-    draft.projectScope.trim() || draft.projectType?.trim() || draft.service.trim()
+    draft.projectScope.trim() || draft.projectType?.trim()
   );
   if (!hasProjectNeed) return 'scope';
   if (!draft.projectObjective) return 'objective';
-  if (!draft.service) return 'service';
   if (!draft.audience) return 'audience';
   if (!draft.intendedOutputs) return 'outputs';
   if (!draft.timelineBand) return 'timeline';
   if (!draft.budgetBand) return 'budget';
-  if (!draft.contactName) return 'references';
+  if (!draft.referencesStatus) return 'references';
+  if (!draft.contactName && !draft.contactEmail) return 'contact-name';
   if (!draft.contactEmail) return 'contact-email';
   if (!draft.consentToShare) return 'consent';
   return 'handoff';

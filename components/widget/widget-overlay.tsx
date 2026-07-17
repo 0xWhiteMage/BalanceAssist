@@ -125,6 +125,7 @@ const CAPTURED_FIELD_KEYS_FOR_LLM = [
   'projectObjective',
   'audience',
   'intendedOutputs',
+  'referencesStatus',
   'projectType',
   'service',
   'timelineBand',
@@ -822,6 +823,7 @@ export function WidgetOverlay({
     setMessages(nextMessages);
 
     if (currentStep === 'references') {
+      const referencesStatus = value === 'Skip' ? 'skipped' : 'added';
       if (value !== 'Skip') {
         const kind = classifyUrl(value);
         if (!kind) {
@@ -839,8 +841,22 @@ export function WidgetOverlay({
           return;
         }
         await appendReferenceLink(savedLink);
-        await botSay('Your reference link was saved.');
       }
+      const statusResult = await sessionDraft.updateDraft('referencesStatus', referencesStatus);
+      const statusSaved = statusResult?.ok === true || (
+        statusResult?.ok === false &&
+        statusResult.conflict === true &&
+        statusResult.draft.referencesStatus === referencesStatus
+      );
+      if (!statusSaved) {
+        await botSay(
+          referencesStatus === 'added'
+            ? 'Your reference link was saved, but I could not update the brief. Please try again.'
+            : 'I could not save Skip. Please try again.'
+        );
+        return;
+      }
+      if (referencesStatus === 'added') await botSay('Your reference link was saved.');
       setCurrentStep('contact-name');
       await advanceStep('contact-name', draftRef.current);
       return;

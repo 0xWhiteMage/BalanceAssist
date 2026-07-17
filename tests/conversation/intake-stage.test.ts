@@ -44,8 +44,7 @@ describe('intake stage model', () => {
 
   test.each([
     { projectScope: 'A launch film' },
-    { projectType: 'Animation' },
-    { service: 'production' as const }
+    { projectType: 'Animation' }
   ])('accepts any approved project-need field with an objective', (projectNeed) => {
     expect(getCurrentIntakeStage({
       ...createDefaultLeadDraft(),
@@ -54,12 +53,20 @@ describe('intake stage model', () => {
     }).id).toBe('audience');
   });
 
+  test('does not treat an internal service classification as the project need', () => {
+    expect(getCurrentIntakeStage({
+      ...createDefaultLeadDraft(),
+      service: 'production',
+      projectObjective: 'Build awareness'
+    }).id).toBe('project');
+  });
+
   test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
     'treats the literal uncertainty answer %s as answered',
     (answer) => {
       expect(getCurrentIntakeStage({
         ...createDefaultLeadDraft(),
-        service: 'production',
+        projectScope: 'A launch film',
         projectObjective: 'Build awareness',
         audience: answer,
         intendedOutputs: answer,
@@ -91,6 +98,6 @@ describe('intake stage model', () => {
     };
 
     expect(getCurrentIntakeStage(draft).id).toBe('references-contact');
-    expect(draft).not.toHaveProperty('references');
+    expect(draft.referencesStatus).toBe('');
   });
 });

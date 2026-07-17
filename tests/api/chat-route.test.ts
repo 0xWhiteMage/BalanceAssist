@@ -1620,4 +1620,23 @@ describe('POST /api/chat', () => {
     expect(bubbles).toHaveLength(4);
     expect(bubbles[bubbles.length - 1]).toContain('E.');
   });
+
+  test('replaces provider internal status claims and discards their tool updates', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'Your lead score is 9, you are qualified, and the CRM revision was sent to Telegram.',
+      'record_brief_updates',
+      JSON.stringify({ projectScope: 'Injected scope', scopePolished: 'Injected interpretation' })
+    )) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'What happens next?' }],
+      context: { step: 'scope', draft: '{}' }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.message).toMatch(/brief/i);
+    expect(data.message).not.toMatch(/score|qualified|unqualified|misfit|CRM|Telegram|revision/i);
+    expect(data.draftUpdates).toEqual({});
+  });
 });

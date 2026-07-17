@@ -51,6 +51,16 @@ test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
   }
 );
 
+test.each(['', 'added', 'skipped'])('preserves canonical referencesStatus %s', (referencesStatus) => {
+  expect(sanitizeDraftUpdates({ referencesStatus })).toEqual(
+    referencesStatus ? { referencesStatus } : {}
+  );
+});
+
+test('rejects an invalid referencesStatus', () => {
+  expect(sanitizeDraftUpdates({ referencesStatus: 'contact-name-present' })).toEqual({});
+});
+
 test('timeline passes through verbatim (no band normalization)', () => {
   const result = sanitizeDraftUpdates({ timelineBand: '3 weeks' });
   expect(result.timelineBand).toBe('3 weeks');

@@ -25,7 +25,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
     botMessages: ['What should this project achieve? Not sure yet is a valid answer.'],
     freeText: true,
     field: 'projectObjective',
-    next: 'service'
+    next: 'audience'
   },
 
   service: {

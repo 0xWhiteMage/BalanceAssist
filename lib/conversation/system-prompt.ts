@@ -32,6 +32,7 @@ const FIELD_LIST = [
   'projectObjective',
   'audience',
   'intendedOutputs',
+  'referencesStatus',
   'projectType',
   'service',
   'timelineBand',
@@ -45,7 +46,7 @@ export type BriefFieldName = (typeof FIELD_LIST)[number];
 
 function buildNextQuestionBlock(draft: Record<string, string> = {}): string {
   const has = (field: string) => Boolean(draft[field]?.trim());
-  if (!(has('projectScope') || has('projectType') || has('service'))) {
+  if (!(has('projectScope') || has('projectType'))) {
     return `    - Ask: "What's the project about?"`;
   }
   if (!has('projectObjective')) return `    - Ask: "What should this project achieve?"`;
@@ -57,8 +58,11 @@ function buildNextQuestionBlock(draft: Record<string, string> = {}): string {
   if (!has('budgetBand')) {
     return `    - Explain that budget helps suggest realistic formats and scope, then ask: "What budget range are you working with?"`;
   }
+  if (!has('referencesStatus')) {
+    return `    - Ask: "Would you like to add a reference URL, or Skip?"`;
+  }
   if (!has('contactName') && !has('contactEmail')) {
-    return `    - Ask: "Would you like to add a reference URL, or Skip?" After that answer, ask for one contact route.`;
+    return `    - Ask for one contact route: "What name or email should the team use to follow up?"`;
   }
   return '    - Do not ask another intake question. Direct the user to review the saved brief.';
 }
@@ -110,6 +114,7 @@ FOUR-STAGE INTAKE:
 3. Timeline and budget
 4. References and contact
 - Ask exactly one contextual question at a time. Use only the single instruction in the NEXT-QUESTION BLOCK.
+- Service is an optional internal classification. Never ask for it or use it to block progression from objective to audience.
 - Timeline is optional and its reason is planning and feasibility. Budget is optional and its reason is suggesting realistic formats and scope.
 - "Not sure yet", "Skip", and "Prefer not to share" are valid literal values. Preserve the exact selected wording and never convert a non-answer literal to an empty string.
 - Optional non-answers never block Talk to a human, email, or scheduling access.
@@ -121,7 +126,7 @@ FOUR-STAGE INTAKE:
 NEVER INFER (only applies when actively building a brief):
 - When the AI is collecting brief fields, do not invent timeline, budget, polished scope, or any other field the user did not explicitly state.
 - If the user did not mention a field, it MUST be the empty string in the tool call.
-- Worked example: when the user says "30s animation", the tool call must be { projectScope: "30s animation", projectType: "Animation", projectObjective: "", audience: "", intendedOutputs: "", timelineBand: "", budgetBand: "", scopePolished: "", contactName: "", contactEmail: "" } — nothing more is filled.
+- Worked example: when the user says "30s animation", the tool call must be { projectScope: "30s animation", projectType: "Animation", projectObjective: "", audience: "", intendedOutputs: "", referencesStatus: "", timelineBand: "", budgetBand: "", scopePolished: "", contactName: "", contactEmail: "" } — nothing more is filled.
 
 WHEN THE USER HINTS (DOESN'T COMMIT):
 - If the user says "I might", "maybe", "we might have something", "eventually", or similar speculative phrasing, do NOT pivot to brief-building. Instead: confirm casually and ask one conversational question to learn more. Example: "Happy to help when you're ready — in the meantime, want to know more about what Balance does, or is there a specific question I can answer?"

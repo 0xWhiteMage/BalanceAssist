@@ -8,6 +8,7 @@ export function createDefaultLeadDraft(): LeadDraft {
     projectObjective: '',
     audience: '',
     intendedOutputs: '',
+    referencesStatus: '',
     scopePolished: '',
     timelineBand: '',
     budgetBand: '',

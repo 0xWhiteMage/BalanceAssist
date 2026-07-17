@@ -5,6 +5,7 @@ const ALLOWED_KEYS = [
   'projectObjective',
   'audience',
   'intendedOutputs',
+  'referencesStatus',
   'scopePolished',
   'timelineBand',
   'budgetBand',
@@ -67,6 +68,10 @@ export function sanitizeDraftUpdates(input: Record<string, unknown> | null | und
     }
     if (key === 'service') {
       result[key] = normalizeService(trimmed);
+      continue;
+    }
+    if (key === 'referencesStatus') {
+      if (trimmed === 'added' || trimmed === 'skipped') result[key] = trimmed;
       continue;
     }
     if (key === 'contactEmail' && !EMAIL_REGEX.test(trimmed)) {

@@ -14,6 +14,7 @@ export const recordBriefUpdatesSchema = z
     projectObjective: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     audience: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     intendedOutputs: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    referencesStatus: z.enum(['', 'added', 'skipped']).default('').describe(TEXT_FIELD_DESCRIPTION),
     scopePolished: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     timelineBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     budgetBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
@@ -136,9 +137,19 @@ export function guardAgainstFabricatedBriefFields(
   if (nextScope && nextScope !== priorDraft.projectScope) {
     if (priorDraft.projectScope?.trim()) {
       cleaned.projectScope = priorDraft.projectScope;
-    } else if (!textContains(userMessage, nextScope)) {
+    } else {
       cleaned.projectScope = userMessage.trim();
     }
+  }
+
+  if (cleaned.referencesStatus === 'added' && priorDraft.referencesStatus !== 'added') {
+    cleaned.referencesStatus = '';
+  } else if (
+    cleaned.referencesStatus === 'skipped' &&
+    priorDraft.referencesStatus !== 'skipped' &&
+    !/^skip$/i.test(userMessage.trim())
+  ) {
+    cleaned.referencesStatus = '';
   }
 
   for (const field of ['projectObjective', 'audience', 'intendedOutputs'] as const) {

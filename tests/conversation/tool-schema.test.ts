@@ -21,6 +21,7 @@ const positiveFixture = {
   projectObjective: 'Build launch awareness',
   audience: 'Young adults',
   intendedOutputs: 'Hero film and social cut-downs',
+  referencesStatus: 'added',
   scopePolished: '',
   timelineBand: '1-2-months',
   budgetBand: '50k-150k',
@@ -36,6 +37,7 @@ const negativeFixture = {
   projectObjective: 'Build launch awareness',
   audience: 'Young adults',
   intendedOutputs: 'Hero film and social cut-downs',
+  referencesStatus: 'skipped',
   scopePolished: '',
   timelineBand: '1-2-months',
   budgetBand: '50k-150k',
@@ -76,6 +78,7 @@ test('rejects consentToShare from LLM tool call', () => {
     projectObjective: '',
     audience: '',
     intendedOutputs: '',
+    referencesStatus: '',
     scopePolished: '',
     timelineBand: '1-2-months',
     budgetBand: '20k-50k',
@@ -113,6 +116,7 @@ test('accepts all known fields with empty strings', () => {
       projectObjective: '',
       audience: '',
       intendedOutputs: '',
+      referencesStatus: '',
       scopePolished: '',
       timelineBand: '',
       budgetBand: '',
@@ -317,6 +321,25 @@ describe('sanitizeShareWork', () => {
 });
 
 describe('guardAgainstFabricatedBriefFields', () => {
+  test('uses the complete trimmed first user answer as original projectScope', () => {
+    const userMessage = '  We need a launch film for the new chair, aimed at young adults.  ';
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, projectScope: 'launch film for the new chair' },
+      createDefaultLeadDraft(),
+      userMessage
+    );
+
+    expect(guarded.projectScope).toBe('We need a launch film for the new chair, aimed at young adults.');
+  });
+
+  test('does not let the model assert that a reference was added', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, referencesStatus: 'added' },
+      createDefaultLeadDraft(),
+      'Here is my project'
+    );
+    expect(guarded.referencesStatus).toBe('');
+  });
   test('preserves the first project statement and keeps generated wording separate', () => {
     const guarded = guardAgainstFabricatedBriefFields(
       {

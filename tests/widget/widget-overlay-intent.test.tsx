@@ -724,6 +724,8 @@ describe('thesis-aligned optional intake actions', () => {
 
   test('persists a typed reference URL and only Skip advances without a link', async () => {
     const requestedUrls: string[] = [];
+    const draftWrites: Array<{ fields: Array<{ field: string; value: string }> }> = [];
+    const persistenceOrder: string[] = [];
     let chatCalls = 0;
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -746,10 +748,20 @@ describe('thesis-aligned optional intake actions', () => {
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url.includes('/api/attachments/link') && init?.method === 'POST') {
+        persistenceOrder.push('link');
         return new Response(JSON.stringify({
           ok: true,
           persisted: true,
           link: { id: 'reference-1', sessionId: 'mock-session', url: 'https://vimeo.com/123', kind: 'vimeo' }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/projects/mock-session/draft') && init?.method === 'PUT') {
+        persistenceOrder.push('status');
+        draftWrites.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({
+          draft: { referencesStatus: { value: 'added', provenance: 'confirmed' } },
+          draftVersion: 1,
+          fieldCount: 1
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url.includes('/consent') && init?.method === 'POST') {
@@ -774,10 +786,66 @@ describe('thesis-aligned optional intake actions', () => {
     fireEvent.click(send);
 
     await waitFor(() => {
-      expect(requestedUrls.some((url) => url.includes('/api/attachments/link'))).toBe(true);
+      expect(draftWrites).toHaveLength(1);
     }, { timeout: 7000 });
+    expect(draftWrites[0].fields).toEqual([
+      { field: 'referencesStatus', value: 'added', provenance: 'confirmed' }
+    ]);
+    expect(persistenceOrder).toEqual(['link', 'status']);
     expect(chatCalls).toBe(1);
     expect(await screen.findByText(/reference link.*saved/i, {}, { timeout: 7000 })).toBeVisible();
+  }, 20_000);
+
+  test('persists explicit Skip as canonical referencesStatus without saving a link', async () => {
+    const requestedUrls: string[] = [];
+    const draftWrites: Array<{ fields: Array<{ field: string; value: string }> }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          message: 'Would you like to add any references? You can add them now or Skip.',
+          draftUpdates: {
+            projectScope: 'Launch film',
+            projectObjective: 'Build awareness',
+            audience: 'Young adults',
+            intendedOutputs: 'Hero film',
+            timelineBand: 'Not sure yet',
+            budgetBand: 'Prefer not to share'
+          },
+          briefReady: false,
+          reviewPrompt: null,
+          missingFields: []
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/projects/mock-session/draft') && init?.method === 'PUT') {
+        draftWrites.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({
+          draft: { referencesStatus: { value: 'skipped', provenance: 'confirmed' } },
+          draftVersion: 1,
+          fieldCount: 1
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'We need a launch film' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    const skip = await screen.findByRole('button', { name: 'Skip' }, { timeout: 7000 });
+    await waitFor(() => expect(skip).not.toBeDisabled(), { timeout: 7000 });
+    fireEvent.click(skip);
+
+    await waitFor(() => expect(draftWrites).toHaveLength(1), { timeout: 7000 });
+    expect(draftWrites[0].fields).toEqual([
+      { field: 'referencesStatus', value: 'skipped', provenance: 'confirmed' }
+    ]);
+    expect(requestedUrls.some((url) => url.includes('/api/attachments/link'))).toBe(false);
   }, 20_000);
 });
 

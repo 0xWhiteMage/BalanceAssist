@@ -22,24 +22,24 @@ test('chooses the next missing conversation step dynamically', () => {
   const draft = createDefaultLeadDraft();
 
   expect(getNextConversationStep(draft)).toBe('scope');
-  expect(getNextConversationStep({ ...draft, service: 'production' })).toBe('objective');
+  expect(getNextConversationStep({ ...draft, service: 'production' })).toBe('scope');
   expect(getNextConversationStep({ ...draft, projectType: 'Animation' })).toBe('objective');
   expect(getNextConversationStep({ ...draft, projectScope: 'Launch film' })).toBe('objective');
   expect(getNextConversationStep({
     ...draft,
-    service: 'production',
+    projectScope: 'Launch film',
     projectObjective: 'Build awareness'
   })).toBe('audience');
   expect(getNextConversationStep({
     ...draft,
     projectType: 'Animation',
     projectObjective: 'Build awareness'
-  })).toBe('service');
+  })).toBe('audience');
   expect(getNextConversationStep({
     ...draft,
     projectScope: 'Launch film',
     projectObjective: 'Build awareness'
-  })).toBe('service');
+  })).toBe('audience');
   expect(getNextConversationStep({
     ...draft,
     projectScope: 'Launch film',
@@ -90,6 +90,7 @@ test('chooses the next missing conversation step dynamically', () => {
     intendedOutputs: 'Hero film',
     timelineBand: 'Not sure yet',
     budgetBand: 'Prefer not to share',
+    referencesStatus: 'skipped',
     contactName: 'Jane'
   })).toBe('contact-email');
   expect(getNextConversationStep({
@@ -101,9 +102,23 @@ test('chooses the next missing conversation step dynamically', () => {
     intendedOutputs: 'Hero film',
     timelineBand: 'Not sure yet',
     budgetBand: 'Prefer not to share',
+    referencesStatus: 'added',
     contactName: 'Jane',
     contactEmail: 'jane@example.com'
   })).toBe('consent');
+
+  const planningComplete = {
+    ...draft,
+    projectScope: 'Launch film',
+    projectObjective: 'Build awareness',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film',
+    timelineBand: 'Not sure yet',
+    budgetBand: 'Prefer not to share'
+  };
+  expect(getNextConversationStep({ ...planningComplete, contactName: 'Early Name' })).toBe('references');
+  expect(getNextConversationStep({ ...planningComplete, contactEmail: 'early@example.com' })).toBe('references');
+  expect(getNextConversationStep({ ...planningComplete, referencesStatus: 'skipped' })).toBe('contact-name');
 });
 
 test('captures canonical prose from its dedicated intake step', () => {
@@ -124,7 +139,7 @@ test('uses stable prompts and excludes qualification from the user journey', () 
   expect(conversationSteps.objective).toMatchObject({
     botMessages: ['What should this project achieve? Not sure yet is a valid answer.'],
     field: 'projectObjective',
-    next: 'service'
+    next: 'audience'
   });
   expect(conversationSteps.audience).toMatchObject({
     botMessages: ['Who is this for? You can choose Not sure yet or Skip.'],

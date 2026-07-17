@@ -261,6 +261,7 @@ const CAPTURED_FIELD_KEYS = [
   'projectObjective',
   'audience',
   'intendedOutputs',
+  'referencesStatus',
   'projectType',
   'service',
   'timelineBand',
@@ -555,7 +556,10 @@ export async function POST(request: Request) {
       truncated = providerResult.truncated;
     }
 
-    const sanitized = sanitizeReply(visibleContent, lastUserMessage, { toolCallArguments: toolArguments ?? undefined });
+    const sanitized = sanitizeReply(visibleContent, lastUserMessage, {
+      toolCallArguments: toolArguments ?? undefined,
+      enforceInternalLanguage: Boolean(env.DEEPSEEK_API_KEY)
+    });
     let replyText = sanitized.reply;
     if (sanitized.overridden) {
       category = 'refusal';

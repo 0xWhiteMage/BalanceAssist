@@ -35,6 +35,45 @@ test('system prompt defines four ordered stages and one-question intake', () => 
   expect(prompt).toMatch(/exactly one contextual question at a time/i);
 });
 
+test('system prompt treats service as optional and references status independently from contact', () => {
+  const audiencePrompt = buildSystemPrompt({
+    currentStage: { id: 'audience', label: 'Audience and outputs' },
+    draft: JSON.stringify({ projectScope: 'Launch film', projectObjective: 'Build awareness', service: '' })
+  });
+  expect(audiencePrompt).toMatch(/Who is this for\?/);
+  expect(audiencePrompt).not.toMatch(/support.*need from Balance|service.*missing/i);
+
+  const referencesPrompt = buildSystemPrompt({
+    currentStage: { id: 'references-contact', label: 'References and contact' },
+    draft: JSON.stringify({
+      projectScope: 'Launch film',
+      projectObjective: 'Build awareness',
+      audience: 'Young adults',
+      intendedOutputs: 'Hero film',
+      timelineBand: 'Skip',
+      budgetBand: 'Prefer not to share',
+      referencesStatus: '',
+      contactName: 'Early Name'
+    })
+  });
+  expect(referencesPrompt).toMatch(/reference URL.*Skip/i);
+
+  const contactPrompt = buildSystemPrompt({
+    currentStage: { id: 'references-contact', label: 'References and contact' },
+    draft: JSON.stringify({
+      projectScope: 'Launch film',
+      projectObjective: 'Build awareness',
+      audience: 'Young adults',
+      intendedOutputs: 'Hero film',
+      timelineBand: 'Skip',
+      budgetBand: 'Prefer not to share',
+      referencesStatus: 'skipped'
+    })
+  });
+  expect(contactPrompt).toMatch(/contact route/i);
+  expect(contactPrompt).not.toMatch(/Would you like to add a reference URL/i);
+});
+
 test('system prompt gives planning rationales and canonical non-answer policy', () => {
   const prompt = buildSystemPrompt();
   expect(prompt).toMatch(/timeline.*planning and feasibility/i);
