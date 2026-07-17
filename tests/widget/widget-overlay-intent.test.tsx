@@ -778,7 +778,7 @@ describe('canonical chat response ownership', () => {
     fireEvent.change(scopeInput, { target: { value: 'Late stale edit' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save project description' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close Balance Assist' }));
 
     await act(async () => {
       pendingEdit.resolve(new Response(JSON.stringify({

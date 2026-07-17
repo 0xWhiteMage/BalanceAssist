@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ReviewPanel } from '@/components/widget/review-panel';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
@@ -42,6 +42,9 @@ describe('ReviewPanel', () => {
     expect(screen.getByText('Core brief needs a project need and contact detail')).toBeInTheDocument();
     expect(screen.getByText('Add any useful context, or leave these for the team conversation')).toBeInTheDocument();
     expect(screen.getByTestId('approve-button')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send brief to Balance' })).toHaveAccessibleDescription(
+      'Add a project need and contact detail to enable sending.'
+    );
   });
 
   test('keeps a legacy generated summary visible without claiming unsupported attribution', () => {
@@ -93,6 +96,22 @@ describe('ReviewPanel', () => {
     expect(screen.getByText('Original wording')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Save original wording' })).toHaveClass('balance-widget-action');
     expect(screen.getByRole('button', { name: 'Cancel editing original wording' })).toHaveClass('balance-widget-action');
+  });
+
+  test('restores focus to the exact edit trigger after cancelling or saving', async () => {
+    const onChange = vi.fn().mockResolvedValue({ status: 'saved' });
+    render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onChange={onChange} provenance={{ projectScope: 'user-stated' }} />);
+
+    const edit = screen.getByRole('button', { name: 'Edit original wording' });
+    fireEvent.click(edit);
+    const editor = screen.getByRole('textbox', { name: 'Original wording' });
+    expect(editor).toHaveAttribute('aria-labelledby', 'brief-row-label-projectScope');
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    await waitFor(() => expect(edit).toHaveFocus());
+
+    fireEvent.click(edit);
+    fireEvent.click(screen.getByRole('button', { name: 'Save original wording' }));
+    await waitFor(() => expect(edit).toHaveFocus());
   });
 
   test('uses the updated send label after a canonical edit', () => {

@@ -144,6 +144,7 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
       >
         <button
           onClick={onBack}
+          className="balance-widget-action"
           style={{
             background: 'none',
             border: 'none',
@@ -170,6 +171,8 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
         <div style={{ flex: 1, position: 'relative', overflow: 'auto', minWidth: 0 }}>
         {!loaded && (
           <div
+            role="status"
+            aria-live="polite"
             style={{
               position: 'absolute',
               inset: 0,
@@ -189,6 +192,7 @@ export function CalendlyEmbed({ url, onBack, onScheduled }: CalendlyEmbedProps) 
             data-testid="calendly-fallback-iframe"
             src={url}
             title="Book a Discovery Call"
+            tabIndex={0}
             style={{ minWidth: 0, height: '100%', width: '100%', border: 'none' }}
           />
         ) : (

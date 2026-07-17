@@ -244,10 +244,11 @@ describe('WidgetOverlay accessibility', () => {
     await waitFor(() => {
       expect(container.querySelector('[role="log"]')).not.toBeNull();
     });
-    const transcript = container.querySelector('[role="log"]')!;
+    const transcript = getByRole('log', { name: 'Conversation transcript' });
 
     expect(transcript).toHaveAttribute('aria-live', 'polite');
     expect(transcript?.parentElement).not.toHaveAttribute('aria-live');
+    expect(getByRole('textbox', { name: 'Message Balance Assist' })).toBeVisible();
   });
 
   test('close button has accessible name', () => {
@@ -255,6 +256,14 @@ describe('WidgetOverlay accessibility', () => {
     const { getByLabelText } = render(<WidgetOverlay autoOpen={true} />);
     const closeButton = getByLabelText('Close Balance Assist');
     expect(closeButton).toBeDefined();
+  });
+
+  test('does not render enabled widget controls inside an inert subtree', () => {
+    stubFetch();
+    const { container } = render(<WidgetOverlay autoOpen={true} />);
+    const controls = container.querySelectorAll<HTMLElement>('.balance-widget-root button:not([disabled]), .balance-widget-root a[href], .balance-widget-root input:not([disabled])');
+    expect(controls.length).toBeGreaterThan(0);
+    for (const control of controls) expect(control.closest('[inert]')).toBeNull();
   });
 
   test('shows canonical intake progress throughout AI intake but not human-only intake', async () => {

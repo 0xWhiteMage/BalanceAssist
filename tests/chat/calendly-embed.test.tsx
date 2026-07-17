@@ -1,8 +1,19 @@
 import { describe, expect, test, vi } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { useState } from 'react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import { CalendlyEmbed } from '@/components/chat/calendly-embed';
 
 const TEST_URL = 'https://calendly.com/haiha-dang/catch-up';
+
+function CalendlyHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(true)}>Open calendar</button>
+      {open && <CalendlyEmbed url={TEST_URL} onBack={() => setOpen(false)} />}
+    </div>
+  );
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -33,6 +44,8 @@ describe('CalendlyEmbed', () => {
     const onBack = vi.fn();
     render(<CalendlyEmbed url={TEST_URL} onBack={onBack} />);
 
+    expect(screen.getByRole('status')).toHaveTextContent('Loading calendar');
+
     // before the fallback timeout, no iframe is shown
     expect(screen.queryByTestId('calendly-fallback-iframe')).toBeNull();
 
@@ -45,6 +58,8 @@ describe('CalendlyEmbed', () => {
     expect(iframe.tagName).toBe('IFRAME');
     expect(iframe.getAttribute('src')).toBe(TEST_URL);
     expect(iframe.getAttribute('src')).not.toMatch(/[?&]hide_gdpr_banner=/);
+    expect(iframe).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('button', { name: /back to chat/i })).toHaveClass('balance-widget-action');
   });
 
   test('clicking the Back button invokes onBack', () => {
@@ -52,6 +67,22 @@ describe('CalendlyEmbed', () => {
     render(<CalendlyEmbed url={TEST_URL} onBack={onBack} />);
     screen.getByRole('button', { name: /back to chat/i }).click();
     expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  test('restores focus to the calendar opener after using Back from the iframe', () => {
+    vi.useFakeTimers();
+    render(<CalendlyHarness />);
+    const opener = screen.getByRole('button', { name: 'Open calendar' });
+    opener.focus();
+    fireEvent.click(opener);
+
+    act(() => vi.advanceTimersByTime(1600));
+    const frame = screen.getByTitle('Book a Discovery Call');
+    frame.focus();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to chat' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Book a Discovery Call' })).toBeNull();
+    expect(opener).toHaveFocus();
   });
 
   test('ignores calendly scheduled events from an unexpected message source', () => {

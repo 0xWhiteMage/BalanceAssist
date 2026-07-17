@@ -149,6 +149,7 @@ export function WidgetOverlay({
   const [isOpen, setIsOpen] = useState(autoOpen);
   const [view, setView] = useState<'chat' | 'calendly'>('chat');
   const [calendlyUrl, setCalendlyUrl] = useState<string | null>(null);
+  const [scheduleRequestDismissed, setScheduleRequestDismissed] = useState(false);
   const configuredCalendlyUrl = calendlyUrlOverride?.trim() || null;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -279,11 +280,15 @@ export function WidgetOverlay({
   }, [messages, isTyping, scrollToBottom]);
 
   useEffect(() => {
-    if (isTeamConnected && humanScheduleRequestOpen && configuredCalendlyUrl && view === 'chat') {
+    if (isTeamConnected && humanScheduleRequestOpen && !scheduleRequestDismissed && configuredCalendlyUrl && view === 'chat') {
       setCalendlyUrl(configuredCalendlyUrl);
       setView('calendly');
     }
-  }, [configuredCalendlyUrl, isTeamConnected, humanScheduleRequestOpen, view]);
+  }, [configuredCalendlyUrl, isTeamConnected, humanScheduleRequestOpen, scheduleRequestDismissed, view]);
+
+  useEffect(() => {
+    if (!humanScheduleRequestOpen) setScheduleRequestDismissed(false);
+  }, [humanScheduleRequestOpen]);
 
   useEffect(() => {
     if (!noticeConsent || !entryPath) return;
@@ -326,6 +331,8 @@ export function WidgetOverlay({
   }, []);
 
   const widgetContainerRef = useRef<HTMLDivElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const restoreLauncherFocusRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -479,6 +486,7 @@ export function WidgetOverlay({
     }
     cancelRef.current = true;
     cleanupAttachmentPreviews(messagesRef.current);
+    restoreLauncherFocusRef.current = true;
     setIsOpen(false);
     teamRelay.clearRequests();
     teamRelay.stop();
@@ -501,6 +509,12 @@ export function WidgetOverlay({
 
   useDialogFocus({ active: isOpen, dialogRef: widgetContainerRef, onDismiss: handleClose });
   useDialogFocus({ active: attachmentOpen, dialogRef: attachmentDialogRef, onDismiss: () => setAttachmentOpen(false) });
+
+  useEffect(() => {
+    if (isOpen || !restoreLauncherFocusRef.current) return;
+    restoreLauncherFocusRef.current = false;
+    requestAnimationFrame(() => launcherRef.current?.focus());
+  }, [isOpen]);
 
   function handleReset() {
     bootstrapGenerationRef.current += 1;
@@ -1299,8 +1313,12 @@ export function WidgetOverlay({
           {view === 'calendly' && calendlyUrl && (
             <CalendlyEmbed
               url={calendlyUrl}
-              onBack={() => setView('chat')}
+              onBack={() => {
+                setScheduleRequestDismissed(true);
+                setView('chat');
+              }}
               onScheduled={async () => {
+                setScheduleRequestDismissed(true);
                 setView('chat');
                 const message: ChatMessage = {
                   id: nextId(),
@@ -1574,7 +1592,7 @@ export function WidgetOverlay({
                 ) : showHumanFallback ? (
                   <HumanFallbacks calendlyUrl={configuredCalendlyUrl} unavailable={sessionUnavailable} />
                 ) : (
-                  <div role="log" aria-live="polite" aria-relevant="additions text" style={{ display: 'contents' }}>
+                  <div role="log" aria-label="Conversation transcript" aria-live="polite" aria-relevant="additions text" style={{ display: 'contents' }}>
                     {messages.map((msg) => (
                       <MessageBubble key={msg.id} message={msg} onInlineCardClick={handleInlineCardClick} />
                     ))}
@@ -1671,6 +1689,9 @@ export function WidgetOverlay({
                 </details>
               )}
               <div className="balance-widget-composer">
+                <label htmlFor="balance-widget-message-input" className="balance-widget-input-label">
+                  {humanRequested ? 'Message the Balance team' : 'Message Balance Assist'}
+                </label>
                 {!isTeamConnected && !deletionFrozen && (
                   <>
                     <button
@@ -1757,6 +1778,7 @@ export function WidgetOverlay({
                   </>
                 )}
                 <input
+                  id="balance-widget-message-input"
                   type="text"
                   value={inputValue}
                   maxLength={MAX_PROJECT_SCOPE_CHARACTERS}
@@ -1786,18 +1808,9 @@ export function WidgetOverlay({
       )}
 
       {/* Launcher / Close Button */}
-      {isOpen ? (
+      {!isOpen && (
         <button
-          onClick={handleClose}
-          aria-label="Close Balance Assist"
-          className="balance-widget-launcher balance-widget-launcher--close balance-widget-motion"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M5 5l10 10M15 5L5 15" stroke="#101010" strokeWidth="2.5" strokeLinecap="round" />
-          </svg>
-        </button>
-      ) : (
-        <button
+          ref={launcherRef}
           onClick={handleOpen}
           aria-label="Open Balance Assist"
           className="balance-widget-launcher balance-widget-motion"

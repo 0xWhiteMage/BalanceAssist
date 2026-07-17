@@ -123,7 +123,7 @@ export function ReviewPanel({
             data-in-flight={approvalInFlight ? 'true' : 'false'}
             data-ready={ready ? 'true' : 'false'}
             aria-busy={approvalInFlight || undefined}
-            aria-label={!ready ? 'Add a project need and contact detail to send the brief' : undefined}
+            aria-describedby={!ready ? 'approve-disabled-hint' : undefined}
             style={{
               width: '100%',
               minHeight: 44,
@@ -153,7 +153,7 @@ export function ReviewPanel({
             </span>
           )}
           {!ready && (
-            <div data-testid="approve-disabled-hint" style={{ fontSize: 10, color: brandTokens.colors.mutedText, lineHeight: 1.5, textAlign: 'center' }}>
+            <div id="approve-disabled-hint" data-testid="approve-disabled-hint" style={{ fontSize: 10, color: brandTokens.colors.mutedText, lineHeight: 1.5, textAlign: 'center' }}>
               Add a project need and contact detail to enable sending.
             </div>
           )}

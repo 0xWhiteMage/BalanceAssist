@@ -31,7 +31,7 @@ test('uses an explicit editorial AI shell and labeled launcher', async ({ page }
     expect(shell.borderRadius).toBeLessThanOrEqual(4);
   }
 
-  await page.getByRole('button', { name: 'Close chat' }).click();
+  await page.getByRole('button', { name: 'Close Balance Assist' }).click();
   const launcher = page.getByRole('button', { name: 'Open Balance Assist' });
   await expect(launcher).toBeVisible();
   await expect(launcher).toContainText('Balance Assist');

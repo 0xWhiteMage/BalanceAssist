@@ -73,6 +73,25 @@ function NestedDialogHarness() {
   );
 }
 
+function IframeDialogHarness() {
+  const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus({ active: open, dialogRef, onDismiss: () => setOpen(false) });
+
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(true)}>Open calendar</button>
+      {open && (
+        <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Calendar dialog">
+          <button type="button">Back</button>
+          <div style={{ display: 'none' }}><button type="button">Hidden by ancestor</button></div>
+          <iframe title="Schedule a call" src="about:blank" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 describe('useDialogFocus', () => {
   test('traps focus, dismisses on Escape, restores the opener, and inerts sibling content', () => {
     render(<DialogHarness />);
@@ -137,5 +156,23 @@ describe('useDialogFocus', () => {
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Outer dialog' }), { key: 'Escape' });
     expect(pageBackground.closest('[inert]')).toBeNull();
     expect(outerOpener.closest('[inert]')).toBeNull();
+  });
+
+  test('includes an iframe in the focus loop and ignores controls hidden by an ancestor', () => {
+    render(<IframeDialogHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open calendar' }));
+
+    const back = screen.getByRole('button', { name: 'Back' });
+    const frame = screen.getByTitle('Schedule a call');
+    expect(document.activeElement).toBe(back);
+
+    frame.focus();
+    fireEvent.keyDown(frame, { key: 'Tab' });
+    expect(document.activeElement).toBe(back);
+
+    back.focus();
+    fireEvent.keyDown(back, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(frame);
+    expect(screen.getByText('Hidden by ancestor')).not.toHaveFocus();
   });
 });
