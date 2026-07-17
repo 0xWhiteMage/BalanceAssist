@@ -23,3 +23,25 @@ a {
   outline: 2px solid #dbb580;
   outline-offset: 2px;
 }
+
+.balance-widget-action {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.balance-widget-wrap {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.balance-widget-action:focus-visible {
+  outline: 2px solid #dbb580;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .balance-widget-motion {
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

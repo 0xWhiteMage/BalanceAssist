@@ -15,6 +15,7 @@ import {
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
 import { ReviewPanel } from '@/components/widget/review-panel';
+import { IntakeStageProgress } from '@/components/widget/intake-stage-progress';
 import { AttachmentDropzone, type ReferenceFile, type ReferenceLink } from '@/components/widget/attachment-dropzone';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
@@ -25,7 +26,8 @@ import { conversationSteps } from '@/lib/conversation/flow';
 import { addReferenceLink, chatRequest, createSession, deleteReferenceLink, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
-import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
+import { getReviewPrompt, isBriefReadyForApproval } from '@/lib/conversation/review-state';
+import { getCurrentIntakeStage } from '@/lib/conversation/intake-stage';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
 import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
@@ -160,6 +162,7 @@ export function WidgetOverlay({
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
   const [isMobile, setIsMobile] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const submitInFlightRef = useRef<boolean>(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -479,6 +482,7 @@ export function WidgetOverlay({
     setCalendlyUrl(null);
     setAllowAttachment(false);
     setConfidentialRecoveryOpen(false);
+    setApprovalError(null);
     confidentialDiversionRef.current = false;
     cancelRef.current = false;
   }
@@ -562,8 +566,12 @@ export function WidgetOverlay({
       }
 
       const replyChunks: string[] = (() => {
-        if (data.replies.length > 0) return data.replies.map((reply) => reply.text);
-        return [CHAT_UNAVAILABLE_MESSAGE];
+        const replies = data.replies.length > 0
+          ? data.replies.map((reply) => reply.text)
+          : [CHAT_UNAVAILABLE_MESSAGE];
+        return data.briefReady
+          ? [...replies.slice(0, -1), getReviewPrompt(isMobile)]
+          : replies;
       })();
       const sharedWork = data.sharedWork
         ? {
@@ -715,6 +723,7 @@ export function WidgetOverlay({
   async function handleApproveBrief() {
     const approvalToken = sessionDraft.beginApproval();
     if (approvalToken === null) return;
+    setApprovalError(null);
     setTelegramBroadcastStatus('pending');
 
     try {
@@ -726,6 +735,7 @@ export function WidgetOverlay({
       if (!activeSessionId) {
         sessionDraft.finishApproval(approvalToken, false);
         setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         return;
       }
 
@@ -736,6 +746,7 @@ export function WidgetOverlay({
         }
         sessionDraft.finishApproval(approvalToken, false);
         setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
         return;
       }
@@ -748,11 +759,13 @@ export function WidgetOverlay({
       if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
         sessionDraft.finishApproval(approvalToken, false);
         setTelegramBroadcastStatus('unconfigured');
+        setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         await botSay('Sorry — the brief could not be saved. Please try again or contact the team directly.');
         return;
       }
 
       if (!sessionDraft.finishApproval(approvalToken, true)) return;
+      setApprovalError(null);
       sessionDraft.recordApproval(finalizeResponse);
       if (finalizeResponse.delivered === true) {
         setTelegramBroadcastStatus('sent');
@@ -774,6 +787,7 @@ export function WidgetOverlay({
       sessionDraft.finishApproval(approvalToken, false);
       if (cancelRef.current) return;
       setTelegramBroadcastStatus('unconfigured');
+      setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
       await botSay('Sorry — something went wrong saving your brief. Please try again.');
     }
   }
@@ -1183,6 +1197,7 @@ export function WidgetOverlay({
           aria-label="Balance Assist"
           aria-labelledby="balance-assist-dialog-title"
           tabIndex={-1}
+          className="balance-widget-wrap balance-widget-motion"
           style={{
             position: 'absolute',
             bottom: '72px',
@@ -1225,6 +1240,10 @@ export function WidgetOverlay({
 
           <WidgetOverlayHeader isTeamConnected={isTeamConnected} onClose={handleClose} />
 
+          {entryPath === 'ai' && hasStarted && !isTeamConnected && (
+            <IntakeStageProgress currentStageId={getCurrentIntakeStage(draft).id} />
+          )}
+
           {isMobile && !isTeamConnected && hasProjectIntent && (
             <div
               role="tablist"
@@ -1238,6 +1257,8 @@ export function WidgetOverlay({
             >
               <button
                 role="tab"
+                type="button"
+                className="balance-widget-action"
                 aria-selected={tabMode === 'chat'}
                 aria-controls="widget-chat-panel"
                 id="widget-chat-tab"
@@ -1262,6 +1283,8 @@ export function WidgetOverlay({
               </button>
               <button
                 role="tab"
+                type="button"
+                className="balance-widget-action"
                 aria-selected={tabMode === 'brief'}
                 aria-controls="widget-brief-panel"
                 id="widget-brief-tab"
@@ -1283,6 +1306,31 @@ export function WidgetOverlay({
                 }}
               >
                 Brief
+              </button>
+            </div>
+          )}
+
+          {approvalError && !isTeamConnected && hasProjectIntent && (
+            <div
+              role="alert"
+              className="balance-widget-wrap"
+              style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '8px 14px', color: '#fca5a5', borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`, fontSize: 11 }}
+            >
+              <span style={{ flex: '1 1 180px' }}>{approvalError}</span>
+              <button
+                type="button"
+                className="balance-widget-action"
+                aria-label="Retry sending brief"
+                onClick={() => void handleApproveBrief()}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                className="balance-widget-action balance-widget-wrap"
+                onClick={() => void handleTeamConnect()}
+              >
+                Talk to the team without AI
               </button>
             </div>
           )}

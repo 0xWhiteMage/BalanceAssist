@@ -13,6 +13,7 @@ function SecondaryButton({ onClick, children, ariaLabel }: { onClick: () => void
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
+      className="balance-widget-action balance-widget-wrap"
       style={{
         width: '100%',
         minHeight: 44,
@@ -117,6 +118,7 @@ export function ReviewPanel({
         <div style={{ display: 'grid', gap: 6 }}>
           <button
             type="button"
+            className="balance-widget-action balance-widget-wrap"
             data-testid="approve-button"
             onClick={() => { if (!approveDisabled) void onApprove(); }}
             disabled={approveDisabled}
@@ -143,6 +145,15 @@ export function ReviewPanel({
           >
             {approveButtonLabel}
           </button>
+          {approvalInFlight && (
+            <span
+              role="status"
+              aria-live="polite"
+              style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}
+            >
+              Sending brief to Balance
+            </span>
+          )}
           {!ready && (
             <div data-testid="approve-disabled-hint" style={{ fontSize: 10, color: brandTokens.colors.mutedText, lineHeight: 1.5, textAlign: 'center' }}>
               Add a project need and contact detail to enable sending.

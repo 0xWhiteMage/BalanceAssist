@@ -680,6 +680,7 @@ export function ProjectBriefCard({
                   {onChange && (
                     <button
                       type="button"
+                      className="balance-widget-action"
                       onClick={(event) => {
                         event.stopPropagation();
                         openEditor();
@@ -787,6 +788,7 @@ export function ProjectBriefCard({
                   {onChange && (
                     <button
                       type="button"
+                      className="balance-widget-action"
                       onClick={(event) => {
                         event.stopPropagation();
                         openEditor();
@@ -964,6 +966,7 @@ function BriefRowEditor({
     <div style={containerStyle}>
       {row.multiline ? (
         <textarea
+          className="balance-widget-wrap"
           rows={3}
           value={value}
           aria-label={row.label}
@@ -979,6 +982,7 @@ function BriefRowEditor({
         />
       ) : (
         <input
+          className="balance-widget-wrap"
           type="text"
           value={value}
           aria-label={row.label}
@@ -996,6 +1000,7 @@ function BriefRowEditor({
       <div style={{ display: 'flex', gap: 6 }}>
         <button
           type="button"
+          className="balance-widget-action"
           aria-label={`Save ${row.label.toLowerCase()}`}
           disabled={saving}
           onClick={(event) => {
@@ -1008,6 +1013,7 @@ function BriefRowEditor({
         </button>
         <button
           type="button"
+          className="balance-widget-action"
           disabled={saving}
           onClick={(event) => {
             event.stopPropagation();

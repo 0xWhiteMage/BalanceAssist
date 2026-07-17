@@ -73,12 +73,26 @@ afterEach(() => {
 const originalFetch = global.fetch;
 afterEach(() => {
   global.fetch = originalFetch;
+  setMobileViewport(false);
 });
 
 function makeJsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+function setMobileViewport(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(max-width: 639px)' ? matches : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn()
+    }))
   });
 }
 
@@ -154,6 +168,21 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay approved confirmation (Fix 5)', () => {
+  test.each([
+    [false, 'Your core brief is ready. Review it in the brief panel.'],
+    [true, 'Your core brief is ready. Review it in the Brief tab.']
+  ])('replaces directional server prose with viewport-correct ready copy (mobile: %s)', async (mobile, expected) => {
+    setMobileViewport(mobile);
+    mockWidgetFetch();
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText(expected, {}, { timeout: 7000 })).toBeVisible();
+    expect(screen.queryByText(/tab on the right|rail on the right/i)).toBeNull();
+  }, 15_000);
+
   test('does not update unmounted state or raise a window error when delayed approval output completes', async () => {
     mockWidgetFetch();
     let resolveFinalize: ((value: Awaited<ReturnType<typeof finalizeLeadMock>>) => void) | undefined;
@@ -319,6 +348,37 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     });
   }, 10000);
 
+  test('shows one retryable approval error above both mobile tab panels', async () => {
+    setMobileViewport(true);
+    mockWidgetFetch();
+    finalizeLeadMock
+      .mockResolvedValueOnce({
+        ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: false,
+        queued: false, delivered: false, retryable: true, crmQueued: false, crmRevision: 1, approvedDraftVersion: 1
+      })
+      .mockResolvedValueOnce({
+        ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
+        queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1
+      });
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Brief' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
+    const alert = await screen.findByRole('alert', {}, { timeout: 7000 });
+    expect(alert).toHaveTextContent('The brief was not sent');
+    expect(alert.closest('[role="tabpanel"]')).toBeNull();
+    const retry = screen.getByRole('button', { name: 'Retry sending brief' });
+    expect(retry).toHaveClass('balance-widget-action');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
+    expect(alert).toBeVisible();
+    fireEvent.click(retry);
+    await waitFor(() => expect(finalizeLeadMock).toHaveBeenCalledTimes(2));
+  }, 20_000);
+
   test('does not finalize until producer-transfer consent has been recorded', async () => {
     mockWidgetFetch();
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -356,10 +416,8 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     });
     fireEvent.click(approveButton);
 
-    await waitFor(() => {
-      expect(finalizeLeadMock).not.toHaveBeenCalled();
-      expect(screen.getByText(/could not confirm consent/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByText(/could not confirm consent/i, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(finalizeLeadMock).not.toHaveBeenCalled();
   }, 10000);
 
   test('after Calendly completes without verified server confirmation, the widget stays truthful about team notification', async () => {

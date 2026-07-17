@@ -73,8 +73,26 @@ describe('ReviewPanel', () => {
     rerender(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onApprove={onApprove} approvalInFlight />);
     const pendingButton = screen.getByRole('button', { name: /sending/i });
     expect(pendingButton).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Sending brief to Balance');
     fireEvent.click(pendingButton);
     expect(onApprove).toHaveBeenCalledOnce();
+  });
+
+  test('keeps editor labels persistent and gives inline actions shared mobile-safe classes', () => {
+    render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" onChange={vi.fn()} provenance={{ projectScope: 'user-stated' }} />);
+
+    const send = screen.getByRole('button', { name: 'Send brief to Balance' });
+    expect(send).toHaveClass('balance-widget-action', 'balance-widget-wrap');
+
+    const edit = screen.getByRole('button', { name: 'Edit original wording' });
+    expect(edit).toHaveClass('balance-widget-action');
+    fireEvent.click(edit);
+
+    const editor = screen.getByRole('textbox', { name: 'Original wording' });
+    expect(editor.tagName).toBe('TEXTAREA');
+    expect(screen.getByText('Original wording')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Save original wording' })).toHaveClass('balance-widget-action');
+    expect(screen.getByRole('button', { name: 'Cancel editing original wording' })).toHaveClass('balance-widget-action');
   });
 
   test('uses the updated send label after a canonical edit', () => {
