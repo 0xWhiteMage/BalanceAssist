@@ -25,8 +25,6 @@ describe('ProjectBriefCard', () => {
         draft={readyDraft}
         provenance={{ projectScope: 'user-stated', scopePolished: 'inferred' }}
         compact={false}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByText('Original wording')).toBeInTheDocument();
@@ -37,8 +35,6 @@ describe('ProjectBriefCard', () => {
         draft={readyDraft}
         provenance={{ projectScope: 'confirmed', scopePolished: 'confirmed' }}
         compact={false}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByText('User-edited wording')).toBeInTheDocument();
@@ -124,8 +120,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={false}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByText('Project Brief')).toBeInTheDocument();
@@ -137,8 +131,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={false}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByTestId('project-brief-card')).toHaveAttribute('data-compact', 'false');
@@ -153,8 +145,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByTestId('project-brief-card')).toHaveAttribute('data-compact', 'true');
@@ -172,8 +162,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByText('Project description')).toBeInTheDocument();
@@ -195,8 +183,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={empty}
         compact={true}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.queryAllByTestId('brief-row-status')).toHaveLength(0);
@@ -208,8 +194,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.queryByText(/key fields captured/i)).not.toBeInTheDocument();
@@ -220,8 +204,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByText('Production')).toBeInTheDocument();
@@ -235,8 +217,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -256,8 +236,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={{ ...readyDraft, projectType: 'live-action' }}
         compact={true}
-        readyForApproval={false}
-        approved={false}
       />
     );
     expect(screen.getByText('Live action')).toBeInTheDocument();
@@ -268,8 +246,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={false}
-        readyForApproval={false}
-        approved={false}
       />
     );
     const serviceRow = screen.getByText('Service').closest('[data-testid="brief-row"]');
@@ -287,8 +263,6 @@ describe('ProjectBriefCard', () => {
         draft={readyDraft}
         provenance={{ projectScope: 'user-stated', scopePolished: 'inferred' }}
         compact={false}
-        readyForApproval={false}
-        approved={false}
       />
     );
 
@@ -303,8 +277,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -321,8 +293,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -342,8 +312,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -359,8 +327,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={false}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -375,8 +341,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={{ ...readyDraft, contactCompany: '' }}
         compact={false}
-        readyForApproval={false}
-        approved={false}
       />
     );
     const companyRow = screen.getByText('Company').closest('[data-testid="brief-row"]') as HTMLElement;
@@ -392,8 +356,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={empty}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -412,8 +374,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={empty}
         compact={false}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -432,8 +392,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={empty}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -449,8 +407,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -472,8 +428,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={empty}
         compact={false}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );
@@ -489,8 +443,6 @@ describe('ProjectBriefCard', () => {
       <ProjectBriefCard
         draft={readyDraft}
         compact={true}
-        readyForApproval={false}
-        approved={false}
         onChange={onChange}
       />
     );

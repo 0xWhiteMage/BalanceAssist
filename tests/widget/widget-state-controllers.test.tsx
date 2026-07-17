@@ -282,7 +282,7 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.draftVersion).toBe(5);
   });
 
-  test('clears the approval lock after a failed approval so it can retry', async () => {
+  test('moves idle to pending to error to pending to approved and rejects duplicate begins', () => {
     const { result } = renderHook(() => useWidgetSessionDraft({
       createSession: vi.fn(async () => ({ sessionId: 'session-1', status: 'new', sourceUrl: '', persisted: true })),
       getCurrentSession: vi.fn(async () => null),
@@ -292,20 +292,28 @@ describe('useWidgetSessionDraft', () => {
       requestProjectDeletion: vi.fn(async () => ({ ok: true }))
     }));
 
-    const failed = vi.fn(async () => false);
-    const succeeded = vi.fn(async () => true);
-
-    await act(async () => {
-      expect(await result.current.approve(failed)).toBe(false);
-      expect(await result.current.approve(succeeded)).toBe(true);
+    expect(result.current.approvalStatus).toBe('idle');
+    let failedToken!: number;
+    act(() => {
+      failedToken = result.current.beginApproval()!;
     });
+    expect(result.current.approvalStatus).toBe('pending');
+    expect(result.current.beginApproval()).toBeNull();
+    act(() => expect(result.current.finishApproval(failedToken, 'error')).toBe(true));
+    expect(result.current.approvalStatus).toBe('error');
 
-    expect(failed).toHaveBeenCalledTimes(1);
-    expect(succeeded).toHaveBeenCalledTimes(1);
+    let retryToken!: number;
+    act(() => {
+      retryToken = result.current.beginApproval()!;
+    });
+    expect(result.current.approvalStatus).toBe('pending');
+    act(() => expect(result.current.finishApproval(retryToken, 'approved')).toBe(true));
+    expect(result.current.approvalStatus).toBe('approved');
     expect(result.current.briefApproved).toBe(true);
+    expect(result.current.beginApproval()).toBeNull();
   });
 
-  test('releases a successful approval lock when a canonical edit requires reapproval', async () => {
+  test('moves an approved canonical v4 brief through edit v5 and reapproval', async () => {
     const updateProjectDraft = vi.fn(async () => ({
       ok: true as const,
       draftVersion: 5,
@@ -320,20 +328,26 @@ describe('useWidgetSessionDraft', () => {
     }));
     act(() => result.current.setNoticeConsent(consent));
     await act(async () => { await result.current.ensureSession(); });
-    let firstApprovalToken!: number;
     act(() => {
-      firstApprovalToken = result.current.beginApproval() as number;
-      expect(firstApprovalToken).toEqual(expect.any(Number));
-      result.current.finishApproval(firstApprovalToken, true);
-      result.current.recordApproval({ approvedDraftVersion: 4 });
+      result.current.applyCanonicalDraft({ projectScope: 'Approved version four' }, 4, {
+        draft: { projectScope: 'Approved version four' }, draftVersion: 4, fieldCount: 1,
+        approvedDraftVersion: 4, canonicalReferenceSetHash: 'references-v4', approvedReferenceSetHash: 'references-v4'
+      });
     });
+    expect(result.current.approvalStatus).toBe('approved');
 
     await act(async () => {
       expect(await result.current.updateDraft('projectScope', 'Edited after approval')).toMatchObject({ status: 'saved' });
     });
 
+    expect(result.current.draftVersion).toBe(5);
+    expect(result.current.approvalStatus).toBe('idle');
     expect(result.current.briefApproved).toBe(false);
-    act(() => expect(result.current.beginApproval()).toEqual(expect.any(Number)));
+    act(() => {
+      const token = result.current.beginApproval()!;
+      expect(result.current.finishApproval(token, 'approved')).toBe(true);
+    });
+    expect(result.current.approvalStatus).toBe('approved');
   });
 
   test('invalidates a pending approval and ignores its stale completion after a reference edit', () => {
@@ -354,15 +368,65 @@ describe('useWidgetSessionDraft', () => {
       id: 'reference-1', sessionId: 'session-1', kind: 'vimeo', url: 'https://vimeo.com/123'
     }));
     expect(result.current.approvalInFlight).toBe(false);
-    expect(result.current.finishApproval(staleToken, true)).toBe(false);
+    expect(result.current.finishApproval(staleToken, 'approved')).toBe(false);
     expect(result.current.briefApproved).toBe(false);
 
     let currentToken!: number;
     act(() => {
       currentToken = result.current.beginApproval()!;
-      expect(result.current.finishApproval(currentToken, true)).toBe(true);
+      expect(result.current.finishApproval(currentToken, 'approved')).toBe(true);
     });
     expect(result.current.briefApproved).toBe(true);
+  });
+
+  test('invalidates canonical approval when the reference hash changes at the same draft version', () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    const draft = { projectScope: 'Same approved wording' };
+
+    act(() => result.current.applyCanonicalDraft(draft, 4, {
+      draft, draftVersion: 4, fieldCount: 1, approvedDraftVersion: 4,
+      canonicalReferenceSetHash: 'references-a', approvedReferenceSetHash: 'references-a'
+    }));
+    expect(result.current.approvalStatus).toBe('approved');
+
+    act(() => result.current.applyCanonicalDraft(draft, 4, {
+      draft, draftVersion: 4, fieldCount: 1, approvedDraftVersion: 4,
+      canonicalReferenceSetHash: 'references-b', approvedReferenceSetHash: 'references-a'
+    }));
+    expect(result.current.approvalStatus).toBe('idle');
+    expect(result.current.briefApproved).toBe(false);
+  });
+
+  test('reset invalidates a pending approval completion', () => {
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    let token!: number;
+    act(() => { token = result.current.beginApproval()!; });
+    act(() => result.current.reset());
+
+    expect(result.current.approvalStatus).toBe('idle');
+    expect(result.current.finishApproval(token, 'approved')).toBe(false);
+    expect(result.current.briefApproved).toBe(false);
+  });
+
+  test('unmount invalidates a pending approval completion', () => {
+    const { result, unmount } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession: vi.fn(async () => null),
+      fetchProjectDraft: vi.fn(async () => null), updateProjectDraft: vi.fn(),
+      resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    let token!: number;
+    act(() => { token = result.current.beginApproval()!; });
+    act(() => unmount());
+
+    expect(result.current.finishApproval(token, 'approved')).toBe(false);
   });
 
   test('hydrates and replaces durable field provenance with canonical results', async () => {

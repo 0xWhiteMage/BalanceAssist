@@ -1,8 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 async function enterAiIntake(page: Page) {
-  await page.getByTestId('consent-button').click();
-  await page.getByRole('button', { name: /start with balance assist/i }).click();
+  await page.getByRole('button', { name: 'Build a brief with AI' }).click();
+  await page.getByRole('button', { name: 'Continue with AI' }).click();
 
   const input = page.getByPlaceholder(/Type your message|Message the team/i);
   await expect(input).toBeVisible();
@@ -61,11 +61,19 @@ test.describe('balance assist intake via persistent rail', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
+            outcome: 'draft_persisted',
             message: 'Got it. What kind of support do you need from Balance Studio?',
             draftUpdates: {
               projectScope: '30s animation for social media',
               scopePolished: '30s animation for social media'
             },
+            canonicalDraft: {
+              projectScope: '30s animation for social media',
+              scopePolished: '30s animation for social media'
+            },
+            draftVersion: 1,
+            currentStage: 'project',
+            stageRecaps: [],
             briefReady: false,
             reviewPrompt: null,
             missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
@@ -78,11 +86,8 @@ test.describe('balance assist intake via persistent rail', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
+          outcome: 'non_persistence',
           message: 'No problem. Tell me the kind of support you are exploring and I will shape it with you.',
-          draftUpdates: {},
-          briefReady: false,
-          reviewPrompt: null,
-          missingFields: ['service', 'timelineBand', 'budgetBand', 'contact']
         })
       });
     });
@@ -146,6 +151,7 @@ test.describe('balance assist intake via persistent rail', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
+          outcome: 'draft_persisted',
           message: 'Your brief is ready. Review it on the left and approve when you are happy with it.',
           draftUpdates: {
             service: 'production',
@@ -157,6 +163,19 @@ test.describe('balance assist intake via persistent rail', () => {
             contactCompany: 'Acme',
             contactEmail: 'jayden@example.com'
           },
+          canonicalDraft: {
+            service: 'production',
+            projectType: 'Video',
+            projectScope: '30s animation for social media',
+            timelineBand: '1-2-months',
+            budgetBand: '20k-50k',
+            contactName: 'Jayden',
+            contactCompany: 'Acme',
+            contactEmail: 'jayden@example.com'
+          },
+          draftVersion: 1,
+          currentStage: 'references-contact',
+          stageRecaps: [],
           briefReady: true,
           reviewPrompt: 'Your brief is ready. Review it on the left and approve when you are happy with it.',
           missingFields: []
@@ -174,7 +193,13 @@ test.describe('balance assist intake via persistent rail', () => {
           ok: true,
           sessionId: 'mock-session-id',
           qualificationStatus: 'qualified',
-          persisted: true
+          persisted: true,
+          queued: false,
+          delivered: false,
+          retryable: false,
+          crmQueued: false,
+          crmRevision: 1,
+          approvedDraftVersion: 1
         })
       });
     });
@@ -194,10 +219,10 @@ test.describe('balance assist intake via persistent rail', () => {
     await input.fill('30s animation for social media');
     await input.press('Enter');
 
-    // The bot reply from the mocked /api/chat should appear in the chat
-    // within 5 seconds. The widget now guarantees a fallback bot reply even
-    // if the LLM call fails, so this should never time out silently.
-    await expect(page.getByText(/Your brief is ready/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('status', { name: 'Brief ready' })).toContainText(
+      'Your core brief is ready',
+      { timeout: 5000 }
+    );
 
     // Once the AI merges the draftUpdates from /api/chat,
     // hasProjectIntent flips to true and the persistent left rail
@@ -207,7 +232,7 @@ test.describe('balance assist intake via persistent rail', () => {
     // Once the merged draft satisfies `isBriefReadyForApproval`, the
     // rail auto-switches from "essentials" to "summary" mode and the
     // "Approve & send to team" CTA renders inline in the rail.
-    const approveButton = page.getByRole('button', { name: /approve.*send to team/i });
+    const approveButton = page.getByRole('button', { name: 'Send brief to Balance' });
     await expect(approveButton).toBeVisible();
 
     // The rail should also report summary mode via data-mode.
@@ -225,8 +250,6 @@ test.describe('balance assist intake via persistent rail', () => {
     // left of the chat, never covering it.
     await expect(input).toBeVisible();
 
-    // After approval, the widget posts a bot confirmation that the
-    // brief is approved and ready for the Balance team.
-    await expect(page.getByText(/approved and ready for the Balance team/i)).toBeVisible();
+    await expect(page.getByText('Brief saved')).toBeVisible();
   });
 });

@@ -381,10 +381,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     setMobileViewport(true);
     mockWidgetFetch();
     finalizeLeadMock
-      .mockResolvedValueOnce({
-        ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: false,
-        queued: false, delivered: false, retryable: true, crmQueued: false, crmRevision: 1, approvedDraftVersion: 1
-      })
+      .mockRejectedValueOnce(new Error('temporary finalization failure'))
       .mockResolvedValueOnce({
         ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
         queued: true, delivered: false, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1
@@ -395,18 +392,42 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     fireEvent.click(await screen.findByRole('tab', { name: 'Brief' }));
+    const mountedRail = screen.getByTestId('review-rail');
     fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
     const alert = await screen.findByRole('alert', {}, { timeout: 7000 });
     expect(alert).toHaveTextContent('The brief was not sent');
     expect(alert.closest('[role="tabpanel"]')).toBeNull();
     const retry = screen.getByRole('button', { name: 'Retry sending brief' });
     expect(retry).toHaveClass('balance-widget-action');
+    expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Email the team' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(screen.getByRole('button', { name: 'Book a call' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
     expect(alert).toBeVisible();
     fireEvent.click(retry);
     await waitFor(() => expect(finalizeLeadMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Queued for the Balance team')).toBeInTheDocument();
+    expect(screen.getByTestId('review-rail')).toBe(mountedRail);
   }, 20_000);
+
+  test('reports verified delivery instead of merely saved or queued', async () => {
+    mockWidgetFetch();
+    finalizeLeadMock.mockResolvedValueOnce({
+      ok: true, sessionId: 'mock-session-id', qualificationStatus: 'qualified', persisted: true,
+      queued: true, delivered: true, retryable: false, crmQueued: true, crmRevision: 1, approvedDraftVersion: 1
+    });
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: '30s animation for social media' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
+
+    expect(await screen.findByText('Delivered to the Balance team')).toBeInTheDocument();
+    expect(screen.queryByText('Brief saved')).toBeNull();
+    expect(screen.queryByText('Queued for the Balance team')).toBeNull();
+  }, 10_000);
 
   test('does not finalize until producer-transfer consent has been recorded', async () => {
     mockWidgetFetch();

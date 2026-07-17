@@ -16,6 +16,7 @@ export type DraftEditOutcome =
   | { status: 'conflict'; ok: false; conflict: true; message: string }
   | { status: 'failed'; ok: false; conflict: false; message: string };
 export type DraftOperation = { invalidationEpoch: number; sessionId: string | null };
+export type ApprovalStatus = 'idle' | 'pending' | 'error' | 'approved';
 
 const alwaysValid: BootstrapValidity = () => true;
 
@@ -38,7 +39,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const [draftVersion, setDraftVersion] = useState(0);
   const [hasProjectIntent, setHasProjectIntent] = useState(false);
   const [briefApproved, setBriefApproved] = useState(false);
-  const [approvalInFlight, setApprovalInFlight] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus>('idle');
   const [referenceLinks, setReferenceLinks] = useState<VisibleReferenceLink[]>([]);
   const [approval, setApproval] = useState<{
     approvedDraftVersion?: number;
@@ -54,7 +55,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
   const bootstrapRef = useRef<Promise<string | null> | null>(null);
   const bootstrapGenerationRef = useRef(0);
   const operationInvalidationEpochRef = useRef(0);
-  const approveInFlightRef = useRef(false);
+  const approvalStatusRef = useRef<ApprovalStatus>('idle');
   const approvalGenerationRef = useRef(0);
   const isExpired = (value: string | null | undefined) => value !== null && value !== undefined && Date.parse(value) <= Date.now();
   const isSessionExpired = isExpired(expiresAt);
@@ -68,7 +69,17 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     bootstrapRef.current = null;
   }, []);
 
-  useEffect(() => invalidateBootstrap, [invalidateBootstrap]);
+  useEffect(() => () => {
+    invalidateBootstrap();
+    approvalGenerationRef.current += 1;
+    approvalStatusRef.current = 'idle';
+  }, [invalidateBootstrap]);
+
+  const transitionApproval = useCallback((status: ApprovalStatus) => {
+    approvalStatusRef.current = status;
+    setApprovalStatus(status);
+    setBriefApproved(status === 'approved');
+  }, []);
 
   const beginDraftOperation = useCallback((): DraftOperation => ({
     invalidationEpoch: operationInvalidationEpochRef.current,
@@ -96,8 +107,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     if (sameVersion && sameDraft && !canonical) return true;
 
     approvalGenerationRef.current += 1;
-    approveInFlightRef.current = false;
-    setApprovalInFlight(false);
+    approvalStatusRef.current = 'idle';
     setDraft(nextDraft);
     draftRef.current = nextDraft;
     setDraftVersion(version);
@@ -113,31 +123,27 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
         crmRevision: canonical.crmRevision
       };
       setApproval(nextApproval);
-      setBriefApproved(
+      const canonicalApproved =
         nextApproval.approvedDraftVersion === version &&
-        nextApproval.canonicalReferenceSetHash === nextApproval.approvedReferenceSetHash
-      );
+        nextApproval.canonicalReferenceSetHash === nextApproval.approvedReferenceSetHash;
+      transitionApproval(canonicalApproved ? 'approved' : 'idle');
     } else {
-      setBriefApproved(false);
+      transitionApproval('idle');
     }
     return true;
-  }, [isDraftOperationCurrent]);
+  }, [isDraftOperationCurrent, transitionApproval]);
 
   const appendReferenceLink = useCallback((link: VisibleReferenceLink) => {
     setReferenceLinks((current) => current.some((item) => item.url === link.url) ? current : [...current, link]);
     approvalGenerationRef.current += 1;
-    approveInFlightRef.current = false;
-    setApprovalInFlight(false);
-    setBriefApproved(false);
-  }, []);
+    transitionApproval('idle');
+  }, [transitionApproval]);
 
   const removeReferenceLink = useCallback((linkId: string) => {
     setReferenceLinks((current) => current.filter((link) => link.id !== linkId));
     approvalGenerationRef.current += 1;
-    approveInFlightRef.current = false;
-    setApprovalInFlight(false);
-    setBriefApproved(false);
-  }, []);
+    transitionApproval('idle');
+  }, [transitionApproval]);
 
   const setActiveSession = useCallback((session: SessionResponse, isValid: BootstrapValidity = alwaysValid) => {
     if (!isValid()) return false;
@@ -254,39 +260,18 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     } as const;
   }, [persistDraft]);
 
-  const approve = useCallback(async (operation: () => Promise<boolean>) => {
-    if (approveInFlightRef.current || briefApproved) return false;
-    const token = ++approvalGenerationRef.current;
-    approveInFlightRef.current = true;
-    setApprovalInFlight(true);
-    try {
-      const approved = await operation();
-      if (token !== approvalGenerationRef.current) return false;
-      if (approved) setBriefApproved(true);
-      return approved;
-    } finally {
-      if (token === approvalGenerationRef.current) {
-        approveInFlightRef.current = false;
-        setApprovalInFlight(false);
-      }
-    }
-  }, [briefApproved]);
-
   const beginApproval = useCallback(() => {
-    if (approveInFlightRef.current || briefApproved) return null;
+    if (approvalStatusRef.current === 'pending' || approvalStatusRef.current === 'approved') return null;
     const token = ++approvalGenerationRef.current;
-    approveInFlightRef.current = true;
-    setApprovalInFlight(true);
+    transitionApproval('pending');
     return token;
-  }, [briefApproved]);
+  }, [transitionApproval]);
 
-  const finishApproval = useCallback((token: number, approved: boolean) => {
+  const finishApproval = useCallback((token: number, status: Extract<ApprovalStatus, 'error' | 'approved'>) => {
     if (token !== approvalGenerationRef.current) return false;
-    if (approved) setBriefApproved(true);
-    approveInFlightRef.current = false;
-    setApprovalInFlight(false);
+    transitionApproval(status);
     return true;
-  }, []);
+  }, [transitionApproval]);
 
   const recordApproval = useCallback((result: { approvedDraftVersion?: number; crmRevision?: number }) => {
     setApproval((current) => ({
@@ -295,8 +280,8 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
       crmRevision: result.crmRevision,
       approvedReferenceSetHash: current.canonicalReferenceSetHash
     }));
-    setBriefApproved(true);
-  }, []);
+    transitionApproval('approved');
+  }, [transitionApproval]);
 
   const reset = useCallback(() => {
     invalidateBootstrap();
@@ -304,23 +289,21 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     expiresAtRef.current = null;
     draftVersionRef.current = 0;
     approvalGenerationRef.current += 1;
-    approveInFlightRef.current = false;
     setSessionId(null);
     setExpiresAt(null);
     setDraft(createDefaultLeadDraft());
     setFieldProvenance({});
     setDraftVersion(0);
     setHasProjectIntent(false);
-    setBriefApproved(false);
-    setApprovalInFlight(false);
+    transitionApproval('idle');
     setReferenceLinks([]);
     setApproval({});
-  }, [invalidateBootstrap]);
+  }, [invalidateBootstrap, transitionApproval]);
 
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, fieldProvenance, draftVersion,
-    hasProjectIntent, briefApproved, setBriefApproved, approvalInFlight, ensureSession, loadOrCreateSession, invalidateBootstrap,
-    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, approve, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, removeReferenceLink, reset,
+    hasProjectIntent, briefApproved, approvalStatus, approvalInFlight: approvalStatus === 'pending', ensureSession, loadOrCreateSession, invalidateBootstrap,
+    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, beginApproval, finishApproval, recordApproval, approval, referenceLinks, appendReferenceLink, removeReferenceLink, reset,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),
     requestProjectDeletion: () => sessionIdRef.current ? dependencies.requestProjectDeletion(sessionIdRef.current) : Promise.resolve({ ok: false })

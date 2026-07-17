@@ -423,11 +423,7 @@ export function ConfidentialDiversionRecovery({
 export function ProjectBriefCard({
   draft,
   showNudge,
-  readyForApproval,
-  approved,
   title,
-  onApprove,
-  onContinueRefining,
   onChange,
   provenance = {},
   referenceLinks = [],
@@ -450,11 +446,7 @@ export function ProjectBriefCard({
     contactEmail: string;
   };
   showNudge?: boolean;
-  readyForApproval?: boolean;
-  approved?: boolean;
   title?: string;
-  onApprove?: () => void;
-  onContinueRefining?: () => void;
   onChange?: (key: string, value: string) => Promise<BriefMutationOutcome>;
   provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
   referenceLinks?: ReadonlyArray<{ id: string; kind: string; url: string }>;
@@ -842,54 +834,6 @@ export function ProjectBriefCard({
       {showNudge && completed < rows.length && (
         <div style={{ fontSize: nudgeFontSize, color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
           Tip: filling the missing fields helps Balance respond faster and more accurately.
-        </div>
-      )}
-
-      {readyForApproval && !approved && (
-        <div style={{ display: 'grid', gap: '8px', marginTop: '4px' }}>
-          <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText, lineHeight: 1.5 }}>
-            Review this brief carefully. When you approve it, Balance Assist will prepare it for the team.
-          </div>
-          <div style={{ display: 'grid', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={onApprove}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: 'none',
-                background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-                color: brandTokens.colors.baseBlack,
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em'
-              }}
-            >
-              Approve &amp; send to team
-            </button>
-            <button
-              type="button"
-              onClick={onContinueRefining}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: `1px solid ${brandTokens.colors.border}`,
-                background: 'transparent',
-                color: brandTokens.colors.lightText,
-                fontSize: '11px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em'
-              }}
-            >
-              Continue refining
-            </button>
-          </div>
         </div>
       )}
 

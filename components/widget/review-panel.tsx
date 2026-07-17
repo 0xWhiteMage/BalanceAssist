@@ -104,8 +104,6 @@ export function ReviewPanel({
         draft={draft}
         showNudge={false}
         title="Project Brief"
-        readyForApproval={false}
-        approved={approved}
         compact={mode === 'essentials'}
         onChange={onChange}
         provenance={provenance}

@@ -139,7 +139,7 @@ export function WidgetOverlay({
   const sessionDraft = useWidgetSessionDraft({ createSession, getCurrentSession, fetchProjectDraft, updateProjectDraft, resetProject, requestProjectDeletion });
   const {
     draft, noticeConsent, setNoticeConsent, hasProjectIntent,
-    briefApproved, setBriefApproved, sessionId, sessionUnavailable, isSessionExpired,
+    briefApproved, sessionId, sessionUnavailable, isSessionExpired,
     draftVersion, setDraftVersion, approval
   } = sessionDraft;
   const [isTyping, setIsTyping] = useState(false);
@@ -680,7 +680,6 @@ export function WidgetOverlay({
 
   async function appendReferenceLink(link: ReferenceLink) {
     if (link.id && link.sessionId) sessionDraft.appendReferenceLink({ ...link, id: link.id, sessionId: link.sessionId });
-    setBriefApproved(false);
   }
 
   async function addPrivateReference(url: string) {
@@ -729,11 +728,11 @@ export function WidgetOverlay({
     try {
       const activeSessionId = await ensureSession();
       if (cancelRef.current) {
-        sessionDraft.finishApproval(approvalToken, false);
+        sessionDraft.finishApproval(approvalToken, 'error');
         return;
       }
       if (!activeSessionId) {
-        sessionDraft.finishApproval(approvalToken, false);
+        sessionDraft.finishApproval(approvalToken, 'error');
         setTelegramBroadcastStatus('unconfigured');
         setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         return;
@@ -741,10 +740,10 @@ export function WidgetOverlay({
 
       if (!await recordProducerTransferConsent(activeSessionId)) {
         if (cancelRef.current) {
-          sessionDraft.finishApproval(approvalToken, false);
+          sessionDraft.finishApproval(approvalToken, 'error');
           return;
         }
-        sessionDraft.finishApproval(approvalToken, false);
+        sessionDraft.finishApproval(approvalToken, 'error');
         setTelegramBroadcastStatus('unconfigured');
         setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         await botSay('Sorry — we could not confirm consent to share your brief with the Balance team. Please try again.');
@@ -753,18 +752,18 @@ export function WidgetOverlay({
 
       const finalizeResponse = await finalizeLead({ sessionId: activeSessionId });
       if (cancelRef.current) {
-        sessionDraft.finishApproval(approvalToken, false);
+        sessionDraft.finishApproval(approvalToken, 'error');
         return;
       }
       if (!finalizeResponse || !finalizeResponse.ok || finalizeResponse.persisted !== true) {
-        sessionDraft.finishApproval(approvalToken, false);
+        sessionDraft.finishApproval(approvalToken, 'error');
         setTelegramBroadcastStatus('unconfigured');
         setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
         await botSay('Sorry — the brief could not be saved. Please try again or contact the team directly.');
         return;
       }
 
-      if (!sessionDraft.finishApproval(approvalToken, true)) return;
+      if (!sessionDraft.finishApproval(approvalToken, 'approved')) return;
       setApprovalError(null);
       sessionDraft.recordApproval(finalizeResponse);
       if (finalizeResponse.delivered === true) {
@@ -784,7 +783,7 @@ export function WidgetOverlay({
       );
       await advanceStep('handoff', draftRef.current);
     } catch {
-      sessionDraft.finishApproval(approvalToken, false);
+      sessionDraft.finishApproval(approvalToken, 'error');
       if (cancelRef.current) return;
       setTelegramBroadcastStatus('unconfigured');
       setApprovalError('The brief was not sent. Please retry or talk to the team without AI.');
@@ -1345,6 +1344,23 @@ export function WidgetOverlay({
               >
                 Talk to the team without AI
               </button>
+              <a href="mailto:hello@balancestudio.tv" style={{ color: '#fca5a5' }}>
+                Email the team
+              </a>
+              <button
+                type="button"
+                className="balance-widget-action"
+                onClick={() => {
+                  if (!configuredCalendlyUrl) {
+                    void botSay('Scheduling is currently unavailable. Please email the Balance team to arrange a time.');
+                    return;
+                  }
+                  setCalendlyUrl(configuredCalendlyUrl);
+                  setView('calendly');
+                }}
+              >
+                Book a call
+              </button>
             </div>
           )}
 
@@ -1380,7 +1396,6 @@ export function WidgetOverlay({
                   mode={railMode}
                   onApprove={handleApproveBrief}
                   onContinueRefining={() => {
-                    setBriefApproved(false);
                     setRailMode('essentials');
                   }}
                   onChange={handleDraftEdit}
