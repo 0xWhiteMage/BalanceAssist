@@ -1,8 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 async function enterAiIntake(page: Page) {
-  await page.getByTestId('consent-button').click();
-  await page.getByRole('button', { name: /start with balance assist/i }).click();
+  await page.getByRole('button', { name: 'Build a brief with AI' }).click();
+  await page.getByRole('button', { name: 'Continue with AI' }).click();
 
   const input = page.getByPlaceholder(/Type your message|Message the team/i);
   await expect(input).toBeVisible();
