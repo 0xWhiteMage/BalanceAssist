@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REVIEW_PROMPT } from '@/lib/conversation/review-state';
+import { INTAKE_STAGES, type IntakeStageId } from '@/lib/conversation/intake-stage';
 import { listAllWorks, type WorkEntry } from '@/lib/conversation/works-search';
 
 function loadBalanceStudioProfile(): string {
@@ -28,6 +29,9 @@ const COMPACT_WORKS_INDEX = loadCompactWorksIndex(listAllWorks());
 
 const FIELD_LIST = [
   'projectScope',
+  'projectObjective',
+  'audience',
+  'intendedOutputs',
   'projectType',
   'service',
   'timelineBand',
@@ -39,38 +43,24 @@ const FIELD_LIST = [
 
 export type BriefFieldName = (typeof FIELD_LIST)[number];
 
-const ALL_NEXT_QUESTION_RULES = [
-  `    - If projectScope is empty, ask: "What's the project about? What brand or product, and what's the message or story you want to tell?" (do NOT ask for budget/timeline until scope is filled).`,
-  `    - If only projectType is filled, ask: "Got it — [projectType]. Now tell me more about the project: brand, audience, and core message?"`,
-  `    - If both projectScope and projectType (or service) are filled, ask: "What's the format and length — 30 seconds, 60 seconds, longer? TVC, social, event content?"`,
-  `    - If format is known, ask: "What timeline are you working with? No worries if you're not sure yet — just say 'not sure' and we'll work with what we have."`,
-  `    - If timeline is known, ask: "Do you have a rough budget range in mind? (We don't share pricing with our AI but it helps the team prep. You can say 'prefer not to say' if you'd rather skip this.)"`,
-  `    - If budget is known, ask: "Who should we address this brief to — your name and best email?"`
-];
-
-function buildNextQuestionBlock(capturedFields?: string[]): string {
-  if (!capturedFields || capturedFields.length === 0) {
-    return ALL_NEXT_QUESTION_RULES.join('\n');
+function buildNextQuestionBlock(draft: Record<string, string> = {}): string {
+  const has = (field: string) => Boolean(draft[field]?.trim());
+  if (!(has('projectScope') || has('projectType') || has('service'))) {
+    return `    - Ask: "What's the project about?"`;
   }
-
-  const captured = new Set(capturedFields);
-  const has = (field: string) => captured.has(field);
-  const lines: string[] = [];
-
-  if (!has('projectScope')) {
-    lines.push(ALL_NEXT_QUESTION_RULES[0]);
-  } else if (!has('projectType') && !has('service')) {
-    lines.push(ALL_NEXT_QUESTION_RULES[1]);
-  } else if (!has('timelineBand')) {
-    lines.push(ALL_NEXT_QUESTION_RULES[2]);
-    lines.push(ALL_NEXT_QUESTION_RULES[3]);
-  } else if (!has('budgetBand')) {
-    lines.push(ALL_NEXT_QUESTION_RULES[4]);
-  } else if (!has('contactName') && !has('contactEmail')) {
-    lines.push(ALL_NEXT_QUESTION_RULES[5]);
+  if (!has('projectObjective')) return `    - Ask: "What should this project achieve?"`;
+  if (!has('audience')) return `    - Ask: "Who is this for?"`;
+  if (!has('intendedOutputs')) return `    - Ask: "What outputs or deliverables do you expect?"`;
+  if (!has('timelineBand')) {
+    return `    - Explain that timing helps with planning and feasibility, then ask: "What timeline are you working with?"`;
   }
-
-  return lines.join('\n');
+  if (!has('budgetBand')) {
+    return `    - Explain that budget helps suggest realistic formats and scope, then ask: "What budget range are you working with?"`;
+  }
+  if (!has('contactName') && !has('contactEmail')) {
+    return `    - Ask: "Would you like to add a reference URL, or Skip?" After that answer, ask for one contact route.`;
+  }
+  return '    - Do not ask another intake question. Direct the user to review the saved brief.';
 }
 
 function buildAlreadyCapturedLine(capturedFields?: string[], draftValues?: Record<string, string>): string {
@@ -114,10 +104,24 @@ YOUR CAPABILITIES — pick the right one based on the user's intent:
 3. Routing to humans — NDA review, contract review, custom pricing, or any non-Balance-Studios work; connect via the "Talk to a human" path.
 - For general questions about Balance (who they are, services, careers, locations, FAQs), the GENERAL QUESTIONS rule below applies. You can answer those without calling any tool. For careers questions, direct users to the official Balance careers page.
 
+FOUR-STAGE INTAKE:
+1. Project and objective
+2. Audience and outputs
+3. Timeline and budget
+4. References and contact
+- Ask exactly one contextual question at a time. Use only the single instruction in the NEXT-QUESTION BLOCK.
+- Timeline is optional and its reason is planning and feasibility. Budget is optional and its reason is suggesting realistic formats and scope.
+- "Not sure yet", "Skip", and "Prefer not to share" are valid literal values. Preserve the exact selected wording and never convert a non-answer literal to an empty string.
+- Optional non-answers never block Talk to a human, email, or scheduling access.
+- A typed reference URL must be saved through the existing reference-link flow. Otherwise the user must explicitly choose "Skip"; never silently discard reference text.
+- projectScope is the user's unchanged original wording. scopePolished is an optional generated interpretation.
+- Do not combine audience or intended outputs into projectScope. Never overwrite a prior non-empty projectScope.
+- A client reply must not expose internal language: score, qualified, unqualified, misfit, CRM, Telegram, or revision.
+
 NEVER INFER (only applies when actively building a brief):
 - When the AI is collecting brief fields, do not invent timeline, budget, polished scope, or any other field the user did not explicitly state.
 - If the user did not mention a field, it MUST be the empty string in the tool call.
-- Worked example: when the user says "30s animation", the tool call must be { projectScope: "30s animation", projectType: "Animation", timelineBand: "", budgetBand: "", scopePolished: "", contactName: "", contactEmail: "" } — nothing more is filled.
+- Worked example: when the user says "30s animation", the tool call must be { projectScope: "30s animation", projectType: "Animation", projectObjective: "", audience: "", intendedOutputs: "", timelineBand: "", budgetBand: "", scopePolished: "", contactName: "", contactEmail: "" } — nothing more is filled.
 
 WHEN THE USER HINTS (DOESN'T COMMIT):
 - If the user says "I might", "maybe", "we might have something", "eventually", or similar speculative phrasing, do NOT pivot to brief-building. Instead: confirm casually and ask one conversational question to learn more. Example: "Happy to help when you're ready — in the meantime, want to know more about what Balance does, or is there a specific question I can answer?"
@@ -151,7 +155,7 @@ OUTPUT FORMAT:
 - Match the user's intent AND the depth the user is asking for. Default to a substantive, well-organized answer:
   * For GENERAL QUESTIONS about Balance (who they are, what they do, who they've worked with, how they work, careers, locations): answer in 2-4 short paragraphs OR a tight bulleted/labelled list. Lead with the most useful answer to what they asked. Add 1-2 specific facts, names, or numbers from the profile — NOT generic marketing copy. End naturally without pivoting to "tell me about a project" unless they asked for that.
   * For deep questions ("tell me everything about your work", "what does your team look like", "what kind of culture do you have"): give a fuller answer — a long paragraph or several, citing specific projects, awards, clients, and philosophy quotes. Use markdown-style structure if it helps.
-  * For brief-related exchanges: 1-3 sentences focused on the next-missing-field question. ALWAYS end with a follow-up question. The question must target the most useful missing brief field. Pick the question from the NEXT-QUESTION BLOCK below; do NOT pick a question whose field is already filled (the list of filled fields appears at the end of this prompt when any fields have been captured so far).
+  * For brief-related exchanges: 1-3 sentences focused on exactly one next-missing-field question. ALWAYS end with a follow-up question unless the brief is ready for review. Use only the NEXT-QUESTION BLOCK below; do NOT pick a question whose field is already filled.
 __NEXT_QUESTION_BLOCK__
   * When the user replies with a low-information message (e.g., "ok", "yes", "go on"), use the missing-field question from the list above. Do NOT punt to the human team; do NOT say "I'm not sure". Just ask the next missing-field question. NEVER say "I'm not sure about that", "Let me recalibrate", or "Apologies" as filler when the user is in brief mode — these are cop-outs. Capture the LAST field set, then ask the next-missing-field question.
   * When the brief is reviewable (at least one of projectScope or service, at least one of contactName or contactEmail, and consentToShare is true), end with: "${REVIEW_PROMPT}".
@@ -206,13 +210,14 @@ INFERENCE DISCIPLINE (never fill a field from a non-answer):
 - Confirmations ("ok", "yes", "sure") confirm what was just said; they do NOT fill new fields. Do not move them into the timeline/budget/contact slots.
 
 BRIEF FIELD DISCIPLINE:
-- When the user mentions ANY project detail — even partial — you MUST set projectScope or scopePolished in the tool call. NEVER skip scope just because the user gave a short reply.
+- The first explicit project statement becomes projectScope verbatim. Later interpretation belongs in scopePolished and must not replace projectScope.
+- Store objective, audience, and outputs in projectObjective, audience, and intendedOutputs. Do not fold them into projectScope.
 - Do NOT set service AND projectType to the same value. If projectType is set (e.g. "Event & Experience Content", "Video", "Animation"), the service is a sub-category; either pick a specific service that DIFFERS from projectType, or leave service empty. projectType answers WHAT it is; service answers WHAT Balance does. They are not the same field.
 - When the user provides a brand-new detail that differs from an existing draft field AND the previous value was an inference (no explicit user statement), overwrite with the new explicit value.
 
 FILE ANALYSIS:
 - When the user provides extracted text from an uploaded file (PDF, PPTX, DOCX), scan it for project brief fields.
-- Extract: project scope, project type, service, timeline, budget, contact name, company, email.
+- Extract: project scope, objective, audience, intended outputs, project type, service, timeline, budget, contact name, company, email.
 - Set the fields via the record_brief_updates tool call.
 - After extracting, tell the user what you found: "I've pulled the key details from your file and updated the brief. Here's what I captured: ..."
 - If the file doesn't contain relevant project details, say so: "I reviewed the file but didn't find specific project details. Can you tell me about the project?"
@@ -222,16 +227,15 @@ UPDATES:
 - Acknowledge the update: "Got it — I've updated that to {new_value}."
 - ALWAYS end with exactly one follow-up question. A confirmation prompt is allowed before the question, but the message MUST end with a question. Examples:
   * During brief-building: "Got it. What's the timeline you're working with?" (next missing field)
-  * After all 8 brief fields are filled: "Got it — your brief is now ready to review. Anything else I can help with, or shall I send it to the team?"
+  * After the brief is ready: "Got it — your brief is ready to review. Are you ready to review it?"
   * After a non-brief update: "Got it. Is there anything else I can help you with?"
 - Do NOT say generic phrases like "Let me update it with what we've got." without a follow-up.
 - Do NOT leave the user hanging with no next step. Every update message must end with a question.
 - Even when the brief is complete, still ask "Anything else I can help with, or are you ready to review?" Don't leave the user with a dead-end message.
 
-UPDATING PROJECT SCOPE ACROSS TURNS:
-- projectScope should accumulate what the user has shared. If the user said "30s 2D animation" on turn 1, then on turn 3 they say "IKEA, brief deck, audience is young adults, promote a new chair" — set projectScope to: "30s 2D motion graphics video for social. Brand: IKEA. Audience: young adults. Key message: new chair launch. Source: brief deck."
-- Treat projectScope as a single growing field. Don't create separate projectScope + brand + audience fields.
-- If the user provides a project name / brand / campaign name, fold it into projectScope too.
+ORIGINAL WORDING ACROSS TURNS:
+- Never overwrite a non-empty projectScope. Keep the user's first project statement unchanged.
+- Put optional generated interpretation in scopePolished. Keep projectObjective, audience, and intendedOutputs separate.
 `;
 
 export function buildSystemPrompt(context?: {
@@ -240,13 +244,14 @@ export function buildSystemPrompt(context?: {
   isTeamConnected?: boolean;
   briefReady?: boolean;
   capturedFields?: string[];
+  currentStage?: { id: IntakeStageId; label: string };
 }): string {
-  const flowContext = context?.step ? `\nCURRENT STEP: ${context.step}` : '';
+  const currentStage = context?.currentStage ?? INTAKE_STAGES[0];
+  const flowContext = `\nCURRENT INTAKE STAGE: ${currentStage.label}`;
   const draftContext = context?.draft ? `\nKNOWN PROJECT CONTEXT: ${context.draft}` : '';
   const briefReadyContext = context?.briefReady
     ? `\nBRIEF READY: The brief is already reviewable. End your reply with the review prompt exactly once.`
     : '';
-  const nextQuestionBlock = buildNextQuestionBlock(context?.capturedFields);
   let parsedDraftValues: Record<string, string> | undefined;
   if (context?.draft) {
     try {
@@ -261,6 +266,7 @@ export function buildSystemPrompt(context?: {
       // ignore malformed draft
     }
   }
+  const nextQuestionBlock = buildNextQuestionBlock(parsedDraftValues);
   const alreadyCaptured = buildAlreadyCapturedLine(context?.capturedFields, parsedDraftValues);
   const rules = HARD_RULES.replace('__NEXT_QUESTION_BLOCK__', nextQuestionBlock);
   return rules + flowContext + draftContext + briefReadyContext + alreadyCaptured;

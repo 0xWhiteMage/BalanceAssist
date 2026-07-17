@@ -20,9 +20,36 @@ test('rejects malformed email', () => {
 });
 
 test('caps long strings to 200 chars', () => {
-  const result = sanitizeDraftUpdates({ projectScope: 'a'.repeat(500) });
+  const result = sanitizeDraftUpdates({
+    projectScope: 'a'.repeat(500),
+    projectObjective: 'b'.repeat(500),
+    audience: 'c'.repeat(500),
+    intendedOutputs: 'd'.repeat(500)
+  });
   expect(result.projectScope?.length).toBe(200);
+  expect(result.projectObjective?.length).toBe(200);
+  expect(result.audience?.length).toBe(200);
+  expect(result.intendedOutputs?.length).toBe(200);
 });
+
+test('allowlists the thesis-aligned prose fields', () => {
+  expect(sanitizeDraftUpdates({
+    projectObjective: 'Build launch awareness',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film and social cut-downs'
+  })).toEqual({
+    projectObjective: 'Build launch awareness',
+    audience: 'Young adults',
+    intendedOutputs: 'Hero film and social cut-downs'
+  });
+});
+
+test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
+  'preserves the exact stable non-answer literal %s',
+  (literal) => {
+    expect(sanitizeDraftUpdates({ audience: literal })).toEqual({ audience: literal });
+  }
+);
 
 test('timeline passes through verbatim (no band normalization)', () => {
   const result = sanitizeDraftUpdates({ timelineBand: '3 weeks' });

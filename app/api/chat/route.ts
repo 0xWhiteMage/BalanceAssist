@@ -1,6 +1,7 @@
 import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
+import { getCurrentIntakeStage } from '@/lib/conversation/intake-stage';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-responses';
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
@@ -257,6 +258,9 @@ type ChatContext = {
 
 const CAPTURED_FIELD_KEYS = [
   'projectScope',
+  'projectObjective',
+  'audience',
+  'intendedOutputs',
   'projectType',
   'service',
   'timelineBand',
@@ -416,12 +420,13 @@ async function persistAuthenticatedDraftState(
 function buildLlmContext(context: ChatContext, promptDraft: Record<string, string>, priorDraft: Partial<LeadDraft>) {
   const briefReady = isBriefReadyForApproval(priorDraft);
   const capturedFields = computeCapturedFieldsFromDraft(promptDraft);
+  const currentStage = getCurrentIntakeStage(priorDraft);
   const systemPrompt = buildSystemPrompt({
     isTeamConnected: context?.isTeamConnected,
-    step: context?.step,
     draft: Object.keys(promptDraft).length > 0 ? JSON.stringify(promptDraft) : undefined,
     briefReady,
-    capturedFields
+    capturedFields,
+    currentStage
   });
   return { priorDraft, briefReady, capturedFields, systemPrompt };
 }

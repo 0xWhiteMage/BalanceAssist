@@ -683,6 +683,104 @@ describe('project-scope auto-fill on user reply (Fix 5 regression)', () => {
   });
 });
 
+describe('thesis-aligned optional intake actions', () => {
+  test('routes the objective non-answer through chat without qualification or handoff', async () => {
+    const chatBodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    const requestedUrls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatBodies.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({
+          message: chatBodies.length === 1
+            ? 'What should this project achieve?'
+            : 'Who is this for?',
+          draftUpdates: chatBodies.length === 1 ? { projectScope: 'Launch film' } : { projectObjective: 'Not sure yet' },
+          briefReady: false,
+          reviewPrompt: null,
+          missingFields: []
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'We need a launch film' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    const action = await screen.findByRole('button', { name: 'Not sure yet' }, { timeout: 7000 });
+    await waitFor(() => expect(action).not.toBeDisabled(), { timeout: 7000 });
+    fireEvent.click(action);
+
+    await waitFor(() => expect(chatBodies).toHaveLength(2), { timeout: 7000 });
+    expect(chatBodies[1].messages.at(-1)).toEqual({ role: 'user', content: 'Not sure yet' });
+    expect(requestedUrls.some((url) => /finalize|handoff|qualification/i.test(url))).toBe(false);
+  }, 20_000);
+
+  test('persists a typed reference URL and only Skip advances without a link', async () => {
+    const requestedUrls: string[] = [];
+    let chatCalls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes('/api/chat') && init?.method === 'POST') {
+        chatCalls += 1;
+        return new Response(JSON.stringify({
+          message: 'Would you like to add any references? You can add them now or Skip.',
+          draftUpdates: {
+            projectScope: 'Launch film',
+            projectObjective: 'Build awareness',
+            audience: 'Young adults',
+            intendedOutputs: 'Hero film',
+            timelineBand: 'Not sure yet',
+            budgetBand: 'Prefer not to share'
+          },
+          briefReady: false,
+          reviewPrompt: null,
+          missingFields: []
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/attachments/link') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          ok: true,
+          persisted: true,
+          link: { id: 'reference-1', sessionId: 'mock-session', url: 'https://vimeo.com/123', kind: 'vimeo' }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/consent') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: true, consent: { producerTransfer: true } }), { status: 200 });
+      }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<WidgetOverlay autoOpen={true} />);
+    const input = await startAiConversation();
+    fireEvent.change(input, { target: { value: 'We need a launch film' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    const skip = await screen.findByRole('button', { name: 'Skip' }, { timeout: 7000 });
+    await waitFor(() => expect(skip).not.toBeDisabled(), { timeout: 7000 });
+    fireEvent.change(input, { target: { value: 'https://vimeo.com/123' } });
+    const send = screen.getByRole('button', { name: 'Send message' });
+    await waitFor(() => expect(send).not.toBeDisabled(), { timeout: 7000 });
+    fireEvent.click(send);
+
+    await waitFor(() => {
+      expect(requestedUrls.some((url) => url.includes('/api/attachments/link'))).toBe(true);
+    }, { timeout: 7000 });
+    expect(chatCalls).toBe(1);
+    expect(await screen.findByText(/reference link.*saved/i, {}, { timeout: 7000 })).toBeVisible();
+  }, 20_000);
+});
+
 describe('intake short replies stay on the LLM path', () => {
   test('sending "ok" during the service step calls /api/chat again and skips the scripted summary', async () => {
     const chatCalls: Array<{ step: string }> = [];

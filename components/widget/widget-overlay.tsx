@@ -23,7 +23,7 @@ import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
-import { chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
+import { addReferenceLink, chatRequest, createSession, fetchProjectDraft, fetchTeamMessages, finalizeLead, getCurrentSession, logEvent, recordHumanContactConsent, recordProducerTransferConsent, relayUserMessage, requestProjectDeletion, resetProject, updateProjectDraft, uploadRequestedFiles, type TeamMessage } from '@/lib/api/client';
 import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-draft';
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
@@ -31,8 +31,10 @@ import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversa
 import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
+import { classifyUrl } from '@/lib/uploads/url-detect';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
+const OPTIONAL_ANSWER_ACTIONS = ['Not sure yet', 'Skip', 'Prefer not to share'] as const;
 
 let messageCounter = 0;
 function nextId() {
@@ -120,6 +122,9 @@ function cleanupAttachmentPreviews(messages: ChatMessage[]) {
 
 const CAPTURED_FIELD_KEYS_FOR_LLM = [
   'projectScope',
+  'projectObjective',
+  'audience',
+  'intendedOutputs',
   'projectType',
   'service',
   'timelineBand',
@@ -676,6 +681,10 @@ export function WidgetOverlay({
   function handleDraftEdit(key: string, value: string) {
     const editableKeys: ReadonlySet<keyof LeadDraft> = new Set([
       'projectScope',
+      'projectObjective',
+      'audience',
+      'intendedOutputs',
+      'scopePolished',
       'projectType',
       'service',
       'timelineBand',
@@ -812,6 +821,31 @@ export function WidgetOverlay({
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
 
+    if (currentStep === 'references') {
+      if (value !== 'Skip') {
+        const kind = classifyUrl(value);
+        if (!kind) {
+          await botSay('Please paste a full reference URL, or choose Skip.');
+          return;
+        }
+        const activeSessionId = sessionId ?? await ensureSession();
+        if (!activeSessionId || !await recordProducerTransferConsent(activeSessionId)) {
+          await botSay('I could not save that reference link. Please try again, or choose Skip.');
+          return;
+        }
+        const savedLink = await addReferenceLink({ sessionId: activeSessionId, url: value, kind });
+        if (!savedLink) {
+          await botSay('I could not save that reference link. Please try again, or choose Skip.');
+          return;
+        }
+        await appendReferenceLink(savedLink);
+        await botSay('Your reference link was saved.');
+      }
+      setCurrentStep('contact-name');
+      await advanceStep('contact-name', draftRef.current);
+      return;
+    }
+
     let updatedDraft = draft;
 
     if (step.freeText || currentStep === 'intro') {
@@ -920,6 +954,7 @@ export function WidgetOverlay({
         currentStep === 'outputs' ||
         currentStep === 'timeline' ||
         currentStep === 'budget' ||
+        currentStep === 'references' ||
         currentStep === 'contact-name' ||
         currentStep === 'contact-email';
 
@@ -989,6 +1024,11 @@ export function WidgetOverlay({
         await ensureSession();
         appendUserMessage(trimmed);
         await handleLLMResponse(messagesRef.current);
+        return;
+      }
+
+      if (!isTeamConnected && currentStep === 'references') {
+        await processFlowAnswer(trimmed);
         return;
       }
 
@@ -1149,6 +1189,16 @@ export function WidgetOverlay({
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
   const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
+  const optionalAnswerActions =
+    currentStep === 'objective' || currentStep === 'timeline'
+      ? [OPTIONAL_ANSWER_ACTIONS[0]]
+      : currentStep === 'audience' || currentStep === 'outputs'
+        ? [OPTIONAL_ANSWER_ACTIONS[0], OPTIONAL_ANSWER_ACTIONS[1]]
+        : currentStep === 'budget'
+          ? [OPTIONAL_ANSWER_ACTIONS[2]]
+          : currentStep === 'references'
+            ? [OPTIONAL_ANSWER_ACTIONS[1]]
+            : [];
 
   return (
     <div
@@ -1442,6 +1492,30 @@ export function WidgetOverlay({
               </div>
             )}
           </div>
+
+          {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 12px 0' }}>
+              {optionalAnswerActions.map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  disabled={isTyping}
+                  onClick={() => { void processFlowAnswer(action, action); }}
+                  style={{
+                    minHeight: 44,
+                    padding: '8px 12px',
+                    borderRadius: 999,
+                    border: `1px solid ${brandTokens.colors.border}`,
+                    background: 'transparent',
+                    color: brandTokens.colors.lightText,
+                    cursor: isTyping ? 'default' : 'pointer'
+                  }}
+                >
+                  {action}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Input Bar */}
           {canInteract && (

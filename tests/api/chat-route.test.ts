@@ -648,6 +648,11 @@ describe('POST /api/chat', () => {
           provenance: 'confirmed',
           updatedAt: '2026-07-11T10:00:00.000Z'
         },
+        projectObjective: {
+          value: 'Build launch awareness',
+          provenance: 'confirmed',
+          updatedAt: '2026-07-11T10:00:00.000Z'
+        },
         timelineBand: {
           value: 'server-owned timeline',
           provenance: 'confirmed',
@@ -681,6 +686,9 @@ describe('POST /api/chat', () => {
           service: 'production',
           projectType: 'Video',
           projectScope: 'Launch film',
+          projectObjective: 'Build launch awareness',
+          audience: '',
+          intendedOutputs: '',
           scopePolished: 'Launch film',
           timelineBand: 'server-owned timeline',
           budgetBand: '',
@@ -698,7 +706,7 @@ describe('POST /api/chat', () => {
       {
         messages: [{ role: 'user', content: 'What budget should we plan for?' }],
         context: {
-          step: 'timeline',
+          step: 'budget',
           sessionId: 'session-server-draft',
           draft: JSON.stringify({ timelineBand: 'browser-owned timeline' }),
           capturedFields: ['budgetBand']
@@ -712,6 +720,8 @@ describe('POST /api/chat', () => {
     expect(res.status).toBe(200);
     expect(capturedSystemPrompt).toContain('server-owned timeline');
     expect(capturedSystemPrompt).not.toContain('browser-owned timeline');
+    expect(capturedSystemPrompt).toContain('CURRENT INTAKE STAGE: Audience and outputs');
+    expect(capturedSystemPrompt).not.toContain('CURRENT STEP: budget');
   });
 
   test('emits llm metrics without a secondary /api/events fetch', async () => {
@@ -952,7 +962,7 @@ describe('POST /api/chat', () => {
     expect(capturedSystemPrompt).not.toMatch(/What timeline are you working with\?/);
   });
 
-  test('when no fields are captured, the LLM system prompt includes the first-question template (full list)', async () => {
+  test('when no fields are captured, the LLM system prompt includes only the first contextual question', async () => {
     let capturedSystemPrompt = '';
     global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
@@ -989,8 +999,8 @@ describe('POST /api/chat', () => {
     expect(res.status).toBe(200);
     // No ALREADY CAPTURED line when nothing is captured.
     expect(capturedSystemPrompt).not.toMatch(/ALREADY CAPTURED/i);
-    // The full template of next-question rules is present so the LLM can pick the right one.
-    expect(capturedSystemPrompt).toMatch(/What timeline are you working with\?/);
+    expect(capturedSystemPrompt).toMatch(/What's the project about\?/);
+    expect(capturedSystemPrompt).not.toMatch(/What timeline are you working with\?/);
   });
 
   test('capturedFields is optional in the request schema', async () => {
@@ -1434,7 +1444,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.draftUpdates.contactName).toBeUndefined();
-    expect(data.draftUpdates.projectScope).toBe('30s animation');
+    expect(data.draftUpdates.projectScope).toBe('yes, an event video');
     expect(data.briefReady).toBe(false);
   });
 

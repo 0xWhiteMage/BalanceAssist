@@ -18,6 +18,9 @@ const positiveFixture = {
   service: 'production',
   projectType: 'Brand film',
   projectScope: '30s hero spot',
+  projectObjective: 'Build launch awareness',
+  audience: 'Young adults',
+  intendedOutputs: 'Hero film and social cut-downs',
   scopePolished: '',
   timelineBand: '1-2-months',
   budgetBand: '50k-150k',
@@ -30,6 +33,9 @@ const negativeFixture = {
   service: 'production',
   projectType: 'Brand film',
   projectScope: '30s hero spot',
+  projectObjective: 'Build launch awareness',
+  audience: 'Young adults',
+  intendedOutputs: 'Hero film and social cut-downs',
   scopePolished: '',
   timelineBand: '1-2-months',
   budgetBand: '50k-150k',
@@ -67,6 +73,9 @@ test('rejects consentToShare from LLM tool call', () => {
     service: 'production',
     projectType: 'Video',
     projectScope: '30s animation',
+    projectObjective: '',
+    audience: '',
+    intendedOutputs: '',
     scopePolished: '',
     timelineBand: '1-2-months',
     budgetBand: '20k-50k',
@@ -101,6 +110,9 @@ test('accepts all known fields with empty strings', () => {
       service: '',
       projectType: '',
       projectScope: '30s animation',
+      projectObjective: '',
+      audience: '',
+      intendedOutputs: '',
       scopePolished: '',
       timelineBand: '',
       budgetBand: '',
@@ -305,6 +317,35 @@ describe('sanitizeShareWork', () => {
 });
 
 describe('guardAgainstFabricatedBriefFields', () => {
+  test('preserves the first project statement and keeps generated wording separate', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      {
+        ...positiveFixture,
+        projectScope: 'A polished launch-film summary',
+        scopePolished: 'A polished launch-film summary'
+      },
+      { ...createDefaultLeadDraft(), projectScope: 'We need a film for our chair launch' },
+      'The audience is young adults'
+    );
+
+    expect(guarded.projectScope).toBe('We need a film for our chair launch');
+    expect(guarded.scopePolished).toBe('A polished launch-film summary');
+  });
+
+  test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
+    'preserves the stable non-answer literal %s',
+    (literal) => {
+      const guarded = guardAgainstFabricatedBriefFields(
+        { ...positiveFixture, audience: literal, intendedOutputs: literal, budgetBand: literal },
+        createDefaultLeadDraft(),
+        literal
+      );
+
+      expect(guarded.audience).toBe(literal);
+      expect(guarded.intendedOutputs).toBe(literal);
+      expect(guarded.budgetBand).toBe(literal);
+    }
+  );
   test('strips a fabricated contactName that the user message did not contain', () => {
     const prior = createDefaultLeadDraft();
     const guarded = guardAgainstFabricatedBriefFields(

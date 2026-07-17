@@ -103,3 +103,39 @@ test('keeps the needs review boundary at score 5', () => {
   expect(result.score).toBe(5);
   expect(result.status).toBe('needs_review');
 });
+
+test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
+  'treats %s as budget uncertainty rather than a specified budget',
+  (budgetBand) => {
+    const result = scoreLead({
+      ...createDefaultLeadDraft(),
+      service: 'production',
+      projectScope: 'Launch visuals',
+      timelineBand: '1-2-months',
+      budgetBand,
+      contactName: 'Dana',
+      contactEmail: 'dana@example.com'
+    });
+
+    expect(result.dimensions.budget).toBe(1);
+    expect(result.score).toBe(8);
+    expect(result.status).toBe('qualified');
+  }
+);
+
+test.each(['Not sure yet', 'Skip', 'Prefer not to share'])(
+  'treats %s as timeline uncertainty rather than a specified timeline',
+  (timelineBand) => {
+    const result = scoreLead({
+      ...createDefaultLeadDraft(),
+      service: 'production',
+      projectScope: 'Launch visuals',
+      timelineBand,
+      budgetBand: '50k-150k',
+      contactName: 'Dana',
+      contactEmail: 'dana@example.com'
+    });
+
+    expect(result.dimensions.timeline).toBe(1);
+  }
+);

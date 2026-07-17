@@ -4,13 +4,16 @@ import { listAllWorks } from '@/lib/conversation/works-search';
 import type { LeadDraft } from '@/lib/onboarding/types';
 
 const TEXT_FIELD_DESCRIPTION =
-  "Use '' (empty string) when the field is unknown; do NOT omit the key.";
+  "Use '' (empty string) when the field is unknown; do NOT omit the key. User-selected 'Not sure yet', 'Skip', and 'Prefer not to share' are canonical non-empty answers.";
 
 export const recordBriefUpdatesSchema = z
   .object({
     service: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     projectType: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     projectScope: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    projectObjective: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    audience: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    intendedOutputs: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     scopePolished: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     timelineBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
     budgetBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
@@ -128,6 +131,23 @@ export function guardAgainstFabricatedBriefFields(
 
   const priorEmail = priorDraft.contactEmail ?? '';
   const priorName = priorDraft.contactName ?? '';
+
+  const nextScope = typeof cleaned.projectScope === 'string' ? cleaned.projectScope.trim() : '';
+  if (nextScope && nextScope !== priorDraft.projectScope) {
+    if (priorDraft.projectScope?.trim()) {
+      cleaned.projectScope = priorDraft.projectScope;
+    } else if (!textContains(userMessage, nextScope)) {
+      cleaned.projectScope = userMessage.trim();
+    }
+  }
+
+  for (const field of ['projectObjective', 'audience', 'intendedOutputs'] as const) {
+    const nextValue = typeof cleaned[field] === 'string' ? cleaned[field].trim() : '';
+    const priorValue = priorDraft[field]?.trim() ?? '';
+    if (priorValue && nextValue && nextValue !== priorValue && !textContains(userMessage, nextValue)) {
+      cleaned[field] = priorValue;
+    }
+  }
 
   if (typeof cleaned.contactEmail === 'string' && cleaned.contactEmail.trim()) {
     const email = cleaned.contactEmail.trim();
