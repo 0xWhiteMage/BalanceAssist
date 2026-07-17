@@ -1431,7 +1431,7 @@ export function WidgetOverlay({
                 overflowY: 'auto',
                 overflowX: 'hidden',
                 padding: '16px 14px',
-                display: 'flex',
+                display: isMobile && tabMode !== 'chat' ? 'none' : 'flex',
                 flexDirection: 'column',
                 gap: '14px',
                 minWidth: 0,
@@ -1725,6 +1725,7 @@ export function WidgetOverlay({
                   placeholder={humanRequested ? 'Message the team request...' : 'Type your message...'}
                   style={{
                     flex: 1,
+                    minWidth: 0,
                     padding: '10px 14px',
                     borderRadius: '20px',
                     border: `1px solid ${brandTokens.colors.subtleBorder}`,
