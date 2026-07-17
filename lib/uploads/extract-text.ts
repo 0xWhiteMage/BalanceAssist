@@ -1,6 +1,6 @@
 import zlib from 'node:zlib';
+import { PRIVATE_ANALYSIS_UPLOAD_POLICY } from '@/lib/uploads/quarantine';
 
-const MAX_EXTRACTED_CHARS = 4000;
 const MAX_PDF_COMPRESSED_STREAM_BYTES = 256 * 1024;
 const MAX_PDF_INFLATED_BYTES = 512 * 1024;
 const MAX_PDF_TOTAL_INFLATED_BYTES = 1024 * 1024;
@@ -226,5 +226,5 @@ export function extractTextFromBuffer(buffer: Buffer, filename: string): string 
   } else if (ext === 'docx') {
     text = extractFromDocx(buffer);
   }
-  return normalizeWhitespace(text).slice(0, MAX_EXTRACTED_CHARS);
+  return normalizeWhitespace(text).slice(0, PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters);
 }

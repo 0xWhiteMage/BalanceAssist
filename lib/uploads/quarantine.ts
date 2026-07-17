@@ -1,18 +1,21 @@
 export type FileQuarantineResult = { ok: true; mime: string } | { ok: false; reason: string };
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-const MAX_TOTAL_SIZE_BYTES = 25 * 1024 * 1024;
-const MAX_FILES = 5;
+export const PRIVATE_ANALYSIS_UPLOAD_POLICY = {
+  acceptedFormats: ['PNG', 'JPEG', 'GIF', 'WebP', 'PDF', 'TXT', 'CSV'],
+  accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv',
+  maxFiles: 5,
+  maxFileSizeBytes: 10 * 1024 * 1024,
+  maxTotalSizeBytes: 25 * 1024 * 1024,
+  maxExtractedCharacters: 4000
+} as const;
 
-const ALLOWED_MIMES = [
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'application/pdf',
-  'text/plain',
-  'text/csv'
-] as const;
+const {
+  maxFileSizeBytes: MAX_FILE_SIZE_BYTES,
+  maxTotalSizeBytes: MAX_TOTAL_SIZE_BYTES,
+  maxFiles: MAX_FILES
+} = PRIVATE_ANALYSIS_UPLOAD_POLICY;
+
+const ALLOWED_MIMES = PRIVATE_ANALYSIS_UPLOAD_POLICY.accept.split(',');
 
 const MAGIC_BYTES: Array<{ mime: string; bytes: number[] }> = [
   { mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47] },
@@ -77,7 +80,7 @@ export function validateFile(file: File, buffer: ArrayBuffer): FileQuarantineRes
   const declaredMime = file.type || '';
 
   if (detectedMime) {
-    if (!(ALLOWED_MIMES as readonly string[]).includes(detectedMime)) {
+    if (!ALLOWED_MIMES.includes(detectedMime)) {
       return { ok: false, reason: 'File type not allowed.' };
     }
     return { ok: true, mime: detectedMime };

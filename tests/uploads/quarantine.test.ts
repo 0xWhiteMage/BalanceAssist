@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, test } from 'vitest';
-import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
+import {
+  PRIVATE_ANALYSIS_UPLOAD_POLICY,
+  validateFile,
+  validateFileBatch
+} from '@/lib/uploads/quarantine';
 import { createAttachmentConsent, hasRequiredConsent } from '@/lib/uploads/consent';
 
 function makeFileWithBytes(name: string, bytes: number[], type: string): File {
@@ -61,6 +65,17 @@ function makeWebpBuffer(): ArrayBuffer {
 function makeTextBuffer(content: string): ArrayBuffer {
   return new TextEncoder().encode(content).buffer;
 }
+
+test('exports the exact private AI analysis formats and limits', () => {
+  expect(PRIVATE_ANALYSIS_UPLOAD_POLICY).toEqual({
+    acceptedFormats: ['PNG', 'JPEG', 'GIF', 'WebP', 'PDF', 'TXT', 'CSV'],
+    accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv',
+    maxFiles: 5,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxTotalSizeBytes: 25 * 1024 * 1024,
+    maxExtractedCharacters: 4000
+  });
+});
 
 describe('validateFile', () => {
   test('rejects empty files', () => {

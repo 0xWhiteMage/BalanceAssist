@@ -8,8 +8,17 @@ import {
   hasProducerShareConsent,
   type AttachmentConsent
 } from '@/lib/uploads/consent';
-import { validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
+import {
+  PRIVATE_ANALYSIS_UPLOAD_POLICY,
+  validateFile,
+  validateFileBatch
+} from '@/lib/uploads/quarantine';
 import { CONSENT_VERSION } from '@/lib/privacy/notice';
+import {
+  classifyConfidentialFilename,
+  classifyConfidentialIntent,
+  CONFIDENTIAL_INTAKE_RESPONSE
+} from '@/lib/privacy/confidential-intent';
 
 export type ReferenceLink = { kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
@@ -36,13 +45,15 @@ export function AttachmentDropzone({
   onAddFile,
   onFileAnalyzed,
   sessionId,
-  consent
+  consent,
+  messageContext = ''
 }: {
   onAddLink: (link: ReferenceLink) => void;
   onAddFile: (file: ReferenceFile) => void;
   onFileAnalyzed?: (fileName: string, extractedText: string) => void;
   sessionId?: string | null;
   consent?: AttachmentConsent | null;
+  messageContext?: string;
 }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +76,34 @@ export function AttachmentDropzone({
   }, []);
 
   const effectiveConsent = consent ?? localConsent;
+  const acceptedFormats = `${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.slice(0, -1).join(', ')}, and ${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.at(-1)}`;
+  const maxFileSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFileSizeBytes / (1024 * 1024);
+  const maxTotalSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxTotalSizeBytes / (1024 * 1024);
+
+  function shouldDivertMessage(value: string): boolean {
+    try {
+      return classifyConfidentialIntent(value) !== 'allow';
+    } catch {
+      return true;
+    }
+  }
+
+  function shouldDivertFilename(value: string): boolean {
+    try {
+      return classifyConfidentialFilename(value) !== 'allow';
+    } catch {
+      return true;
+    }
+  }
+
+  function openFileSelector() {
+    if (shouldDivertMessage(messageContext)) {
+      setError(CONFIDENTIAL_INTAKE_RESPONSE);
+      return;
+    }
+    setError(null);
+    fileInputRef.current?.click();
+  }
 
   function updateConsent(nextValues: { aiAnalysis: boolean; producerShare: boolean }) {
     if (consent !== undefined) {
@@ -147,8 +186,16 @@ export function AttachmentDropzone({
     setError(null);
   }
 
-  async function handleFiles(files: FileList | null) {
+  async function handleFiles(input: HTMLInputElement) {
+    const files = input.files;
     if (!files) return;
+
+    const fileArray = Array.from(files);
+    if (fileArray.some((file) => shouldDivertFilename(file.name))) {
+      input.value = '';
+      setError(CONFIDENTIAL_INTAKE_RESPONSE);
+      return;
+    }
 
     const consentToUse = effectiveConsent ?? null;
 
@@ -164,12 +211,18 @@ export function AttachmentDropzone({
 
     if (!await persistConsent('analysis')) return;
 
-    const fileArray = Array.from(files);
     const buffers = await Promise.all(fileArray.map((f) => readFileBuffer(f)));
     const batchResult = validateFileBatch(fileArray.map((file, i) => ({ file, buffer: buffers[i] })));
     if (!batchResult.ok) {
       setError(batchResult.reason ?? 'Files failed validation.');
       return;
+    }
+    for (const [index, file] of fileArray.entries()) {
+      const validation = validateFile(file, buffers[index]);
+      if (!validation.ok) {
+        setError(validation.reason);
+        return;
+      }
     }
 
     const newQueued: QueuedFile[] = fileArray.map((file) => ({ file, status: 'queued' as FileStatus }));
@@ -189,7 +242,11 @@ export function AttachmentDropzone({
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      for (const file of fileArray) updateFileStatus(file.name, 'retryable', body?.error ?? `Failed to upload ${file.name}.`);
+      const uploadError = body?.code === 'confidential_file_not_allowed'
+        ? CONFIDENTIAL_INTAKE_RESPONSE
+        : body?.error ?? 'Failed to upload file.';
+      setError(uploadError);
+      for (const file of fileArray) updateFileStatus(file.name, 'retryable', uploadError);
       return;
     }
     const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
@@ -288,11 +345,26 @@ export function AttachmentDropzone({
         <span>The Balance team may review links I add here.</span>
       </label>
 
+      <div
+        id="private-analysis-upload-disclosure"
+        data-testid="private-analysis-upload-disclosure"
+        style={{ fontSize: 11, color: brandTokens.colors.mutedText, lineHeight: 1.5 }}
+      >
+        Use non-confidential files only. Accepted: {acceptedFormats}; up to{' '}
+        {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFiles} files, {maxFileSizeMb} MB each, and{' '}
+        {maxTotalSizeMb} MB total. Files are validated and stored privately for the temporary
+        retention period. TXT and PDF may yield up to{' '}
+        {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters.toLocaleString('en-US')} characters
+        of server-extracted text; accepted images and CSV may yield no extracted text. Any extracted
+        text used in AI mode is processed by DeepSeek. Consent, filename checks, private storage, and
+        extraction do not prove a file is non-confidential. Use the human-only path for protected material.
+      </div>
+
       <button
         type="button"
-        aria-describedby="attachment-private-note"
+        aria-describedby="private-analysis-upload-disclosure attachment-private-note"
         disabled={!privateStorageAvailable}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={openFileSelector}
         style={{
           width: '100%',
           padding: 14,
@@ -329,8 +401,9 @@ export function AttachmentDropzone({
         ref={fileInputRef}
         type="file"
         multiple
+        accept={PRIVATE_ANALYSIS_UPLOAD_POLICY.accept}
         disabled={!privateStorageAvailable}
-        onChange={(event) => { void handleFiles(event.target.files); }}
+        onChange={(event) => { void handleFiles(event.currentTarget); }}
         tabIndex={-1}
         aria-hidden="true"
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}

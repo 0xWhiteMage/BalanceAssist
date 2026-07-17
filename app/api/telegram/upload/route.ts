@@ -2,6 +2,8 @@ import { corsOptionsResponse, jsonWithCors } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
+import { classifyConfidentialFilename } from '@/lib/privacy/confidential-intent';
+import { PRIVATE_ANALYSIS_UPLOAD_POLICY } from '@/lib/uploads/quarantine';
 
 const MAX_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
 
@@ -84,8 +86,19 @@ export async function POST(request: Request) {
   if (files.length === 0) {
     return jsonWithCors({ ok: false, error: 'Missing files' }, { status: 400 }, request);
   }
-  if (files.length > 5 || files.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {
+  if (
+    files.length > PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFiles ||
+    files.reduce((total, file) => total + file.size, 0) > PRIVATE_ANALYSIS_UPLOAD_POLICY.maxTotalSizeBytes
+  ) {
     return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
+  }
+
+  try {
+    if (files.some((file) => classifyConfidentialFilename(file.name) !== 'allow')) {
+      return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
+    }
+  } catch {
+    return jsonWithCors({ ok: false, code: 'confidential_file_not_allowed' }, { status: 422 }, request);
   }
 
   const sessionId = authResult.auth.sessionId;

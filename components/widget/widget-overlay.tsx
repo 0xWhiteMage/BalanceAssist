@@ -1517,6 +1517,7 @@ export function WidgetOverlay({
                           onAddFile={appendReferenceFile}
                           onFileAnalyzed={handleFileAnalyzed}
                           sessionId={sessionId}
+                          messageContext={inputValue}
                         />
                       </div>
                     )}

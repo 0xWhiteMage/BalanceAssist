@@ -151,7 +151,7 @@ describe('POST /api/telegram/upload private storage', () => {
 
   test('stores an analysis-consented file without producer delivery', async () => {
     const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
-    const file = new File([bytes], 'sensitive-brief.pdf', { type: 'application/pdf' });
+    const file = new File([bytes], 'launch-brief.pdf', { type: 'application/pdf' });
     const response = await post(formWith(file));
 
     expect(response.status).toBe(200);
