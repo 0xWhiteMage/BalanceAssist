@@ -104,6 +104,43 @@ test('allows non-scheduling availability language', () => {
 });
 
 test.each([
+  ['We will deliver by 2026-09-01.', /timing.*producer/i],
+  ['The project will be ready 09/01/2026.', /timing.*producer/i],
+  ['We can deliver within two weeks.', /timing.*producer/i],
+  ['We can deliver within 2 weeks.', /timing.*producer/i],
+  ['We will finish in ten business days.', /timing.*producer/i],
+  ['The project will be ready in two weeks.', /timing.*producer/i],
+  ['The project will be complete within 3 months.', /timing.*producer/i],
+  ['We’ve reserved our studio for Friday.', /availability.*producer/i],
+  ['Our quote is SGD 12,000.', /pricing.*producer/i],
+  ["Balance's final cost is USD 5,000.", /pricing.*producer/i]
+])('overrides dated, duration, contraction, and Balance-issued commitments: %s', (providerReply, expected) => {
+  const result = sanitizeReply(providerReply, 'What can Balance commit to?', {
+    toolCallArguments: { budgetBand: 'Injected amount', timelineBand: 'Injected timing' }
+  });
+
+  expect(result.overridden).toBe(true);
+  expect(result.reply).toMatch(expected);
+  expect(result.draft).toEqual({});
+});
+
+test.each([
+  'The cost you entered is SGD 12,000.',
+  'The final cost you entered is SGD 12,000.',
+  'Your stated budget is SGD 12,000.'
+])('allows user-attributed pricing restatements: %s', (providerReply) => {
+  const result = sanitizeReply(providerReply, 'What did I enter?', {
+    toolCallArguments: { budgetBand: 'SGD 12,000' }
+  });
+
+  expect(result).toEqual({
+    reply: providerReply,
+    draft: { budgetBand: 'SGD 12,000' },
+    overridden: false
+  });
+});
+
+test.each([
   ['We’ll deliver by Friday.', /timing.*producer/i],
   ['The project will be ready Friday.', /timing.*producer/i],
   ['We reserved our studio for Friday.', /availability.*producer/i]

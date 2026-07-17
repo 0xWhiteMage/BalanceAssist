@@ -2,8 +2,11 @@ import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
 
 const DRAFT_MARKER = ':::draft:::';
 const DRAFT_LINE_PATTERN = /:::draft:::\s*(?:<json>)?\s*(\{[\s\S]*?\})\s*(?:<\/json>)?\s*:::/i;
-const TEMPORAL_EXPRESSION = String.raw`(?:today|tomorrow|tonight|(?:next|this)\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?)`;
+const TEMPORAL_EXPRESSION = String.raw`(?:today|tomorrow|tonight|(?:next|this)\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?)`;
+const DURATION_NUMBER = String.raw`(?:\d{1,3}|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?|(?:one|two|three|four|five|six|seven|eight|nine)\s+hundred)`;
+const DURATION_EXPRESSION = String.raw`${DURATION_NUMBER}\s+(?:business\s+)?(?:days?|weeks?|months?)`;
 const MONEY_WORD = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)`;
+const BALANCE_PRICE_SUBJECT = String.raw`(?:(?:the\s+)?(?:final|fixed|guaranteed)\s+(?:price|pricing|quote|fee|cost)(?!\s+(?:you|the user)\s+(?:entered|provided|stated|supplied))|(?:our|balance(?:'s)?)\s+(?:(?:final|fixed|guaranteed)\s+)?(?:price|pricing|quote|fee|cost)|(?:the\s+)?quote(?=\s+(?:is|comes?\s+to|totals?|equals?)))`;
 
 const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> = [
   {
@@ -11,27 +14,27 @@ const PRODUCER_BOUNDARY_PATTERNS: Array<{ pattern: RegExp; response: string }> =
     response: "I can't provide legal or contract advice. A Balance producer must review legal and contract terms directly."
   },
   {
-    pattern: /\b(?:final |fixed |guaranteed )?(?:price|pricing|quote|fee|cost)\b[^.\n]{0,40}(?:(?:s?\$|£|€)\s*\d[\d,]*(?:\.\d{2})?|(?:sgd|usd|eur|gbp)\s*\d[\d,]*(?:\.\d{2})?|\d[\d,]*(?:\.\d{2})?\s*(?:dollars?|pounds?|euros?))\b/i,
+    pattern: new RegExp(String.raw`\b${BALANCE_PRICE_SUBJECT}\b[^.\n]{0,40}(?:(?:s?\$|£|€)\s*\d[\d,]*(?:\.\d{2})?|(?:sgd|usd|eur|gbp)\s*\d[\d,]*(?:\.\d{2})?|\d[\d,]*(?:\.\d{2})?\s*(?:dollars?|pounds?|euros?))\b`, 'i'),
     response: 'Final pricing is set by Balance producers after they review the scope.'
   },
   {
-    pattern: new RegExp(String.raw`\b(?:price|pricing|quote|fee|cost)\b[^.\n]{0,40}\b(?:comes? to|is|will be|totals?|equals?)\s+(?:(?:about|approximately|roughly)\s+)?(?:${MONEY_WORD}[\s-]+){1,6}(?:dollars?|pounds?|euros?)\b`, 'i'),
+    pattern: new RegExp(String.raw`\b${BALANCE_PRICE_SUBJECT}\b[^.\n]{0,20}\b(?:comes? to|is|will be|totals?|equals?)\s+(?:(?:about|approximately|roughly)\s+)?(?:${MONEY_WORD}[\s-]+){1,6}(?:dollars?|pounds?|euros?)\b`, 'i'),
     response: 'Final pricing is set by Balance producers after they review the scope.'
   },
   {
-    pattern: new RegExp(String.raw`\b(?:guarantee|guaranteed|promise|promised|definitely)\b[^.\n]{0,30}\b(?:deliver|delivery|complete|completed|ready)\b[^.\n]{0,20}\b(?:by|on)\s+${TEMPORAL_EXPRESSION}\b`, 'i'),
+    pattern: new RegExp(String.raw`\b(?:guarantee|guaranteed|promise|promised|definitely)\b[^.\n]{0,30}\b(?:deliver|delivery|complete|completed|ready)\b[^.\n]{0,20}(?:(?:by|on)\s+${TEMPORAL_EXPRESSION}|(?:within|in)\s+${DURATION_EXPRESSION})\b`, 'i'),
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
-    pattern: new RegExp(String.raw`\b(?:we(?:['’]ll| can| will)|balance (?:can|will)|(?:our|the) (?:team|crew|producer) (?:can|will))\s+(?:deliver|complete|finish)\b[^.\n]{0,20}\b(?:by|on)\s+${TEMPORAL_EXPRESSION}\b`, 'i'),
+    pattern: new RegExp(String.raw`\b(?:we(?:'ll| can| will)|balance (?:can|will)|(?:our|the) (?:team|crew|producer) (?:can|will))\s+(?:deliver|complete|finish)\b[^.\n]{0,20}(?:(?:by|on)\s+${TEMPORAL_EXPRESSION}|(?:within|in)\s+${DURATION_EXPRESSION})\b`, 'i'),
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
-    pattern: new RegExp(String.raw`\b(?:the|your|this) (?:project|deliverable|film|video) will be (?:ready|complete|finished)\s+(?:(?:by|on)\s+)?${TEMPORAL_EXPRESSION}\b`, 'i'),
+    pattern: new RegExp(String.raw`\b(?:the|your|this) (?:project|deliverable|film|video) will be (?:ready|complete|finished)\s+(?:(?:(?:by|on)\s+)?${TEMPORAL_EXPRESSION}|(?:within|in)\s+${DURATION_EXPRESSION})\b`, 'i'),
     response: 'Final timing is confirmed by Balance producers after they review scope and scheduling.'
   },
   {
-    pattern: new RegExp(String.raw`\b(?:we|balance|(?:our|the) (?:team|crew|producer)) (?:have )?(?:reserved|booked|confirmed) (?:the |our )?(?:crew|team|studio)\b[^.\n]{0,20}\b(?:for|on)\s+${TEMPORAL_EXPRESSION}\b`, 'i'),
+    pattern: new RegExp(String.raw`\b(?:we(?:'ve)?|balance|(?:our|the) (?:team|crew|producer)) (?:have )?(?:reserved|booked|confirmed) (?:the |our )?(?:crew|team|studio)\b[^.\n]{0,20}\b(?:for|on)\s+${TEMPORAL_EXPRESSION}\b`, 'i'),
     response: 'Availability is confirmed by Balance producers after they review the project and schedule.'
   },
   {
@@ -121,8 +124,9 @@ function parseAssistantReply(reply: string): {
 }
 
 function matchesRefusal(reply: string, userMessage: string): string | null {
+  const normalizedReply = reply.normalize('NFKC').replace(/[’‘`]/g, "'");
   for (const { pattern, response } of PRODUCER_BOUNDARY_PATTERNS) {
-    if (pattern.test(reply)) return response;
+    if (pattern.test(normalizedReply)) return response;
   }
   for (const { pattern, response } of REFUSAL_PATTERNS) {
     if (pattern.test(userMessage)) {
@@ -130,7 +134,7 @@ function matchesRefusal(reply: string, userMessage: string): string | null {
     }
   }
   for (const { pattern, response } of REFUSAL_PATTERNS) {
-    if (pattern.test(reply)) {
+    if (pattern.test(normalizedReply)) {
       return response;
     }
   }
