@@ -72,6 +72,16 @@ function databaseSupabase(client: import('pg').Client) {
       eq: (column: string, value: unknown) => ({
         maybeSingle: () => selectOne(name, columns, column, value),
         order: (_order: string, _options: unknown) => filtered(name, columns, [[column, value]]).then(({ rows }) => ({ data: rows, error: null })),
+        contains: (jsonColumn: string, contained: Record<string, unknown>) => ({
+          order: (orderColumn: string, options: { ascending: boolean }) => ({
+            limit: (limit: number) => ({
+              maybeSingle: () => client.query(
+                `select ${columns} from public.${name} where ${column} = $1 and ${jsonColumn} @> $2::jsonb order by ${orderColumn} ${options.ascending ? 'asc' : 'desc'} limit $3`,
+                [value, JSON.stringify(contained), limit]
+              ).then(({ rows }) => ({ data: rows[0] ?? null, error: null }))
+            })
+          })
+        }),
         eq: (nextColumn: string, nextValue: unknown) => ({
           order: () => ({ limit: () => ({ gt: () => result([], null) }) }),
           maybeSingle: () => filtered(name, columns, [[column, value], [nextColumn, nextValue]]).then(({ rows }) => ({ data: rows[0] ?? null, error: null }))
