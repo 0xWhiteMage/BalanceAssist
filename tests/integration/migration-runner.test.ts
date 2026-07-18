@@ -113,6 +113,8 @@ describe('test migration runner', () => {
     expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE[\s\S]*FROM authenticated/i);
     expect(migration).toMatch(/GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE[\s\S]*public\.sessions[\s\S]*TO service_role/i);
     expect(migration).toMatch(/GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role/i);
+    expect(migration).toMatch(/ALTER DEFAULT PRIVILEGES IN SCHEMA public[\s\S]*GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO service_role/i);
+    expect(migration).toMatch(/ALTER DEFAULT PRIVILEGES IN SCHEMA public[\s\S]*GRANT USAGE, SELECT ON SEQUENCES TO service_role/i);
   });
 
   it('runs the release-proof journey after local stack setup and publishes failure evidence', async () => {
