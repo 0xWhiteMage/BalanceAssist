@@ -68,7 +68,7 @@ describe('production consent 1.2 cutover migration 060 policy', () => {
   test('supports an audited owner-authorized emergency cutover without weakening normal review gates', async () => {
     const workflow = await readFile(resolve(root, '.github/workflows/emergency-consent-1-2-cutover.yml'), 'utf8');
     const verification = await readFile(resolve(root, 'supabase/verify-consent-1-2-cutover-060.sql'), 'utf8');
-    expect(workflow).toContain('environment: production-consent-cutover');
+    expect(workflow).toContain('environment: production-trust-migrations');
     expect(workflow).toContain('AUTHORIZE CONSENT 1.2 EMERGENCY CUTOVER');
     expect(workflow).toContain("comment.author_association === 'OWNER'");
     expect(workflow).toContain("line('Normal-Review-Path', 'unavailable-solo-owner-repository')");
