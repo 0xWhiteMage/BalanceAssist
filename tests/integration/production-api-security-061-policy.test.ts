@@ -56,7 +56,8 @@ describe('production API security migration 061 policy', () => {
     expect(workflow).toContain('name: Verify Vercel auto-deploy-disabled prerequisite');
     expect(workflow).toContain('VERCEL_GIT_DEPLOYMENTS_DISABLED_AT');
     expect(workflow).toContain('project.id !== process.env.VERCEL_PROJECT_ID');
-    expect(workflow).toContain('project.link != null');
+    expect(workflow).toContain("project.link?.type?.startsWith('github')");
+    expect(workflow).toContain('config.git?.deploymentEnabled?.main !== false');
     expect(apply).toBeGreaterThan(workflow.indexOf('name: Smoke immutable deployment'));
     expect(apply).toBeLessThan(workflow.indexOf('name: Verify approved deployment proof record'));
     expect(apply).toBeLessThan(workflow.indexOf('name: Promote immutable deployment'));

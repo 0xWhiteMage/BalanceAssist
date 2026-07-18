@@ -15,7 +15,7 @@ Repository changes do not alter GitHub or Vercel settings. After merging CI, rel
 
 ## Vercel
 
-1. Confirm the project is disconnected from its Git repository so pushes cannot create deployments. Protected production releases continue through Vercel CLI.
+1. Confirm the project is connected to this Git repository for automatic branch previews and that `vercel.json` disables Git deployment of `main`. Protected production releases continue through Vercel CLI.
 2. Confirm the production alias is exactly `https://balance-assist.vercel.app` and points to the deployment promoted by the latest successful `Production release` run.
 3. Confirm production environment variables match `.env.example` and the release checks in `README.md`, including exact allowed origins, trusted client IP header, private upload bucket, numeric `TELEGRAM_ALLOWED_USER_IDS`, and disabled Monday write lanes until separately approved.
 4. Confirm `CRON_SECRET` matches the GitHub Actions secret without displaying or logging either value.

@@ -194,7 +194,10 @@ jobs:
           if (!response.ok) process.exit(1);
           const project = await response.json();
           if (project.id !== process.env.VERCEL_PROJECT_ID || project.accountId !== process.env.VERCEL_ORG_ID) process.exit(1);
-          if (project.link != null) process.exit(1);
+          const [owner, repository] = process.env.GITHUB_REPOSITORY.split('/');
+          if (!project.link?.type?.startsWith('github') || project.link.org?.toLowerCase() !== owner.toLowerCase() || project.link.repo?.toLowerCase() !== repository.toLowerCase()) process.exit(1);
+          const config = JSON.parse(await (await import('node:fs/promises')).readFile('vercel.json', 'utf8'));
+          if (config.git?.deploymentEnabled?.main !== false) process.exit(1);
           NODE
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
