@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { installTelegramTransportForTests, sendDocument } from '@/lib/telegram';
+import { sendDocument } from '@/lib/telegram';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -18,7 +18,7 @@ let appUrl = '';
 let telegramUrl = '';
 let telegramServer: ReturnType<typeof createServer> | undefined;
 let productionServer: ReturnType<typeof createServer> | undefined;
-let uninstallTelegramTransport: (() => void) | undefined;
+const originalFetch = global.fetch;
 const telegramRequests: Array<{ path: string; body: Record<string, unknown> }> = [];
 let sessionId: string | undefined;
 
@@ -79,10 +79,12 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     });
     await new Promise<void>((resolve) => telegramServer!.listen(0, '127.0.0.1', resolve));
     telegramUrl = `http://127.0.0.1:${(telegramServer.address() as AddressInfo).port}`;
-    uninstallTelegramTransport = installTelegramTransportForTests((input, init) => {
-      const telegramRequest = new URL(typeof input === 'string' ? input : input.toString());
-      return fetch(new URL(telegramRequest.pathname, telegramUrl), init);
-    });
+    global.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(typeof input === 'string' ? input : input.toString());
+      return requestUrl.hostname === 'api.telegram.org'
+        ? originalFetch(new URL(requestUrl.pathname, telegramUrl), init)
+        : originalFetch(input, init);
+    }) as typeof fetch;
 
     const port = 39000 + Math.floor(Math.random() * 1000);
     appUrl = `http://127.0.0.1:${port}`;
@@ -116,7 +118,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
   });
 
   afterAll(async () => {
-    uninstallTelegramTransport?.();
+    global.fetch = originalFetch;
     if (productionServer) await new Promise<void>((resolve) => productionServer!.close(() => resolve()));
     if (telegramServer) await new Promise<void>((resolve) => telegramServer!.close(() => resolve()));
   });
