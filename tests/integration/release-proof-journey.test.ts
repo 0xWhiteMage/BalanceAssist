@@ -41,7 +41,11 @@ function result(data: unknown, error: unknown = null) {
 function databaseSupabase(client: import('pg').Client) {
   const selectOne = (table: string, columns: string, column: string, value: unknown) => client
     .query(`select ${columns} from public.${table} where ${column} = $1 limit 1`, [value])
-    .then(({ rows }) => ({ data: rows[0] ?? null, error: null }));
+    .then(({ rows }) => {
+      const data = rows[0] ?? null;
+      if (data && typeof data.telegram_thread_id === 'string') data.telegram_thread_id = Number(data.telegram_thread_id);
+      return { data, error: null };
+    });
   const filtered = (table: string, columns: string, filters: Array<[string, unknown]>) => {
     const where = filters.map(([column], index) => `${column} = $${index + 1}`).join(' and ');
     return client.query(`select ${columns} from public.${table} where ${where}`, filters.map(([, value]) => value));
