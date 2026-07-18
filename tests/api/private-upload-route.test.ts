@@ -1,13 +1,15 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-const { requireSessionMock, storePrivateUploadMock, deletePrivateUploadMock } = vi.hoisted(() => ({
+const { requireSessionMock, storePrivateUploadMock, deletePrivateUploadMock, consumeRateLimitMock } = vi.hoisted(() => ({
   requireSessionMock: vi.fn(),
   storePrivateUploadMock: vi.fn(),
-  deletePrivateUploadMock: vi.fn()
+  deletePrivateUploadMock: vi.fn(),
+  consumeRateLimitMock: vi.fn()
 }));
 
 vi.mock('@/lib/api/require-session', () => ({ requireSession: requireSessionMock }));
+vi.mock('@/lib/security/rate-limit', () => ({ consumeRateLimit: consumeRateLimitMock }));
 vi.mock('@/lib/uploads/private-storage', () => ({
   storePrivateUpload: storePrivateUploadMock,
   deletePrivateUpload: deletePrivateUploadMock,
@@ -45,6 +47,9 @@ describe('POST /api/telegram/upload private storage', () => {
       ok: true,
       auth: { sessionId, capability: 'capability' },
       supabase: {
+        rpc: vi.fn(async (name: string) => name === 'reserve_session_upload_quota'
+          ? { data: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', error: null }
+          : { data: true, error: null }),
         from: vi.fn(() => ({
           select: vi.fn(() => ({
             eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: consents.map((consent) => ({ ...consent, notice_version: '1.2' })), error: null })) }))
@@ -56,6 +61,8 @@ describe('POST /api/telegram/upload private storage', () => {
 
   beforeEach(() => {
     process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
+    consumeRateLimitMock.mockReset();
+    consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
     requireSessionMock.mockImplementation(async (request: Request, expectedSessionId?: string) => {
       if (
         request.headers.get('origin') !== 'https://www.balancestudio.tv'
@@ -69,6 +76,9 @@ describe('POST /api/telegram/upload private storage', () => {
         ok: true,
         auth: { sessionId, capability: 'capability' },
         supabase: {
+          rpc: vi.fn(async (name: string) => name === 'reserve_session_upload_quota'
+            ? { data: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', error: null }
+            : { data: true, error: null }),
           from: vi.fn(() => ({
             select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true, notice_version: '1.2' }], error: null })) })) }))
           }))
@@ -146,6 +156,14 @@ describe('POST /api/telegram/upload private storage', () => {
 
     expect(response.status).toBe(403);
     expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  test('throttles an authenticated upload request before parsing multipart data', async () => {
+    consumeRateLimitMock.mockResolvedValue({ permitted: false, retryAfterSeconds: 45 });
+    const response = await post(formWith(new File(['brief'], 'brief.txt', { type: 'text/plain' })));
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('45');
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
   });
 
   test('rejects an oversized declared multipart body before parsing', async () => {
@@ -448,6 +466,28 @@ describe('POST /api/telegram/upload private storage', () => {
     const storageInput = storePrivateUploadMock.mock.calls[0]?.[0] as { buffer: ArrayBuffer };
     expect(new Uint8Array(storageInput.buffer)).toEqual(bytes);
     expect(storageInput).not.toHaveProperty('file');
+  });
+
+  test('rejects a batch when cumulative session upload quota cannot be reserved', async () => {
+    const rpc = vi.fn(async (name: string) => name === 'reserve_session_upload_quota'
+      ? { data: null, error: null }
+      : { data: true, error: null });
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId, capability: 'capability' },
+      supabase: {
+        rpc,
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({
+            data: [{ scope: 'analysis', granted: true, notice_version: '1.2' }], error: null
+          })) })) }))
+        }))
+      }
+    });
+    const response = await post(formWith(new File(['ordinary'], 'brief.txt', { type: 'text/plain' })));
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'upload_quota_exceeded' });
+    expect(storePrivateUploadMock).not.toHaveBeenCalled();
   });
 
   test('rejects invalid files before private persistence', async () => {

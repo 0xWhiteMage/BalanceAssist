@@ -32,6 +32,7 @@ import {
   CONFIDENTIAL_INTAKE_RESPONSE
 } from '@/lib/privacy/confidential-intent';
 import { CHAT_PROVIDER_TIMEOUT_MS } from '@/lib/conversation/chat-timeouts';
+import { parseProviderResponse } from '@/app/api/chat/provider-response';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -191,12 +192,9 @@ async function callOpenAICompatible(
     throw new Error(`LLM API returned ${response.status}`);
   }
 
-  const data = await response.json();
-  const choice = data?.choices?.[0];
-  const message = choice?.message;
-  const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
-  const rawContent = typeof message?.content === 'string' ? message.content : null;
-  const finishReason = choice?.finish_reason;
+  const providerResponse = parseProviderResponse(await response.json());
+  const hasToolCalls = providerResponse.toolCalls.length > 0;
+  const { rawContent, finishReason } = providerResponse;
   const truncated = finishReason === 'length' && !hasToolCalls && (rawContent?.trim().length ?? 0) > 0;
 
   if (finishReason === 'length' && !hasToolCalls) {
@@ -207,7 +205,7 @@ async function callOpenAICompatible(
     let toolArguments: Record<string, unknown> | null = null;
     let sharedWork: SharedWork | null = null;
 
-    for (const call of message.tool_calls) {
+    for (const call of providerResponse.toolCalls) {
       if (!call || typeof call !== 'object') continue;
       const functionName = call.function?.name;
       if (typeof call.function?.arguments !== 'string') continue;
@@ -279,20 +277,10 @@ type ChatContext = {
   capturedFields?: string[];
 } | undefined;
 
-const CAPTURED_FIELD_KEYS = [
-  'projectScope',
-  'projectObjective',
-  'audience',
-  'intendedOutputs',
-  'referencesStatus',
-  'projectType',
-  'service',
-  'timelineBand',
-  'budgetBand',
-  'contactName',
-  'contactCompany',
-  'contactEmail'
-] as const;
+const CAPTURED_FIELD_KEYS = recordBriefUpdatesSchema
+  .keyof()
+  .options
+  .filter((key) => key !== 'scopePolished');
 
 function computeCapturedFieldsFromDraft(draft: Record<string, string>): string[] {
   const captured: string[] = [];
@@ -780,7 +768,6 @@ function splitLongChunk(chunk: string): string[] {
   const sentenceBoundary = /([.!?])\s+/g;
   const pieces: string[] = [];
   let buffer = '';
-  let lastBoundary = -1;
   let cursor = 0;
 
   for (const match of chunk.matchAll(sentenceBoundary)) {
@@ -791,7 +778,6 @@ function splitLongChunk(chunk: string): string[] {
       buffer = '';
     }
     buffer += chunk.slice(cursor, sentenceEnd);
-    lastBoundary = sentenceEnd;
     cursor = sentenceEnd;
     if (buffer.length > MAX_CHUNK) {
       pieces.push(buffer.trim());

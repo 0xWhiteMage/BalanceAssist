@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-const { requireSessionMock } = vi.hoisted(() => ({ requireSessionMock: vi.fn() }));
+const { requireSessionMock, consumeRateLimitMock } = vi.hoisted(() => ({ requireSessionMock: vi.fn(), consumeRateLimitMock: vi.fn() }));
 vi.mock('@/lib/api/require-session', () => ({ requireSession: requireSessionMock }));
+vi.mock('@/lib/security/rate-limit', () => ({ consumeRateLimit: consumeRateLimitMock }));
 
 describe('POST /api/telegram/relay', () => {
   const retryRequestId = '8d1f684d-090c-4f67-80d4-317a88ad9cbe';
@@ -11,9 +12,11 @@ describe('POST /api/telegram/relay', () => {
   const rpc = vi.fn();
   beforeEach(() => {
     rpc.mockReset();
+    consumeRateLimitMock.mockReset();
+    consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
     delete process.env.INTERNAL_DISPATCH_SECRET;
     delete process.env.CRON_SECRET;
-    requireSessionMock.mockResolvedValue({ ok: true, auth: { sessionId: 'sess-relay' }, supabase: { rpc } });
+    requireSessionMock.mockResolvedValue({ ok: true, auth: { sessionId: 'sess-relay', capability: 'cap' }, supabase: { rpc } });
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -88,5 +91,30 @@ describe('POST /api/telegram/relay', () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ code: 'consent_required' });
+  });
+
+  test('authenticates before reading an invalid body', async () => {
+    requireSessionMock.mockResolvedValue({ ok: false, response: new Response('{}', { status: 401 }) });
+    const { POST } = await import('@/app/api/telegram/relay/route');
+    const response = await POST(new Request('http://localhost/api/telegram/relay', { method: 'POST', body: 'not-json' }));
+    expect(response.status).toBe(401);
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects an oversized authenticated body', async () => {
+    const { POST } = await import('@/app/api/telegram/relay/route');
+    const response = await POST(new Request('http://localhost/api/telegram/relay', {
+      method: 'POST', headers: { 'content-length': '9000' }, body: '{}'
+    }));
+    expect(response.status).toBe(413);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  test('returns 429 before parsing when the durable relay limiter is exhausted', async () => {
+    consumeRateLimitMock.mockResolvedValue({ permitted: false, retryAfterSeconds: 30 });
+    const { POST } = await import('@/app/api/telegram/relay/route');
+    const response = await POST(new Request('http://localhost/api/telegram/relay', { method: 'POST', body: 'not-json' }));
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('30');
   });
 });

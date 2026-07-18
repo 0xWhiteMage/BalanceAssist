@@ -28,12 +28,12 @@ export function verifyWebhookChatId(
 }
 
 export function verifyWebhookSender(
-  senderUsername: string | null,
-  allowedUsernames: string[] | null
+  senderUserId: number | null,
+  allowedUserIds: number[] | null
 ): boolean {
-  if (!allowedUsernames || allowedUsernames.length === 0) return false;
-  if (!senderUsername) return false;
-  return allowedUsernames.includes(senderUsername.toLowerCase());
+  if (!allowedUserIds || allowedUserIds.length === 0) return false;
+  if (!Number.isSafeInteger(senderUserId) || (senderUserId ?? 0) <= 0) return false;
+  return allowedUserIds.includes(senderUserId as number);
 }
 
 export function validateWebhookRequest(params: {
@@ -41,10 +41,10 @@ export function validateWebhookRequest(params: {
   configuredSecret: string | null;
   incomingChatId: number;
   configuredChatId: string | null;
-  senderUsername: string | null;
-  allowedUsernames: string[] | null;
+  senderUserId: number | null;
+  allowedUserIds: number[] | null;
 }): WebhookAuthResult {
-  const { headerSecret, configuredSecret, incomingChatId, configuredChatId, senderUsername, allowedUsernames } = params;
+  const { headerSecret, configuredSecret, incomingChatId, configuredChatId, senderUserId, allowedUserIds } = params;
 
   if (!configuredSecret) {
     return { ok: false, reason: 'missing-secret' };
@@ -58,7 +58,7 @@ export function validateWebhookRequest(params: {
     return { ok: false, reason: 'wrong-chat' };
   }
 
-  if (!verifyWebhookSender(senderUsername, allowedUsernames)) {
+  if (!verifyWebhookSender(senderUserId, allowedUserIds)) {
     return { ok: false, reason: 'unauthorized-sender' };
   }
 

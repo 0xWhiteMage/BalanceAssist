@@ -76,7 +76,7 @@ Files to inspect/fix:
 
 Requirements:
 
-- In production, a missing or empty `TELEGRAM_ALLOWED_USERNAMES` configuration must return a safe configuration failure before any database side effect.
+- In production, a missing or empty `TELEGRAM_ALLOWED_USER_IDS` configuration must return a safe configuration failure before any database side effect.
 - Missing sender username, wrong sender, wrong chat, and invalid secret must all be rejected before replay persistence, session lookup, schedule/file-request actions, or team-message insertion.
 - Keep explicitly configured non-production test behavior only where needed to test routes; do not preserve production fail-open semantics.
 - Add regression coverage for absent sender configuration and wrong sender. Replace any test that asserts the unsafe missing-allowlist behavior.

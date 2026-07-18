@@ -42,6 +42,8 @@ function buildWebhookSupabase() {
 beforeEach(() => {
   vi.resetModules();
   process.env = { ...originalEnv };
+  process.env.TELEGRAM_CHAT_ID = '123456';
+  process.env.TELEGRAM_ALLOWED_USER_IDS = '42';
   hasSupabaseServerConfigMock.mockReturnValue(true);
   createServerSupabaseClientMock.mockReset();
 });
@@ -93,23 +95,23 @@ describe('verifyWebhookChatId', () => {
 
 describe('verifyWebhookSender', () => {
   it('returns false when no allowlist is configured', () => {
-    expect(verifyWebhookSender('anyone', null)).toBe(false);
+    expect(verifyWebhookSender(42, null)).toBe(false);
   });
 
-  it('returns true for matching username', () => {
-    expect(verifyWebhookSender('admin', ['admin', 'mod'])).toBe(true);
+  it('returns true for a matching immutable user ID', () => {
+    expect(verifyWebhookSender(42, [42, 77])).toBe(true);
   });
 
-  it('returns true case-insensitively', () => {
-    expect(verifyWebhookSender('Admin', ['admin'])).toBe(true);
+  it('returns false for a different numeric user ID', () => {
+    expect(verifyWebhookSender(43, [42])).toBe(false);
   });
 
   it('returns false for unknown sender', () => {
-    expect(verifyWebhookSender('hacker', ['admin'])).toBe(false);
+    expect(verifyWebhookSender(999, [42])).toBe(false);
   });
 
   it('returns false when sender is null but allowlist exists', () => {
-    expect(verifyWebhookSender(null, ['admin'])).toBe(false);
+    expect(verifyWebhookSender(null, [42])).toBe(false);
   });
 });
 
@@ -120,8 +122,8 @@ describe('validateWebhookRequest', () => {
       configuredSecret: null,
       incomingChatId: 123,
       configuredChatId: '123',
-      senderUsername: 'admin',
-      allowedUsernames: null
+      senderUserId: 42,
+      allowedUserIds: null
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('missing-secret');
@@ -133,8 +135,8 @@ describe('validateWebhookRequest', () => {
       configuredSecret: 'correct',
       incomingChatId: 123,
       configuredChatId: '123',
-      senderUsername: 'admin',
-      allowedUsernames: null
+      senderUserId: 42,
+      allowedUserIds: null
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('invalid-secret');
@@ -146,8 +148,8 @@ describe('validateWebhookRequest', () => {
       configuredSecret: 'secret',
       incomingChatId: 999,
       configuredChatId: '123',
-      senderUsername: 'admin',
-      allowedUsernames: null
+      senderUserId: 42,
+      allowedUserIds: null
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('wrong-chat');
@@ -159,8 +161,8 @@ describe('validateWebhookRequest', () => {
       configuredSecret: 'secret',
       incomingChatId: 123,
       configuredChatId: '123',
-      senderUsername: 'hacker',
-      allowedUsernames: ['admin']
+      senderUserId: 999,
+      allowedUserIds: [42]
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('unauthorized-sender');
@@ -172,8 +174,8 @@ describe('validateWebhookRequest', () => {
       configuredSecret: 'secret',
       incomingChatId: 123,
       configuredChatId: '123',
-      senderUsername: 'admin',
-      allowedUsernames: ['admin']
+      senderUserId: 42,
+      allowedUserIds: [42]
     });
     expect(result.ok).toBe(true);
   });
@@ -200,7 +202,7 @@ describe('POST /api/telegram/webhook', () => {
   it('parses the update before validating configured chat and sender rules', async () => {
     process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
     process.env.TELEGRAM_CHAT_ID = '123456';
-    process.env.TELEGRAM_ALLOWED_USERNAMES = 'admin';
+    process.env.TELEGRAM_ALLOWED_USER_IDS = '42';
     createServerSupabaseClientMock.mockReturnValue(buildWebhookSupabase());
 
     const { POST } = await import('@/app/api/telegram/webhook/route');
@@ -215,7 +217,7 @@ describe('POST /api/telegram/webhook', () => {
         message: {
           text: 'Hello from Telegram',
           chat: { id: 123456 },
-          from: { username: 'admin', first_name: 'Admin' }
+          from: { id: 42, username: 'admin', first_name: 'Admin' }
         }
       })
     });
@@ -253,11 +255,11 @@ describe('POST /api/telegram/webhook', () => {
     expect(response.status).toBe(503);
   });
 
-  it('fails closed with 503 when TELEGRAM_ALLOWED_USERNAMES is unset in production', async () => {
+  it('fails closed with 503 when TELEGRAM_ALLOWED_USER_IDS is unset in production', async () => {
     (process.env as Record<string, string>).NODE_ENV = 'production';
     process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
     process.env.TELEGRAM_CHAT_ID = '123';
-    delete process.env.TELEGRAM_ALLOWED_USERNAMES;
+    delete process.env.TELEGRAM_ALLOWED_USER_IDS;
 
     const { POST } = await import('@/app/api/telegram/webhook/route');
     const request = new Request('http://localhost/api/telegram/webhook', {
@@ -279,7 +281,7 @@ describe('POST /api/telegram/webhook', () => {
     const response = await POST(request);
     const body = await response.json();
     expect(response.status).toBe(503);
-    expect(body.error).toMatch(/TELEGRAM_ALLOWED_USERNAMES/i);
+    expect(body.error).toMatch(/TELEGRAM_ALLOWED_USER_IDS/i);
   });
 
   it('ignores update from wrong chat ID', async () => {
@@ -299,7 +301,7 @@ describe('POST /api/telegram/webhook', () => {
         message: {
           text: 'Hello from wrong chat',
           chat: { id: 999 },
-          from: { username: 'admin' }
+          from: { id: 42, username: 'admin' }
         }
       })
     });
@@ -309,6 +311,21 @@ describe('POST /api/telegram/webhook', () => {
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ ok: true, ignored: 'wrong-chat' });
+  });
+
+  it('rejects an oversized authenticated update', async () => {
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const response = await POST(new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: {
+        'x-telegram-bot-api-secret-token': 'secret',
+        'content-length': String(300 * 1024)
+      },
+      body: '{}'
+    }));
+    expect(response.status).toBe(413);
+    expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
   });
 
   it('preserves duplicate handling without releasing an existing claim', async () => {
@@ -325,7 +342,7 @@ describe('POST /api/telegram/webhook', () => {
     const response = await POST(new Request('http://localhost/api/telegram/webhook', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-telegram-bot-api-secret-token': 'secret' },
-      body: JSON.stringify({ update_id: 91 })
+      body: JSON.stringify({ update_id: 91, message: { chat: { id: 123456 }, from: { id: 42 } } })
     }));
 
     expect(response.status).toBe(200);
@@ -364,7 +381,8 @@ describe('POST /api/telegram/webhook', () => {
           message_id: 100,
           message_thread_id: 77,
           text: 'Retry me',
-          chat: { id: 123456, type: 'supergroup' }
+          chat: { id: 123456, type: 'supergroup' },
+          from: { id: 42 }
         }
       })
     }));
@@ -377,7 +395,7 @@ describe('POST /api/telegram/webhook', () => {
   it('resolves a team reply by its persisted provider parent message when no topic is present', async () => {
     process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
     process.env.TELEGRAM_CHAT_ID = '123456';
-    process.env.TELEGRAM_ALLOWED_USERNAMES = 'admin';
+    process.env.TELEGRAM_ALLOWED_USER_IDS = '42';
     createServerSupabaseClientMock.mockReturnValue({
       from: vi.fn((table: string) => {
         if (table === 'processed_telegram_updates') return { insert: vi.fn(async () => ({ error: null })) };
@@ -396,7 +414,7 @@ describe('POST /api/telegram/webhook', () => {
       headers: { 'Content-Type': 'application/json', 'x-telegram-bot-api-secret-token': 'secret' },
       body: JSON.stringify({ update_id: 10, message: {
         message_id: 1000, chat: { id: 123456, type: 'supergroup' },
-        from: { username: 'admin', first_name: 'Admin' }, text: 'Reply',
+        from: { id: 42, username: 'admin', first_name: 'Admin' }, text: 'Reply',
         reply_to_message: { message_id: 501 }
       } })
     }));

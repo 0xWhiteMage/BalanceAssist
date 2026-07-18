@@ -18,9 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - name: Verify required CRM migrations through the Management API
@@ -47,3 +49,4 @@ jobs:
           name: monday-canary-evidence
           path: .artifacts/monday-canary/
           if-no-files-found: warn
+          retention-days: 30

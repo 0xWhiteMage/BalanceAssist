@@ -16,6 +16,7 @@ const reviewedTrustFeedbackVersion = '057';
 const reviewedUnsentCrmDeletionVersion = '058';
 const reviewedConsent12Version = '059';
 const reviewedConsent12CutoverVersion = '060';
+const reviewedApiSecurityVersion = '061';
 
 export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
   const recorded = new Set(recordedVersions);
@@ -77,7 +78,8 @@ export function selectOrdinaryProductionMigrations(migrations) {
     && migration.version !== reviewedTrustFeedbackVersion
     && migration.version !== reviewedUnsentCrmDeletionVersion
     && migration.version !== reviewedConsent12Version
-    && migration.version !== reviewedConsent12CutoverVersion);
+    && migration.version !== reviewedConsent12CutoverVersion
+    && migration.version !== reviewedApiSecurityVersion);
 }
 
 export function assertExpandOnlyMigration(source, filename) {

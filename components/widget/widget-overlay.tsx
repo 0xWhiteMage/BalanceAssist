@@ -16,7 +16,7 @@ import {
 } from '@/components/widget/widget-overlay-parts';
 import { ReviewPanel } from '@/components/widget/review-panel';
 import { TrustFeedback } from '@/components/widget/trust-feedback';
-import { AttachmentDropzone, type ReferenceFile } from '@/components/widget/attachment-dropzone';
+import { AttachmentDropzone } from '@/components/widget/attachment-dropzone';
 import { DataUseNotice } from '@/components/widget/data-use-notice';
 import { brandTokens } from '@/lib/brand-tokens';
 import { getNextConversationStep } from '@/lib/conversation/extract';
@@ -48,20 +48,6 @@ let messageCounter = 0;
 function nextId() {
   messageCounter += 1;
   return `msg-${messageCounter}`;
-}
-
-export const WIDGET_WIDTH_CHAT_ONLY = 'min(720px, calc(100vw - 48px))';
-export const WIDGET_WIDTH_WITH_RAIL = 'min(1100px, calc(100vw - 48px))';
-
-export function getWidgetWidth({
-  isTeamConnected,
-  hasProjectIntent
-}: {
-  isTeamConnected: boolean;
-  hasProjectIntent: boolean;
-}): string {
-  if (isTeamConnected || !hasProjectIntent) return WIDGET_WIDTH_CHAT_ONLY;
-  return WIDGET_WIDTH_WITH_RAIL;
 }
 
 function resolveBotTexts(stepId: ConversationStepId, draft: LeadDraft): string[] {
@@ -176,7 +162,6 @@ export function WidgetOverlay({
   const [showUploadPolicy, setShowUploadPolicy] = useState(false);
   const [railMode, setRailMode] = useState<'essentials' | 'summary'>('essentials');
   const referenceLinks = sessionDraft.referenceLinks;
-  const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [telegramBroadcastStatus, setTelegramBroadcastStatus] = useState<'pending' | 'sent' | 'queued' | 'unconfigured'>('unconfigured');
   const [tabMode, setTabMode] = useState<'chat' | 'brief'>('chat');
@@ -188,7 +173,6 @@ export function WidgetOverlay({
   const submitInFlightRef = useRef<boolean>(false);
   const submitGenerationRef = useRef(0);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapGenerationRef = useRef(0);
   const aiBootstrapInFlightGenerationRef = useRef<number | null>(null);
   const aiBootstrapCompletedRef = useRef(false);
@@ -274,7 +258,20 @@ export function WidgetOverlay({
       setTrustFeedbackResponse(null);
     }
     if (previousSessionIdRef.current && previousSessionIdRef.current !== sessionId) {
+      bootstrapGenerationRef.current += 1;
+      aiProcessingGenerationRef.current += 1;
+      submitGenerationRef.current += 1;
+      aiBootstrapCompletedRef.current = false;
+      cancelRef.current = true;
+      submitInFlightRef.current = false;
       resetTeamRelay();
+      cleanupAttachmentPreviews(messagesRef.current);
+      messagesRef.current = [];
+      setMessages([]);
+      setEntryPath(null);
+      setCurrentStep('intro');
+      setHasStarted(false);
+      setIsTyping(false);
     }
     previousSessionIdRef.current = sessionId;
   }, [sessionId, resetTeamRelay]);
@@ -359,10 +356,6 @@ export function WidgetOverlay({
       if (advanceTimerRef.current) {
         clearTimeout(advanceTimerRef.current);
         advanceTimerRef.current = null;
-      }
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-        resetTimerRef.current = null;
       }
     };
   }, []);
@@ -505,7 +498,6 @@ export function WidgetOverlay({
     submitGenerationRef.current += 1;
     submitInFlightRef.current = false;
     setIsTyping(false);
-    cleanupAttachmentPreviews(messagesRef.current);
     restoreLauncherFocusRef.current = true;
     setIsOpen(false);
     teamRelay.clearRequests();
@@ -513,10 +505,6 @@ export function WidgetOverlay({
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
-    }
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = null;
     }
   }
 
@@ -555,10 +543,6 @@ export function WidgetOverlay({
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
     }
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = null;
-    }
     cleanupAttachmentPreviews(messagesRef.current);
     messagesRef.current = [];
     setMessages([]);
@@ -566,7 +550,6 @@ export function WidgetOverlay({
     setHasStarted(false);
     setEntryPath(null);
     setRailMode('essentials');
-    setReferenceFiles([]);
     setAttachmentOpen(false);
     setView('chat');
     setCalendlyUrl(null);
@@ -802,10 +785,6 @@ export function WidgetOverlay({
     }
     if (sessionId) await sessionDraft.hydrateDraft(sessionId);
     return { status: 'saved' } as const;
-  }
-
-  function appendReferenceFile(file: ReferenceFile) {
-    setReferenceFiles((prev) => [...prev, file]);
   }
 
   async function handleFileAnalyzed(_fileName: string, extractedText: string) {
@@ -1827,7 +1806,6 @@ export function WidgetOverlay({
                         )}
                         <AttachmentDropzone
                           onAddLink={addPrivateReference}
-                          onAddFile={appendReferenceFile}
                           onFileAnalyzed={handleFileAnalyzed}
                           sessionId={sessionId}
                           consent={entryPath === 'ai' && noticeConsent ? { aiAnalysis: true, producerShare: false, consentedAt: noticeConsent.consentedAt } : null}

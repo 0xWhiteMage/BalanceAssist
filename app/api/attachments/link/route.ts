@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
+import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
 
@@ -12,18 +12,25 @@ const linkSchema = z.object({
   url: z.string().url(),
   kind: z.enum(['youtube', 'vimeo', 'figma', 'loom', 'gdrive', 'other'])
 });
+const MAX_LINK_BODY_BYTES = 16 * 1024;
 
 export async function POST(request: Request) {
-  const parsed = await parseRequestBody(request, linkSchema);
-  if (!parsed.ok) return parsed.response;
+  const authResult = await requireSession(request);
+  if (!authResult.ok) return authResult.response;
+  const body = await readJsonBodyLimited(request, MAX_LINK_BODY_BYTES);
+  if (!body.ok) return jsonWithCors(
+    { error: body.tooLarge ? 'Payload too large' : 'Invalid JSON body' },
+    { status: body.tooLarge ? 413 : 400 },
+    request
+  );
+  const parsed = linkSchema.safeParse(body.data);
+  if (!parsed.success) return jsonWithCors({ error: 'Invalid request payload', issues: parsed.error.issues }, { status: 400 }, request);
+  if (parsed.data.sessionId && parsed.data.sessionId !== authResult.auth.sessionId) {
+    return jsonWithCors({ error: 'Session mismatch' }, { status: 403 }, request);
+  }
   const normalizedUrl = normalizePublicReferenceUrl(parsed.data.url);
   if (!normalizedUrl) {
     return jsonWithCors({ ok: false, persisted: false, error: 'https_reference_required' }, { status: 400 }, request);
-  }
-
-  const authResult = await requireSession(request, parsed.data.sessionId ?? undefined);
-  if (!authResult.ok) {
-    return authResult.response;
   }
 
   const { supabase, auth } = authResult;

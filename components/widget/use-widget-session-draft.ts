@@ -96,6 +96,24 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     setBriefApproved(status === 'approved');
   }, []);
 
+  const clearCanonicalState = useCallback(() => {
+    const emptyDraft = createDefaultLeadDraft();
+    const emptyApproval = { canonicalReferenceSetHash: EMPTY_REFERENCE_SET_HASH };
+    draftRef.current = emptyDraft;
+    draftVersionRef.current = 0;
+    approvalRef.current = emptyApproval;
+    approvalGenerationRef.current += 1;
+    approvalStatusRef.current = 'idle';
+    setDraft(emptyDraft);
+    setFieldProvenance({});
+    setDraftVersion(0);
+    setHasProjectIntent(false);
+    setBriefApproved(false);
+    setApprovalStatus('idle');
+    setReferenceLinks([]);
+    setApproval(emptyApproval);
+  }, []);
+
   const beginDraftOperation = useCallback((): DraftOperation => ({
     invalidationEpoch: operationInvalidationEpochRef.current,
     sessionId: sessionIdRef.current
@@ -168,32 +186,32 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
 
   const setActiveSession = useCallback((session: SessionResponse, isValid: BootstrapValidity = alwaysValid) => {
     if (!isValid()) return false;
-    if (sessionIdRef.current !== session.sessionId) operationInvalidationEpochRef.current += 1;
+    if (sessionIdRef.current !== session.sessionId) {
+      operationInvalidationEpochRef.current += 1;
+      clearCanonicalState();
+    }
     sessionIdRef.current = session.sessionId;
     expiresAtRef.current = session.expiresAt ?? null;
     setSessionId(session.sessionId);
     setExpiresAt(session.expiresAt ?? null);
     setSessionUnavailable(false);
     return true;
-  }, []);
+  }, [clearCanonicalState]);
 
   const hydrateDraft = useCallback(async (id: string, isValid: BootstrapValidity = alwaysValid) => {
     const generation = bootstrapGenerationRef.current;
     const operationIsValid = () => isValid() && generation === bootstrapGenerationRef.current;
-    if (!operationIsValid()) return;
+    if (!operationIsValid() || (sessionIdRef.current !== null && id !== sessionIdRef.current)) return;
     const canonical = await dependencies.fetchProjectDraft(id);
-    if (!operationIsValid()) return;
+    if (!operationIsValid() || (sessionIdRef.current !== null && id !== sessionIdRef.current)) return;
     if (canonical) {
       if (!operationIsValid()) return;
+      if (canonical.draftVersion === 0 && Object.keys(canonical.draft).length === 0) clearCanonicalState();
       setReferenceLinks(canonical.referenceLinks ?? []);
-      if (canonical.draftVersion > 0 || Object.keys(canonical.draft).length > 0) {
-        if (!operationIsValid()) return;
-        applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
-      } else {
-        applyCanonicalApproval(canonical, canonical.draftVersion);
-      }
+      if (!operationIsValid()) return;
+      applyCanonicalDraft(canonical.draft, canonical.draftVersion, canonical);
     }
-  }, [applyCanonicalApproval, applyCanonicalDraft, dependencies]);
+  }, [applyCanonicalDraft, clearCanonicalState, dependencies]);
 
   const ensureSession = useCallback(async (isValid: BootstrapValidity = alwaysValid) => {
     const generation = bootstrapGenerationRef.current;
@@ -206,6 +224,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
       expiresAtRef.current = null;
       setSessionId(null);
       setExpiresAt(null);
+      clearCanonicalState();
     }
     if (!noticeConsent || typeof window === 'undefined') return null;
     const session = await dependencies.createSession({
@@ -221,7 +240,7 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     }
     if (!setActiveSession(session, operationIsValid)) return null;
     return session.sessionId;
-  }, [dependencies, noticeConsent, setActiveSession]);
+  }, [clearCanonicalState, dependencies, noticeConsent, setActiveSession]);
 
   const loadOrCreateSession = useCallback((isValid: BootstrapValidity = alwaysValid) => {
     const generation = bootstrapGenerationRef.current;
@@ -333,20 +352,10 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     invalidateBootstrap();
     sessionIdRef.current = null;
     expiresAtRef.current = null;
-    draftVersionRef.current = 0;
-    approvalGenerationRef.current += 1;
     setSessionId(null);
     setExpiresAt(null);
-    setDraft(createDefaultLeadDraft());
-    setFieldProvenance({});
-    setDraftVersion(0);
-    setHasProjectIntent(false);
-    transitionApproval('idle');
-    setReferenceLinks([]);
-    const resetApproval = { canonicalReferenceSetHash: EMPTY_REFERENCE_SET_HASH };
-    approvalRef.current = resetApproval;
-    setApproval(resetApproval);
-  }, [invalidateBootstrap, transitionApproval]);
+    clearCanonicalState();
+  }, [clearCanonicalState, invalidateBootstrap]);
 
   const getDraftSnapshot = useCallback(() => draftRef.current, []);
   const reopenApproval = useCallback(() => transitionApproval('idle'), [transitionApproval]);

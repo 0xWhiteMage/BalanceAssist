@@ -140,4 +140,35 @@ describe('producer-requested human uploads', () => {
     expect(await screen.findByText('Requested file upload failed.')).toBeVisible();
     expect(relayActions.markUploadFailed).toHaveBeenCalled();
   });
+
+  test('retains owned preview URLs across close and reopen, then revokes them on unmount', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const createObjectUrl = vi.fn(() => 'blob:owned-preview');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/consent')) return new Response(JSON.stringify({ ok: true, consent: { producerTransfer: true } }), { status: 200 });
+      if (url.includes('/api/telegram/upload')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const view = render(<WidgetOverlay autoOpen={true} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Talk to the team without AI' }));
+    fireEvent.change(await screen.findByLabelText('Choose requested files'), {
+      target: { files: [new File(['image'], 'frame.png', { type: 'image/png' })] }
+    });
+    await waitFor(() => expect(createObjectUrl).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    expect(await screen.findByText('Upload quarantined: frame.png')).toBeVisible();
+    expect(createObjectUrl).toHaveBeenCalledOnce();
+
+    view.unmount();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:owned-preview');
+    delete (URL as { createObjectURL?: unknown }).createObjectURL;
+    delete (URL as { revokeObjectURL?: unknown }).revokeObjectURL;
+  });
 });

@@ -14,9 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npm run lint
@@ -25,9 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit
@@ -36,13 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npx vitest run
-      - run: npm test -- tests/integration/monday-release-proof.test.ts
 
   database:
     runs-on: ubuntu-latest
@@ -50,9 +55,11 @@ jobs:
       REQUIRE_SUPABASE_RELEASE_PROOF: '1'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1
       - run: npm ci
@@ -67,14 +74,17 @@ jobs:
           name: supabase-release-proof-diagnostics
           path: .artifacts/supabase-release-proof/
           if-no-files-found: warn
+          retention-days: 14
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npm run build
@@ -83,6 +93,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - run: git diff --check
 
   e2e:
@@ -90,9 +102,11 @@ jobs:
     needs: [lint, typecheck, test, database, build, diff-check]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
@@ -106,14 +120,17 @@ jobs:
             playwright-report/
             test-results/
           if-no-files-found: warn
+          retention-days: 14
 
   dependency-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high

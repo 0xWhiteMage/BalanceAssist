@@ -1,23 +1,42 @@
 import { z } from 'zod';
-import { corsOptionsResponse, jsonWithCors, parseRequestBody } from '@/lib/api/route-helpers';
+import { corsOptionsResponse, jsonWithCors, readJsonBodyLimited } from '@/lib/api/route-helpers';
 import { requireSession } from '@/lib/api/require-session';
 import { extractClientRequestId } from '@/lib/logger';
+import { consumeRateLimit } from '@/lib/security/rate-limit';
 
 const relayPayloadSchema = z.object({
   sessionId: z.string().min(1),
   text: z.string().min(1).max(4000)
 });
+const MAX_RELAY_BODY_BYTES = 8 * 1024;
 
 export async function OPTIONS(request: Request) {
   return corsOptionsResponse(request);
 }
 
 export async function POST(request: Request) {
-  const parsed = await parseRequestBody(request, relayPayloadSchema);
-  if (!parsed.ok) return parsed.response;
-  const { sessionId, text } = parsed.data;
-  const authResult = await requireSession(request, sessionId);
+  const authResult = await requireSession(request);
   if (!authResult.ok) return authResult.response;
+  try {
+    const limit = await consumeRateLimit(`relay:${authResult.auth.capability}`, 30, 60 * 60);
+    if (!limit.permitted) return jsonWithCors(
+      { ok: false, code: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }, request
+    );
+  } catch {
+    return jsonWithCors({ ok: false, code: 'rate_limit_unavailable' }, { status: 503 }, request);
+  }
+  const body = await readJsonBodyLimited(request, MAX_RELAY_BODY_BYTES);
+  if (!body.ok) return jsonWithCors(
+    { ok: false, code: body.tooLarge ? 'payload_too_large' : 'invalid_json' },
+    { status: body.tooLarge ? 413 : 400 }, request
+  );
+  const parsed = relayPayloadSchema.safeParse(body.data);
+  if (!parsed.success) return jsonWithCors({ ok: false, error: 'Invalid request payload' }, { status: 400 }, request);
+  const { sessionId, text } = parsed.data;
+  if (sessionId !== authResult.auth.sessionId) {
+    return jsonWithCors({ ok: false, error: 'Session mismatch' }, { status: 403 }, request);
+  }
   const requestId = extractClientRequestId(request);
   if (!requestId) return jsonWithCors({ ok: false, error: 'request_id_required' }, { status: 400 }, request);
 

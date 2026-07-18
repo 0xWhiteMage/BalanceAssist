@@ -25,6 +25,7 @@ describe('Monday scheduler workflows', () => {
     expect(source).toContain('"worker":"monday-dispatch"');
     expect(source).toContain('--max-time 30');
     expect(source).toContain('curl --fail');
+    expect(source).toContain('test "$PRODUCTION_URL" = "https://balance-assist.vercel.app"');
   });
 
   it('runs lifecycle daily and records a heartbeat only after success', async () => {
@@ -40,6 +41,7 @@ describe('Monday scheduler workflows', () => {
     expect(source).toContain('"worker":"monday-lifecycle"');
     expect(source).toContain('--max-time 30');
     expect(source).toContain('curl --fail');
+    expect(source).toContain('test "$PRODUCTION_URL" = "https://balance-assist.vercel.app"');
   });
 
   it('runs reconciliation weekly and records a heartbeat only after success', async () => {
@@ -55,5 +57,6 @@ describe('Monday scheduler workflows', () => {
     expect(source).toContain('"worker":"monday-reconcile"');
     expect(source).toContain('--max-time 30');
     expect(source).toContain('curl --fail');
+    expect(source).toContain('test "$PRODUCTION_URL" = "https://balance-assist.vercel.app"');
   });
 });

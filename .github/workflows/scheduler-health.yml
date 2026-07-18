@@ -23,7 +23,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
-          test -n "$PRODUCTION_URL"
+          test "$PRODUCTION_URL" = "https://balance-assist.vercel.app"
           test -n "$CRON_SECRET"
           curl --fail --silent --show-error --max-time 30 \
             --header "Authorization: Bearer ${CRON_SECRET}" \

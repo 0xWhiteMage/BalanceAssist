@@ -19,11 +19,12 @@ The release dispatch requires the exact reviewed SHA plus one bounded case
 reference for each discipline. Use closed GitHub issues with the `release-review`
 and `release-approved` labels. Each discipline issue must contain `Reviewed-SHA`,
 `Review-Role`, `Reviewer-GitHub`, `Decision: approved`, `Open-P0: 0`, and
-`Open-P1: 0`. Assign the issue to the named reviewer; all five reviewer accounts
-must be distinct. The named reviewer must add an approval comment repeating the
-SHA, role, decision, and zero-open-P0/P1 fields from an account with owner, member,
-or collaborator association. The workflow authenticates the comment author and
-uses GitHub's comment timestamp. The workflow retrieves and validates those records. Validation also requires the successful aggregate
+`Open-P1: 0`. Assign the issue to the named reviewer. The named reviewer must be
+listed in `RELEASE_TRUSTED_REVIEWERS` and add an approval comment repeating the
+SHA, role, decision, and zero-open-P0/P1 fields. The workflow requires the configured
+`RELEASE_MIN_REVIEWERS` count of distinct trusted accounts across the five roles,
+from one through five. The workflow authenticates the comment author and uses
+GitHub's comment timestamp. The workflow retrieves and validates those records. Validation also requires the successful aggregate
 `release-proof` check for that SHA. Protect the `production-release-review`
 environment with the authorized release reviewers; its approval occurs after the
 immutable deployment and live trigger verification and before alias promotion.
@@ -86,7 +87,7 @@ producer-transfer consent never authorizes Monday disclosure.
 4. Confirm Telegram webhook configuration:
    - `TELEGRAM_WEBHOOK_SECRET`
    - `TELEGRAM_CHAT_ID`
-   - `TELEGRAM_ALLOWED_USERNAMES`
+   - `TELEGRAM_ALLOWED_USER_IDS` containing comma-separated immutable numeric Telegram user IDs
 5. Confirm the dispatcher scheduler is invoking the authenticated dispatch route.
     - GitHub Actions workflow: `Handoff dispatch` (`.github/workflows/handoff-dispatch.yml`)
     - Dispatch path: `/api/internal/handoff-dispatch`

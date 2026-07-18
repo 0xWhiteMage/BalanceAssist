@@ -5,6 +5,7 @@ import { useWidgetSessionDraft, type ApprovalToken } from '@/components/widget/u
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { fetchTeamMessages, relayUserMessage } from '@/lib/api/client';
 import type { ConsentRecord } from '@/lib/privacy/notice';
+import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 const consent: ConsentRecord = {
   consentVersion: '1.2',
@@ -261,7 +262,7 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.referenceLinks).toEqual([...persistedLinks, { id: 'reference-2', sessionId: 'session-1', kind: 'youtube', url: 'https://youtube.com/watch?v=1' }]);
   });
 
-  test('hydrates reference-only sessions without replacing existing draft state', async () => {
+  test('explicitly hydrates an empty canonical draft instead of retaining old session state', async () => {
     const persistedLinks = [{
       id: 'reference-only', sessionId: 'session-1', kind: 'vimeo' as const, url: 'https://vimeo.com/reference-only'
     }];
@@ -284,10 +285,52 @@ describe('useWidgetSessionDraft', () => {
     await act(async () => { await result.current.hydrateDraft('session-1'); });
 
     expect(result.current.referenceLinks).toEqual(persistedLinks);
-    expect(result.current.draft.projectScope).toBe('Keep this local recovery value');
-    expect(result.current.draftVersion).toBe(5);
+    expect(result.current.draft.projectScope).toBe('');
+    expect(result.current.draftVersion).toBe(0);
     expect(result.current.approval.canonicalReferenceSetHash).toBe('restored-reference-hash');
     expect(result.current.approvalStatus).toBe('idle');
+  });
+
+  test('atomically clears populated draft, references, provenance, and approval when a new empty session is restored', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-18T10:00:00.000Z'));
+    const getCurrentSession = vi.fn()
+      .mockResolvedValueOnce({ sessionId: 'old-session', status: 'open', sourceUrl: '', expiresAt: '2026-07-18T10:00:01.000Z' })
+      .mockResolvedValueOnce({ sessionId: 'new-session', status: 'open', sourceUrl: '' });
+    const fetchProjectDraft = vi.fn()
+      .mockResolvedValueOnce({
+        draftVersion: 4, fieldCount: 1, draft: { projectScope: 'Old populated scope' },
+        provenance: { projectScope: 'confirmed' as const },
+        referenceLinks: [{ id: 'old-link', sessionId: 'old-session', kind: 'vimeo' as const, url: 'https://vimeo.com/old' }],
+        approvedDraftVersion: 4, canonicalReferenceSetHash: 'old-hash', approvedReferenceSetHash: 'old-hash'
+      })
+      .mockResolvedValueOnce({
+        draftVersion: 0, fieldCount: 0, draft: {}, provenance: {}, referenceLinks: [],
+        canonicalReferenceSetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
+      });
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null), getCurrentSession, fetchProjectDraft,
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.loadOrCreateSession(); });
+    expect(result.current).toMatchObject({
+      sessionId: 'old-session', draftVersion: 4, fieldProvenance: { projectScope: 'confirmed' },
+      approvalStatus: 'approved'
+    });
+
+    act(() => vi.setSystemTime(new Date('2026-07-18T10:00:02.000Z')));
+    await act(async () => { await result.current.loadOrCreateSession(); });
+
+    expect(result.current.sessionId).toBe('new-session');
+    expect(result.current.draft).toEqual(createDefaultLeadDraft());
+    expect(result.current.draftVersion).toBe(0);
+    expect(result.current.fieldProvenance).toEqual({});
+    expect(result.current.referenceLinks).toEqual([]);
+    expect(result.current.approvalStatus).toBe('idle');
+    expect(result.current.briefApproved).toBe(false);
+    expect(result.current.approval.approvedDraftVersion).toBeUndefined();
+    vi.useRealTimers();
   });
 
   test('moves idle to pending to error to pending to approved and rejects duplicate begins', () => {
@@ -706,6 +749,27 @@ describe('useWidgetSessionDraft', () => {
     expect(result.current.draft.projectScope).toBe('');
     expect(result.current.draftVersion).toBe(0);
   });
+
+  test('does not fetch or apply hydration for a session other than the active session', async () => {
+    const fetchProjectDraft = vi.fn(async (sessionId: string) => ({
+      sessionId, draftVersion: 1, fieldCount: 1, draft: { projectScope: sessionId }
+    }));
+    const { result } = renderHook(() => useWidgetSessionDraft({
+      createSession: vi.fn(async () => null),
+      getCurrentSession: vi.fn(async () => ({ sessionId: 'active-session', status: 'open', sourceUrl: '' })),
+      fetchProjectDraft,
+      updateProjectDraft: vi.fn(), resetProject: vi.fn(async () => true), requestProjectDeletion: vi.fn(async () => ({ ok: true }))
+    }));
+    act(() => result.current.setNoticeConsent(consent));
+    await act(async () => { await result.current.loadOrCreateSession(); });
+    expect(result.current.draft.projectScope).toBe('active-session');
+    fetchProjectDraft.mockClear();
+
+    await act(async () => { await result.current.hydrateDraft('different-session'); });
+
+    expect(fetchProjectDraft).not.toHaveBeenCalled();
+    expect(result.current.draft.projectScope).toBe('active-session');
+  });
 });
 
 describe('useTeamRelay', () => {
@@ -1082,12 +1146,72 @@ describe('useTeamRelay', () => {
     act(() => result.current.requestHandoff());
     await act(async () => { await result.current.send('Hello'); });
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(result.current.status).toBe('queued');
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
 
     expect(poll).toHaveBeenCalledTimes(2);
     expect(result.current.status).toBe('queued');
+    unmount();
+    vi.useRealTimers();
+  });
+
+  test('pauses scheduled relay polling while hidden or offline and resumes when ready', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn(async () => ({ outgoingStatus: null, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const originalVisibility = document.visibilityState;
+    const originalOnline = navigator.onLine;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    const { result, unmount } = renderHook(() => useTeamRelay({ sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn() }));
+    act(() => result.current.requestHandoff());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(poll).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(poll).not.toHaveBeenCalled();
+
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    act(() => window.dispatchEvent(new Event('online')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(poll).toHaveBeenCalledOnce();
+    unmount();
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: originalVisibility });
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: originalOnline });
+    vi.useRealTimers();
+  });
+
+  test('falls back to low-frequency polling after the bounded active polling window', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn(async () => ({ outgoingStatus: null, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const { result, unmount } = renderHook(() => useTeamRelay({ sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: vi.fn() }));
+    act(() => result.current.requestHandoff());
+    await act(async () => { await vi.advanceTimersByTimeAsync(310_000); });
+    const callsAtLimit = poll.mock.calls.length;
+    expect(callsAtLimit).toBeGreaterThan(0);
+    expect(callsAtLimit).toBeLessThanOrEqual(150);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(poll.mock.calls.length).toBeGreaterThan(callsAtLimit);
+    expect(poll.mock.calls.length).toBeLessThanOrEqual(callsAtLimit + 4);
+    unmount();
+    vi.useRealTimers();
+  });
+
+  test('starts a fresh active polling window when a new relay message is sent during passive polling', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn(async () => ({ outgoingStatus: 'queued' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
+    const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
+    const { result, unmount } = renderHook(() => useTeamRelay({ sessionId: 'session-1', fetchTeamMessages: poll, relayUserMessage: relay }));
+    act(() => result.current.requestHandoff());
+    await act(async () => { await vi.advanceTimersByTimeAsync(310_000); });
+    const callsAtLimit = poll.mock.calls.length;
+
+    await act(async () => { await result.current.send('New message'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    expect(poll.mock.calls.length).toBeGreaterThan(callsAtLimit);
     unmount();
     vi.useRealTimers();
   });
