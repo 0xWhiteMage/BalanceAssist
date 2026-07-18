@@ -10,6 +10,7 @@ import { sendDocument } from '@/lib/telegram';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const databaseUrl = process.env.TEST_DATABASE_URL;
 const artifactsDir = process.env.RELEASE_PROOF_ARTIFACTS_DIR;
 const runId = `release-proof-${crypto.randomUUID()}`;
 const clientIp = `203.0.113.${Math.floor(Math.random() * 200) + 1}`;
@@ -107,7 +108,22 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
   });
 
   afterEach(async () => {
-    if (sessionId) await supabase!.from('sessions').delete().eq('id', sessionId);
+    if (sessionId && databaseUrl) {
+      const { Client } = await import('pg');
+      const cleanup = new Client({ connectionString: databaseUrl });
+      await cleanup.connect();
+      try {
+        await cleanup.query('begin');
+        await cleanup.query("set local app.session_purge = 'on'");
+        await cleanup.query('delete from public.sessions where id = $1', [sessionId]);
+        await cleanup.query('commit');
+      } catch (error) {
+        await cleanup.query('rollback');
+        throw error;
+      } finally {
+        await cleanup.end();
+      }
+    }
     await supabase!.from('processed_telegram_updates').delete().eq('update_id', updateId);
     await supabase!.from('api_rate_limits').delete().eq(
       'key_hash',

@@ -19,6 +19,7 @@ type MigrationRunner = {
 };
 
 const connectionString = process.env.TEST_DATABASE_URL;
+const localSupabase = process.env.TEST_SUPABASE_LOCAL === '1';
 const migrationsDir = resolve(process.cwd(), 'supabase/migrations');
 let client: import('pg').Client | undefined;
 let serverSimulationClient: import('pg').Client | undefined;
@@ -99,7 +100,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     const roleCheck = await adminClient.query(
       "select rolname from pg_roles where rolname = any(array['anon', 'authenticated', 'server_role_simulation'])"
     );
-    expect(roleCheck.rows).toEqual([]);
+    expect(roleCheck.rows.map((row) => row.rolname).sort()).toEqual(localSupabase
+      ? ['anon', 'authenticated']
+      : []);
 
     const suffix = `${process.pid}_${Date.now()}`;
     const rolelessDatabase = `balance_assist_roleless_${suffix}`;
@@ -137,12 +140,14 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
 
     // Plain PostgreSQL CI lacks Supabase roles. Create restricted API roles only after
     // the roleless migration proves 018's conditional grants are portable.
-    await adminClient.query(`
-      CREATE ROLE anon NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-      CREATE ROLE authenticated NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-      CREATE ROLE service_role NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-      CREATE ROLE server_role_simulation LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD 'test-service-role-password';
-    `);
+    if (!localSupabase) {
+      await adminClient.query(`
+        CREATE ROLE anon NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+        CREATE ROLE authenticated NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+        CREATE ROLE service_role NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+      `);
+    }
+    await adminClient.query("CREATE ROLE server_role_simulation LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD 'test-service-role-password'");
     await adminClient.query(`CREATE DATABASE ${grantDatabase}`);
 
     await runner.applyMigrations({
@@ -212,7 +217,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       await adminClient.query(`drop database if exists ${rolelessDatabase}`);
       await adminClient.query(`drop database if exists ${grantDatabase}`);
       await adminClient.query(`drop database if exists ${backfillDatabase}`);
-      await adminClient.query('drop role if exists server_role_simulation, service_role, anon, authenticated');
+      await adminClient.query(localSupabase
+        ? 'drop role if exists server_role_simulation'
+        : 'drop role if exists server_role_simulation, service_role, anon, authenticated');
     }
     await adminClient?.end();
   });

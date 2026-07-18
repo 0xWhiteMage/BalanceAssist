@@ -338,8 +338,17 @@ describe.skipIf(!connectionString)('release proof journey', () => {
       await expect(client!.query('select public.assert_session_processing_allowed($1) as allowed', [sessionId]))
         .resolves.toMatchObject({ rows: [{ allowed: true }] });
     } finally {
-      await client!.query('delete from public.session_consents where session_id = $1', [sessionId]);
-      await client!.query('delete from public.sessions where id = $1', [sessionId]);
+      await client!.query('begin');
+      try {
+        await client!.query('set local session_replication_role = replica');
+        await client!.query('delete from public.session_consents where session_id = $1', [sessionId]);
+        await client!.query('set local session_replication_role = origin');
+        await client!.query('delete from public.sessions where id = $1', [sessionId]);
+        await client!.query('commit');
+      } catch (error) {
+        await client!.query('rollback');
+        throw error;
+      }
     }
   });
 });
