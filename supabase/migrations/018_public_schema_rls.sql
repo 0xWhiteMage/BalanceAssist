@@ -54,6 +54,20 @@ BEGIN
     FROM authenticated;
   END IF;
 
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+      public.sessions,
+      public.events,
+      public.leads,
+      public.human_messages,
+      public.uploaded_files,
+      public.reference_links,
+      public.processed_telegram_updates,
+      public.handoff_outbox
+    TO service_role;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;
+  END IF;
+
   -- Supabase CLI can run project migrations before the custom migration
   -- runner creates its public tracker table.
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
@@ -66,6 +80,10 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
       REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM authenticated;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.schema_migrations TO service_role;
     END IF;
   END IF;
 END
