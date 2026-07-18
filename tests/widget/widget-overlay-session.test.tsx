@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WidgetOverlay } from '@/components/widget/widget-overlay';
 
 const originalFetch = global.fetch;
 const originalReferrer = document.referrer;
+const deletionReceiptStorageKey = 'balance-assist-deletion-receipt';
 
 beforeAll(() => {
   if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
@@ -12,6 +13,10 @@ beforeAll(() => {
       // no-op for jsdom
     };
   }
+});
+
+beforeEach(() => {
+  window.localStorage?.removeItem?.(deletionReceiptStorageKey);
 });
 
 afterEach(() => {
