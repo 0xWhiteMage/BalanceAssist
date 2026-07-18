@@ -668,25 +668,37 @@ jobs:
             fs.writeFileSync(process.argv[2], 'applied');
             const live = await client.query(`
               SELECT p.proname, p.prosrc, p.prosecdef, p.proconfig, l.lanname,
-                pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result
+                pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result,
+                has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_execute,
+                has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_execute,
+                has_function_privilege('service_role', p.oid, 'EXECUTE') AS service_role_execute,
+                EXISTS (
+                  SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+                  WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+                ) AS public_execute
               FROM pg_proc p
               JOIN pg_language l ON l.oid = p.prolang
               WHERE p.oid IN (
                 'public.assert_session_processing_allowed(uuid)'::regprocedure,
                 'public.finalize_session_lead(uuid)'::regprocedure,
                 'public.relay_human_message(uuid,text,text)'::regprocedure,
-                'public.reserve_handoff_send(uuid,uuid)'::regprocedure
+                'public.reserve_handoff_send(uuid,uuid)'::regprocedure,
+                'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure
               )
                 AND EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '060' AND filename = '060_consent_1_2_cutover.sql')
             `);
-            if (live.rows.length !== 4) process.exit(1);
+            if (live.rows.length !== 5) process.exit(1);
             for (const fn of live.rows) {
               const expectedResult = fn.proname === 'finalize_session_lead'
                 ? 'TABLE(persisted boolean, consent_required boolean, qualification_status text, score integer, recommended_next_step text, lead_id bigint, handoff_id uuid, crm_record_id uuid, crm_revision integer, approved_draft_version integer, crm_queued boolean, approval_input_hash text, approved_reference_set_hash text)'
                 : fn.proname === 'relay_human_message'
                   ? 'TABLE(persisted boolean, consent_required boolean, message_id bigint, handoff_id uuid, thread_id bigint)'
                   : 'boolean';
-              if (fn.prosrc.trim() !== reviewedBody(`${fn.proname}(`) || fn.prosecdef !== true || fn.lanname !== 'plpgsql' || fn.result !== expectedResult || !fn.proconfig?.includes('search_path=public, pg_temp') || fn.owner !== 'postgres') process.exit(1);
+              const expectedSearchPath = fn.proname === 'finalize_session_lead'
+                ? 'search_path=public, extensions, pg_temp'
+                : 'search_path=public, pg_temp';
+              if (fn.prosrc.trim() !== reviewedBody(`${fn.proname}(`) || fn.prosecdef !== true || fn.lanname !== 'plpgsql' || fn.result !== expectedResult || !fn.proconfig?.includes(expectedSearchPath) || fn.owner !== 'postgres') process.exit(1);
+              if (fn.public_execute !== false || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) process.exit(1);
             }
           } finally {
             await client.end();

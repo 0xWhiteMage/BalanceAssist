@@ -1,0 +1,316 @@
+name: Emergency consent 1.2 cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact main commit SHA already serving on the production alias
+        required: true
+        type: string
+      incident_ref:
+        description: Closed owner-approved emergency release issue number
+        required: true
+        type: string
+      authorization:
+        description: Type AUTHORIZE CONSENT 1.2 EMERGENCY CUTOVER
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - name: Validate emergency authorization
+        id: validate
+        env:
+          AUTHORIZATION: ${{ inputs.authorization }}
+          GITHUB_TOKEN: ${{ github.token }}
+          INCIDENT_REF: ${{ inputs.incident_ref }}
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/emergency-consent-1-2-cutover.yml@refs/heads/main"
+          test "$AUTHORIZATION" = "AUTHORIZE CONSENT 1.2 EMERGENCY CUTOVER"
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INCIDENT_REF" =~ ^[1-9][0-9]{0,9}$ ]]
+          git init --quiet release
+          cd release
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          release_sha="$(git rev-parse "$RELEASE_REF^{commit}")"
+          test "$release_sha" = "$(git rev-parse refs/remotes/origin/main)"
+          ci_path="$(mktemp)"
+          issue_path="$(mktemp)"
+          comments_path="$(mktemp)"
+          trap 'rm -f "$ci_path" "$issue_path" "$comments_path"' EXIT
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$ci_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$release_sha&status=completed&per_page=100"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$issue_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$INCIDENT_REF"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$comments_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$INCIDENT_REF/comments?per_page=100"
+          node - "$ci_path" "$issue_path" "$comments_path" "$release_sha" "$GITHUB_REPOSITORY_OWNER" <<'NODE'
+          const fs = require('node:fs');
+          const runs = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).workflow_runs ?? [];
+          const issue = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+          const comments = JSON.parse(fs.readFileSync(process.argv[4], 'utf8'));
+          const sha = process.argv[5];
+          const owner = process.argv[6];
+          if (!runs.some((run) => run.head_sha === sha && run.status === 'completed' && run.conclusion === 'success' && run.event === 'push' && run.head_branch === 'main' && run.path === '.github/workflows/ci.yml')) process.exit(1);
+          const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+          const body = issue.body ?? '';
+          const line = (name, value) => new RegExp(`^${name}:\\s*${value}\\s*$`, 'm').test(body);
+          const assignedToOwner = (issue.assignees ?? []).some((assignee) => assignee.login.toLowerCase() === owner.toLowerCase());
+          if (issue.pull_request || issue.state !== 'closed' || !labels.has('release-incident') || !labels.has('release-approved') || !assignedToOwner) process.exit(1);
+          if (!line('Incident-Type', 'consent-1.2-cutover') || !line('Release-SHA', sha) || !line('Decision', 'approved')) process.exit(1);
+          if (!line('Approver-GitHub', `@?${owner}`) || !line('Reason', 'production-workers-blocked-pending-060') || !line('Normal-Review-Path', 'unavailable-solo-owner-repository')) process.exit(1);
+          if (!line('Artifact', 'supabase/production-consent-1-2-cutover-060.sql')) process.exit(1);
+          const approval = comments.some((comment) => comment.user?.login.toLowerCase() === owner.toLowerCase()
+            && comment.author_association === 'OWNER'
+            && new RegExp(`^Release-SHA:\\s*${sha}\\s*$`, 'm').test(comment.body ?? '')
+            && /^Decision:\s*approved\s*$/m.test(comment.body ?? '')
+            && /^Authorization:\s*emergency-cutover-approved\s*$/m.test(comment.body ?? ''));
+          if (!approval) process.exit(1);
+          NODE
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
+
+  cutover:
+    needs: [validate]
+    environment: production-consent-cutover
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verify production alias serves the release commit
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const required = ['PRODUCTION_URL', 'RELEASE_SHA', 'VERCEL_ORG_ID', 'VERCEL_PROJECT_ID', 'VERCEL_TOKEN'];
+          if (required.some((name) => !process.env[name]?.trim())) process.exit(1);
+          const host = new URL(process.env.PRODUCTION_URL).hostname;
+          const headers = { Authorization: `Bearer ${process.env.VERCEL_TOKEN}` };
+          const aliasResponse = await fetch(`https://api.vercel.com/v4/aliases/${host}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
+          if (!aliasResponse.ok) process.exit(1);
+          const alias = await aliasResponse.json();
+          if (typeof alias.deployment?.id !== 'string') process.exit(1);
+          const deploymentResponse = await fetch(`https://api.vercel.com/v13/deployments/${alias.deployment.id}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
+          if (!deploymentResponse.ok) process.exit(1);
+          const deployment = await deploymentResponse.json();
+          const sha = deployment.meta?.githubCommitSha ?? deployment.gitSource?.sha;
+          if (deployment.projectId !== process.env.VERCEL_PROJECT_ID || deployment.readyState !== 'READY' || deployment.target !== 'production' || sha !== process.env.RELEASE_SHA) process.exit(1);
+          NODE
+      - name: Apply hash-verified consent 1.2 cutover
+        env:
+          EXPECTED_SUPABASE_PROJECT_REF: vbdqjgwcmckutwehrbvo
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)"
+          node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import pg from 'pg';
+          const required = ['PRODUCTION_DATABASE_URL', 'PRODUCTION_URL', 'RELEASE_SHA', 'VERCEL_ORG_ID', 'VERCEL_PROJECT_ID', 'VERCEL_TOKEN'];
+          if (required.some((name) => !process.env[name]?.trim())) process.exit(1);
+          const headers = { Authorization: `Bearer ${process.env.VERCEL_TOKEN}` };
+          const projectResponse = await fetch(`https://api.vercel.com/v9/projects/${process.env.VERCEL_PROJECT_ID}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
+          if (!projectResponse.ok) process.exit(1);
+          const project = await projectResponse.json();
+          if (project.gitProviderOptions?.createDeployments !== 'disabled') process.exit(1);
+          const host = new URL(process.env.PRODUCTION_URL).hostname;
+          const aliasResponse = await fetch(`https://api.vercel.com/v4/aliases/${host}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
+          if (!aliasResponse.ok) process.exit(1);
+          const alias = await aliasResponse.json();
+          const deploymentResponse = await fetch(`https://api.vercel.com/v13/deployments/${alias.deployment?.id}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
+          if (!deploymentResponse.ok) process.exit(1);
+          const deployment = await deploymentResponse.json();
+          const deploymentSha = deployment.meta?.githubCommitSha ?? deployment.gitSource?.sha;
+          if (deployment.projectId !== process.env.VERCEL_PROJECT_ID || deployment.readyState !== 'READY' || deployment.target !== 'production' || deploymentSha !== process.env.RELEASE_SHA) process.exit(1);
+          const database = new URL(process.env.PRODUCTION_DATABASE_URL);
+          const projectRef = process.env.EXPECTED_SUPABASE_PROJECT_REF;
+          const direct = database.hostname === `db.${projectRef}.supabase.co` && database.username === 'postgres';
+          const pooled = database.hostname.endsWith('.pooler.supabase.com') && database.username === `postgres.${projectRef}`;
+          if ((database.protocol !== 'postgresql:' && database.protocol !== 'postgres:') || (!direct && !pooled) || database.pathname !== '/postgres' || database.search || database.hash) process.exit(1);
+          const source = fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8').replace(/\r\n/g, '\n');
+          function reviewedBody(functionName) {
+            const signature = source.indexOf(`FUNCTION public.${functionName}`);
+            const start = source.indexOf('AS $$', signature) + 5;
+            const end = source.indexOf('\n$$;', start);
+            if (signature < 0 || start < 5 || end < 0) process.exit(1);
+            return source.slice(start, end).trim();
+          }
+          const expected = new Map([
+            ['assert_session_processing_allowed', ['boolean', 'search_path=public, pg_temp']],
+            ['finalize_session_lead', ['TABLE(persisted boolean, consent_required boolean, qualification_status text, score integer, recommended_next_step text, lead_id bigint, handoff_id uuid, crm_record_id uuid, crm_revision integer, approved_draft_version integer, crm_queued boolean, approval_input_hash text, approved_reference_set_hash text)', 'search_path=public, extensions, pg_temp']],
+            ['relay_human_message', ['TABLE(persisted boolean, consent_required boolean, message_id bigint, handoff_id uuid, thread_id bigint)', 'search_path=public, pg_temp']],
+            ['reserve_handoff_send', ['boolean', 'search_path=public, pg_temp']],
+            ['delete_session_for_deletion_job', ['boolean', 'search_path=public, pg_temp']],
+          ]);
+          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL, ssl: { rejectUnauthorized: true } });
+          try {
+            await client.connect();
+            const recorded = await client.query("SELECT filename FROM public.schema_migrations WHERE version = '060'");
+            if (!recorded.rows.length) {
+              await client.query(fs.readFileSync('supabase/production-consent-1-2-cutover-060.sql', 'utf8'));
+            } else if (recorded.rows.length !== 1 || recorded.rows[0].filename !== '060_consent_1_2_cutover.sql') {
+              process.exit(1);
+            }
+            const live = await client.query(`
+              SELECT p.proname, p.prosrc, p.prosecdef, p.proconfig, l.lanname,
+                pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result,
+                has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_execute,
+                has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_execute,
+                has_function_privilege('service_role', p.oid, 'EXECUTE') AS service_role_execute,
+                EXISTS (
+                  SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+                  WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+                ) AS public_execute
+              FROM pg_proc p
+              JOIN pg_language l ON l.oid = p.prolang
+              WHERE p.oid IN (
+                'public.assert_session_processing_allowed(uuid)'::regprocedure,
+                'public.finalize_session_lead(uuid)'::regprocedure,
+                'public.relay_human_message(uuid,text,text)'::regprocedure,
+                'public.reserve_handoff_send(uuid,uuid)'::regprocedure,
+                'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure
+              )
+                AND EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '060' AND filename = '060_consent_1_2_cutover.sql')
+            `);
+            if (live.rows.length !== expected.size) process.exit(1);
+            for (const fn of live.rows) {
+              const policy = expected.get(fn.proname);
+              if (!policy || fn.prosrc.trim() !== reviewedBody(`${fn.proname}(`) || fn.prosecdef !== true || fn.lanname !== 'plpgsql' || fn.result !== policy[0] || !fn.proconfig?.includes(policy[1]) || fn.owner !== 'postgres') process.exit(1);
+              if (fn.public_execute !== false || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) process.exit(1);
+              expected.delete(fn.proname);
+            }
+            if (expected.size) process.exit(1);
+          } finally {
+            await client.end();
+          }
+          NODE
+      - name: Verify production cutover and recover workers
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$CRON_SECRET"
+          test -n "$PRODUCTION_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          test -n "$SUPABASE_URL"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null "$PRODUCTION_URL/api/health"
+          migration_path="$(mktemp)"
+          probe_dir="$(mktemp -d)"
+          trap 'rm -f "$migration_path"; rm -rf "$probe_dir"' EXIT
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            --output "$migration_path" \
+            "$SUPABASE_URL/rest/v1/schema_migrations?version=eq.060&select=version,filename"
+          node - "$migration_path" <<'NODE'
+          const fs = require('node:fs');
+          const rows = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (rows.length !== 1 || rows[0].version !== '060' || rows[0].filename !== '060_consent_1_2_cutover.sql') process.exit(1);
+          NODE
+          consented_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          session_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
+            --header "content-type: application/json" \
+            --header "origin: https://balance-assist.vercel.app" \
+            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/emergency-cutover-smoke\",\"consentVersion\":\"1.2\",\"consentedAt\":\"$consented_at\"}" \
+            --cookie-jar "$probe_dir/cookies" \
+            --output "$probe_dir/session.json" \
+            --write-out '%{http_code}' \
+            "$PRODUCTION_URL/api/sessions")"
+          test "$session_status" = "200"
+          session_id="$(node - "$probe_dir/session.json" <<'NODE'
+          const fs = require('node:fs');
+          const session = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (session.persisted !== true || typeof session.sessionId !== 'string') process.exit(1);
+          process.stdout.write(session.sessionId);
+          NODE
+          )"
+          deletion_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
+            --header "origin: https://balance-assist.vercel.app" \
+            --cookie "$probe_dir/cookies" \
+            --output "$probe_dir/deletion.json" \
+            --write-out '%{http_code}' \
+            "$PRODUCTION_URL/api/projects/$session_id/delete")"
+          test "$deletion_status" = "200"
+          curl --fail --silent --show-error --max-time 80 --request POST --header "Authorization: Bearer $CRON_SECRET" --output "$probe_dir/handoff.json" "$PRODUCTION_URL/api/internal/handoff-dispatch"
+          node - "$probe_dir/handoff.json" <<'NODE'
+          const fs = require('node:fs');
+          const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (result.ok !== true || !Array.isArray(result.results)) process.exit(1);
+          NODE
+          for _ in $(seq 1 25); do
+            curl --fail --silent --show-error --max-time 30 --request POST --header "Authorization: Bearer $CRON_SECRET" --output "$probe_dir/deletion-worker.json" "$PRODUCTION_URL/api/internal/deletion-worker"
+            node - "$probe_dir/deletion-worker.json" <<'NODE'
+          const fs = require('node:fs');
+          const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (result.ok !== true) process.exit(1);
+          NODE
+          done
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            --output "$probe_dir/session-after-deletion.json" \
+            "$SUPABASE_URL/rest/v1/chat_sessions?id=eq.$session_id&select=id"
+          node - "$probe_dir/session-after-deletion.json" <<'NODE'
+          const fs = require('node:fs');
+          const rows = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (!Array.isArray(rows) || rows.length !== 0) process.exit(1);
+          NODE
+          for worker in handoff-dispatch deletion-worker; do
+            curl --fail --silent --show-error --max-time 15 --request POST \
+              --header "Authorization: Bearer $CRON_SECRET" \
+              --header "Content-Type: application/json" \
+              --data "{\"worker\":\"$worker\"}" \
+              "$PRODUCTION_URL/api/internal/scheduler-heartbeat" > /dev/null
+          done
+          curl --fail --silent --show-error --max-time 30 --header "Authorization: Bearer $CRON_SECRET" "$PRODUCTION_URL/api/internal/scheduler-health" > /dev/null
