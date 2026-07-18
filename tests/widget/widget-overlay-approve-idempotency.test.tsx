@@ -105,10 +105,10 @@ async function startAiConversation() {
   fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
 
   const input = (await waitFor(() => {
-    const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;
+    const el = document.querySelector('textarea[placeholder]') as HTMLTextAreaElement | null;
     if (!el) throw new Error('input not yet rendered');
     return el;
-  })) as HTMLInputElement;
+  })) as HTMLTextAreaElement;
 
   await waitFor(() => {
     expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);

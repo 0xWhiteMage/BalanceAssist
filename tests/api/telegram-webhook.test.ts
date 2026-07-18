@@ -311,6 +311,69 @@ describe('POST /api/telegram/webhook', () => {
     expect(body).toMatchObject({ ok: true, ignored: 'wrong-chat' });
   });
 
+  it('preserves duplicate handling without releasing an existing claim', async () => {
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    const deleteMock = vi.fn();
+    createServerSupabaseClientMock.mockReturnValue({
+      from: vi.fn(() => ({
+        insert: vi.fn(async () => ({ error: { code: '23505', message: 'duplicate' } })),
+        delete: deleteMock
+      }))
+    });
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const response = await POST(new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-telegram-bot-api-secret-token': 'secret' },
+      body: JSON.stringify({ update_id: 91 })
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, ignored: 'duplicate-update' });
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the replay claim and returns 500 when thread lookup fails', async () => {
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    process.env.TELEGRAM_CHAT_ID = '123456';
+    const releaseEqMock = vi.fn(async () => ({ error: null }));
+    createServerSupabaseClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === 'processed_telegram_updates') return {
+          insert: vi.fn(async () => ({ error: null })),
+          delete: vi.fn(() => ({ eq: releaseEqMock }))
+        };
+        if (table === 'sessions') return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: null, error: { code: '08006', message: 'connection failure' } }))
+            }))
+          }))
+        };
+        throw new Error(`Unexpected table: ${table}`);
+      })
+    });
+
+    const { POST } = await import('@/app/api/telegram/webhook/route');
+    const response = await POST(new Request('http://localhost/api/telegram/webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-telegram-bot-api-secret-token': 'secret' },
+      body: JSON.stringify({
+        update_id: 92,
+        message: {
+          message_id: 100,
+          message_thread_id: 77,
+          text: 'Retry me',
+          chat: { id: 123456, type: 'supergroup' }
+        }
+      })
+    }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: 'session_lookup_failed' });
+    expect(releaseEqMock).toHaveBeenCalledWith('update_id', 92);
+  });
+
   it('resolves a team reply by its persisted provider parent message when no topic is present', async () => {
     process.env.TELEGRAM_WEBHOOK_SECRET = 'secret';
     process.env.TELEGRAM_CHAT_ID = '123456';

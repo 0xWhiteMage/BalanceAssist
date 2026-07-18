@@ -71,8 +71,8 @@ test('exports the exact private AI analysis formats and limits', () => {
     acceptedFormats: ['PNG', 'JPEG', 'GIF', 'WebP', 'PDF', 'TXT', 'CSV'],
     accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,.txt,.csv',
     maxFiles: 5,
-    maxFileSizeBytes: 10 * 1024 * 1024,
-    maxTotalSizeBytes: 25 * 1024 * 1024,
+    maxFileSizeBytes: 4 * 1024 * 1024,
+    maxTotalSizeBytes: 4 * 1024 * 1024,
     maxExtractedCharacters: 4000
   });
 });
@@ -84,13 +84,13 @@ describe('validateFile', () => {
     expect(validateFile(file, buf)).toEqual({ ok: false, reason: 'File is empty.' });
   });
 
-  test('rejects files exceeding 10 MB', () => {
-    const buf = new ArrayBuffer(11 * 1024 * 1024);
+  test('rejects files exceeding 4 MB', () => {
+    const buf = new ArrayBuffer(5 * 1024 * 1024);
     const file = makeFileWithBytes('big.png', [], 'image/png');
-    Object.defineProperty(file, 'size', { value: 11 * 1024 * 1024 });
+    Object.defineProperty(file, 'size', { value: 5 * 1024 * 1024 });
     expect(validateFile(file, buf)).toEqual({
       ok: false,
-      reason: 'File is too large. Maximum size is 10 MB.'
+      reason: 'File is too large. Maximum size is 4 MB.'
     });
   });
 
@@ -239,9 +239,9 @@ describe('validateFileBatch', () => {
     });
   });
 
-  test('rejects batch exceeding 25 MB total', () => {
+  test('rejects batch exceeding 4 MB total', () => {
     const files = Array.from({ length: 3 }, (_, i) => {
-      const buf = new ArrayBuffer(9 * 1024 * 1024);
+      const buf = new ArrayBuffer(2 * 1024 * 1024);
       const view = new Uint8Array(buf);
       view[0] = 0x89;
       view[1] = 0x50;
@@ -253,20 +253,20 @@ describe('validateFileBatch', () => {
     });
     expect(validateFileBatch(files)).toEqual({
       ok: false,
-      reason: 'Total file size exceeds 25 MB limit.'
+      reason: 'Total file size exceeds 4 MB limit.'
     });
   });
 
-  test('rejects batch if total size exceeds 25 MB even with few files', () => {
+  test('rejects batch if total size exceeds 4 MB even with few files', () => {
     const files = Array.from({ length: 3 }, (_, i) => {
-      const buf = new ArrayBuffer(9 * 1024 * 1024);
+      const buf = new ArrayBuffer(2 * 1024 * 1024);
       const file = makeFileWithBytes(`big${i}.png`, [], 'image/png');
       Object.defineProperty(file, 'size', { value: buf.byteLength });
       return { file, buffer: buf };
     });
     expect(validateFileBatch(files)).toEqual({
       ok: false,
-      reason: 'Total file size exceeds 25 MB limit.'
+      reason: 'Total file size exceeds 4 MB limit.'
     });
   });
 

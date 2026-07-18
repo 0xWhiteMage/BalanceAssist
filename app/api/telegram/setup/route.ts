@@ -134,7 +134,7 @@ export async function POST(request: Request) {
 
     const setWebhook = await callTelegram<true>(botToken, 'setWebhook', {
       url: parsed.data.webhookUrl,
-      drop_pending_updates: parsed.data.dropPending ?? true,
+      drop_pending_updates: parsed.data.dropPending ?? false,
       allowed_updates: ['message', 'message_reaction'],
       secret_token: webhookSecret
     });

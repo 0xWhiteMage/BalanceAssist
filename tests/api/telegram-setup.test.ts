@@ -129,5 +129,6 @@ describe('telegram/setup route security', () => {
 
     const setWebhookCall = telegramCalls.find((call) => call.url.endsWith('/setWebhook'));
     expect(setWebhookCall?.body?.secret_token).toBe('webhook-secret');
+    expect(setWebhookCall?.body?.drop_pending_updates).toBe(false);
   });
 });

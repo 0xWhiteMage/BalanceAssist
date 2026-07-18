@@ -24,21 +24,23 @@ function mockPrivateStorageAvailable() {
   return fetchMock;
 }
 
-test('discloses the exact AI formats, limits, extraction behavior, and DeepSeek flow before selection', async () => {
+test('discloses the exact AI formats, proxy-safe limits, extraction behavior, and AI flow before selection', async () => {
   mockPrivateStorageAvailable();
   const { container } = render(
-    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-disclosure" />
   );
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
 
   const disclosure = screen.getByTestId('private-analysis-upload-disclosure');
   expect(disclosure).toHaveTextContent(/PNG, JPEG, GIF, WebP, PDF, TXT, and CSV/i);
   expect(disclosure).toHaveTextContent(/up to 5 files/i);
-  expect(disclosure).toHaveTextContent(/10 MB each/i);
-  expect(disclosure).toHaveTextContent(/25 MB total/i);
+  expect(disclosure).toHaveTextContent(/4 MB each/i);
+  expect(disclosure).toHaveTextContent(/4 MB total/i);
   expect(disclosure).toHaveTextContent(/TXT and PDF.*up to 4,000 characters/i);
   expect(disclosure).toHaveTextContent(/images and CSV may yield no extracted text/i);
-  expect(disclosure).toHaveTextContent(/extracted text.*DeepSeek/i);
+  expect(disclosure).toHaveTextContent(/extracted text.*AI processing service/i);
+  expect(disclosure).toHaveTextContent(/no readable text.*cannot inform the AI draft/i);
+  expect(disclosure).not.toHaveTextContent(/DeepSeek/i);
   expect(disclosure).toHaveTextContent(/do not prove.*non-confidential/i);
   expect(container.querySelector('input[type="file"]')).toHaveAttribute(
     'accept',
@@ -52,6 +54,7 @@ test('does not open the selector when current message context is confidential', 
     <AttachmentDropzone
       onAddLink={vi.fn()}
       onAddFile={vi.fn()}
+      sessionId="sess-context"
       messageContext="The attached brief contains confidential information"
     />
   );
@@ -176,7 +179,7 @@ test('requires an HTTPS URL before invoking the canonical mutation', async () =>
 });
 
 test('renders the uppercase section header and short subhead describing the upload affordance', () => {
-  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-unavailable-copy" />);
   expect(
     screen.getByText(/share files to help us understand your project/i)
   ).toBeInTheDocument();
@@ -186,7 +189,7 @@ test('renders the uppercase section header and short subhead describing the uplo
 });
 
 test('dropzone states that file sharing is unavailable and disables selection', () => {
-  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+  render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-unavailable" />);
   expect(screen.getByText(/file sharing unavailable/i)).toBeInTheDocument();
   expect(screen.getByText(/add a reference link above instead/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /file sharing unavailable/i })).toBeDisabled();
@@ -207,10 +210,25 @@ test('enables file selection only after the server verifies private storage', as
     }
     return new Response('{}', { status: 404 });
   }) as unknown as typeof fetch;
-  const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+  const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-ready" />);
 
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
   expect(screen.getByText(/never sent to the team/i)).toBeInTheDocument();
+});
+
+test('keeps file selection disabled until a secure session ID exists', async () => {
+  const fetchMock = mockPrivateStorageAvailable();
+  const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
+
+  await waitFor(() => expect(screen.getByText(/secure session starts/i)).toBeInTheDocument());
+  expect(screen.getByRole('button', { name: /secure session starting/i })).toBeDisabled();
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  expect(input).toBeDisabled();
+
+  fireEvent.change(input, { target: { files: [new File(['blocked'], 'blocked.txt', { type: 'text/plain' })] } });
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/secure session is still starting/i));
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toEqual([]);
+  expect(input.value).toBe('');
 });
 
 test('URL submit button uses the uppercase ADD LINK pill copy', () => {
@@ -290,4 +308,62 @@ test('forwards only the server-derived analysis payload to the draft callback', 
   const uploadCall = vi.mocked(global.fetch).mock.calls.find(([, init]) => init?.method === 'POST' && init.body instanceof FormData);
   expect((uploadCall?.[1]?.body as FormData).get('mode')).toBe('analysis');
   expect(new Headers(uploadCall?.[1]?.headers).get('x-upload-mode')).toBe('analysis');
+  expect(input.value).toBe('');
+});
+
+test('awaits file analyses sequentially and reports stored files with no readable text', async () => {
+  let releaseFirst: (() => void) | undefined;
+  const firstAnalysis = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const onFileAnalyzed = vi.fn((fileName: string) => fileName === 'first.txt' ? firstAnalysis : undefined);
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/consent')) return new Response('{}', { status: 200 });
+    if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
+    return new Response(JSON.stringify({
+      analyses: [
+        { extractedText: 'First analysis' },
+        { extractedText: 'Second analysis' },
+        { extractedText: '' }
+      ]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as unknown as typeof fetch;
+  const { container } = render(
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} onFileAnalyzed={onFileAnalyzed} sessionId="sess-sequential" consent={analysisConsent} />
+  );
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [
+    new File(['first'], 'first.txt', { type: 'text/plain' }),
+    new File(['second'], 'second.txt', { type: 'text/plain' }),
+    new File(['image'], 'image.csv', { type: 'text/csv' })
+  ] } });
+
+  await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledTimes(1));
+  expect(onFileAnalyzed).toHaveBeenLastCalledWith('first.txt', 'First analysis');
+  releaseFirst?.();
+  await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledTimes(2));
+  expect(onFileAnalyzed).toHaveBeenLastCalledWith('second.txt', 'Second analysis');
+  expect(await screen.findByText(/no readable text was found for AI analysis/i)).toBeInTheDocument();
+  expect(input.value).toBe('');
+});
+
+test('maps server error codes and clears the input so the same file can be retried', async () => {
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/consent')) return new Response('{}', { status: 200 });
+    if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
+    return new Response(JSON.stringify({ code: 'private_storage_unavailable', error: 'internal detail' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }) as unknown as typeof fetch;
+  const { container } = render(
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-retry" consent={analysisConsent} />
+  );
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  const file = new File(['retry me'], 'retry.txt', { type: 'text/plain' });
+  fireEvent.change(input, { target: { files: [file] } });
+
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/private file storage is temporarily unavailable/i));
+  expect(screen.getByRole('alert')).not.toHaveTextContent(/internal detail/i);
+  expect(input.value).toBe('');
 });

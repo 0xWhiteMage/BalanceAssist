@@ -53,7 +53,7 @@ export const shareWorkSchema = z
     slugs: z
       .array(z.string().min(1).max(80))
       .min(1)
-      .max(8)
+      .max(5)
       .describe('Slugs of the works to share, drawn from docs/balance-works.json (1-8 entries).'),
     category: z
       .enum(['reference', 'mood', 'pitch'])
@@ -94,7 +94,7 @@ export function sanitizeShareWork(
     if (seen.has(slug)) continue;
     seen.add(slug);
     cleaned.push(slug);
-    if (cleaned.length >= 8) break;
+    if (cleaned.length >= 5) break;
   }
 
   if (cleaned.length === 0) return fallback;

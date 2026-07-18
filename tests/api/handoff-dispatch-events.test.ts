@@ -176,7 +176,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
 
     expect(response.status).toBe(200);
     expect(ensureTelegramTopicMock).toHaveBeenCalledWith(expect.anything(), 'sess-relay', null, null, 'sess-rel');
-    expect(sendTelegramMessageMock).toHaveBeenCalledWith('Private user message', { threadId: 77 });
+    expect(sendTelegramMessageMock).toHaveBeenCalledWith('Private user message', { threadId: 77, plainText: true });
     expect(persistTelegramMessageDeliveryMock).toHaveBeenCalledWith(expect.anything(), 42, 77, 501);
     expect(persistTelegramMessageDeliveryMock.mock.invocationCallOrder[0]).toBeLessThan(markDeliveredMock.mock.invocationCallOrder[0]);
   });

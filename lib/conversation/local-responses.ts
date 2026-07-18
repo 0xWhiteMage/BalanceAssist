@@ -14,13 +14,14 @@ type ConversationContext = {
 
 function getNextMissingFieldPrompt(draft: LeadDraft): string {
   if (!draft.projectScope.trim()) return 'Tell me a bit about the project you want to create.';
-  if (!(draft.projectType ?? '').trim() && !draft.service) return 'What type of creative output are you looking for — for example 2D animation, motion graphics, or a brand film?';
+  if (!draft.projectObjective.trim()) return 'What should this project achieve?';
+  if (!draft.audience.trim()) return 'Who is the primary audience?';
+  if (!draft.intendedOutputs.trim()) return 'What outputs or deliverables do you expect?';
   if (!draft.timelineBand) return 'What timeline are you working with?';
   if (!draft.budgetBand) return 'What budget range are you working with?';
+  if (!draft.referencesStatus.trim()) return 'Would you like to add any references, or skip that for now?';
   if (!draft.contactName.trim()) return 'What name should I put on the brief?';
-  if (!draft.contactEmail.trim()) return 'What email should the Balance team use to follow up?';
-  if (!draft.consentToShare) return 'Is it okay to share this brief with the Balance team?';
-  return 'Would you like to approve the brief for the team or continue refining it?';
+  return 'Would you like to review and send the brief, or continue refining it?';
 }
 
 export { getNextMissingFieldPrompt };

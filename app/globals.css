@@ -14,8 +14,8 @@
   --balance-border-subtle: rgba(219, 181, 128, 0.30);
   --balance-surface: rgba(29, 29, 29, 0.96);
   --balance-surface-raised: #242321;
-  --balance-ui: "Futura PT", Arial, sans-serif;
-  --balance-condensed: "Futura PT Condensed", "Arial Narrow", Arial, sans-serif;
+  --balance-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --balance-condensed: system-ui, -apple-system, "Segoe UI", sans-serif;
   --balance-editorial: Calluna, Georgia, serif;
   --balance-radius: 12px;
   --balance-shadow: 0 20px 56px rgba(0, 0, 0, 0.52);
@@ -97,16 +97,16 @@ a {
 }
 
 .balance-widget-dialog {
-  position: absolute;
-  right: 0;
-  bottom: 72px;
-  width: min(380px, calc(100vw - 48px));
-  height: min(580px, calc(100dvh - 120px));
+  position: fixed;
+  inset: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  width: min(720px, calc(100vw - 48px));
+  height: min(760px, calc(100dvh - 48px));
+  margin: auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--balance-border);
-  border-radius: 16px;
+  border-radius: 10px;
   background: linear-gradient(180deg, var(--balance-black), var(--balance-charcoal));
   color: var(--balance-ink);
   box-shadow: var(--balance-shadow);
@@ -114,7 +114,7 @@ a {
 }
 
 .balance-widget-dialog[data-rail="true"] {
-  width: min(820px, calc(100vw - 48px));
+  width: min(1100px, calc(100vw - 48px));
 }
 
 .balance-widget-main {
@@ -125,7 +125,7 @@ a {
 }
 
 .balance-widget-rail {
-  width: 280px;
+  width: clamp(280px, 29vw, 320px);
   flex-shrink: 0;
   overflow-y: auto;
   border-right: 1px solid var(--balance-border-subtle);
@@ -142,8 +142,25 @@ a {
   gap: 12px;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 16px 14px;
+  padding: 22px 20px;
   scroll-behavior: smooth;
+}
+
+.balance-widget-transcript {
+  width: min(100%, 720px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.balance-widget-quick-actions {
+  width: min(100%, 720px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 auto;
+  padding: 8px 20px 0;
 }
 
 .balance-widget-chat[hidden],
@@ -182,11 +199,36 @@ a {
   display: flex;
   flex-wrap: wrap;
   flex-shrink: 0;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+  padding: 12px 20px max(12px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--balance-border-subtle);
   background: rgba(16, 16, 16, 0.88);
+}
+
+.balance-widget-composer-inner {
+  position: relative;
+  width: min(100%, 720px);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.balance-widget-approved-actions {
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding: 10px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--balance-border-subtle);
+  color: #4ade80;
+  font-size: 12px;
+}
+
+.balance-widget-approved-actions > strong {
+  margin-right: auto;
 }
 
 .balance-widget-input-label {
@@ -200,13 +242,17 @@ a {
 .balance-widget-input {
   min-width: 0;
   flex: 1;
-  padding: 11px 12px;
+  min-height: 46px;
+  max-height: 120px;
+  padding: 12px 14px;
   border: 1px solid var(--balance-border-subtle);
-  border-radius: 20px;
+  border-radius: 8px;
   outline: none;
   background: rgba(255, 255, 255, 0.035);
   color: var(--balance-ink);
-  font: 13px var(--balance-ui);
+  font: 14px/1.5 var(--balance-ui);
+  resize: none;
+  overflow-y: auto;
 }
 
 .balance-widget-input:focus {
@@ -311,7 +357,7 @@ a {
 }
 
 .balance-message-bubble {
-  border-radius: 14px !important;
+  border-radius: 8px !important;
   border-color: var(--balance-border-subtle) !important;
   background: rgba(255, 255, 255, 0.045) !important;
 }
@@ -405,6 +451,9 @@ a {
   .balance-widget-main { width: 100%; }
   .balance-widget-rail { width: 100%; border-right: 0; }
   .balance-widget-chat { padding: 16px 14px; }
+  .balance-widget-transcript { width: 100%; }
+  .balance-widget-quick-actions { padding-inline: 14px; }
+  .balance-widget-composer { padding-inline: 14px; }
   .balance-widget-input { font-size: 16px; }
 
   .balance-widget-launcher {
@@ -413,6 +462,17 @@ a {
     bottom: max(12px, env(safe-area-inset-bottom));
   }
 
+}
+
+@media (min-width: 640px) and (max-height: 520px) {
+  .balance-widget-dialog,
+  .balance-widget-dialog[data-rail="true"] {
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    max-width: none;
+    border-radius: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

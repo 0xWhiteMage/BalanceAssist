@@ -1469,7 +1469,7 @@ describe('POST /api/chat', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  test('returns one redacted unavailable error when DeepSeek rejects the request', async () => {
+  test('returns a redacted, draft-aware retry prompt when the AI provider rejects the request', async () => {
     process.env.DEEPSEEK_API_KEY = 'deepseek-key';
     process.env.MINIMAX_API_KEY = 'minimax-key';
     process.env.OPENAI_API_KEY = 'openai-key';
@@ -1479,13 +1479,16 @@ describe('POST /api/chat', () => {
       messages: [{ role: 'user', content: 'ordinary provider-dependent question' }]
     });
 
-    expect(res.status).toBe(503);
-    expect(data).toEqual({ outcome: 'provider_unavailable', error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+    expect(res.status).toBe(200);
+    expect(data).toEqual({
+      outcome: 'non_persistence',
+      message: expect.stringMatching(/did not save that answer.*Tell me a bit about the project/is)
+    });
     expect(JSON.stringify(data)).not.toMatch(/SECRET-42|429|minimax|openai|deepseek-key/i);
     expect(global.fetch).toHaveBeenCalledOnce();
   });
 
-  test('returns the same redacted unavailable error when DeepSeek times out', async () => {
+  test('returns the same redacted, draft-aware retry prompt when the AI provider times out', async () => {
     vi.useFakeTimers();
     try {
       process.env.DEEPSEEK_API_KEY = 'deepseek-key';
@@ -1504,8 +1507,11 @@ describe('POST /api/chat', () => {
       await vi.advanceTimersByTimeAsync(15_000);
       const { res, data } = await responsePromise;
 
-      expect(res.status).toBe(503);
-      expect(data).toEqual({ outcome: 'provider_unavailable', error: 'Chat service unavailable', detail: 'chat_provider_unavailable' });
+      expect(res.status).toBe(200);
+      expect(data).toEqual({
+        outcome: 'non_persistence',
+        message: expect.stringMatching(/did not save that answer.*Tell me a bit about the project/is)
+      });
       expect(JSON.stringify(data)).not.toMatch(/SECRET-43|AbortError|deepseek-key/i);
     } finally {
       vi.useRealTimers();
@@ -1529,6 +1535,41 @@ describe('POST /api/chat', () => {
     expect(data.messages[0]).toMatch(/production is one of our core service pillars/i);
     expect(data.sharedWork.entries.length).toBeGreaterThan(0);
     expect(data.sharedWork.entries.length).toBeLessThanOrEqual(5);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('resolves a pending relevant-work qualifier without replaying prior user text', async () => {
+    global.fetch = vi.fn();
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'animation' }],
+      context: { workSearchPending: true, sharedWorkSlugs: [], isTeamConnected: false }
+    });
+
+    expect(res.status).toBe(200);
+    expect(data.outcome).toBe('non_persistence');
+    expect(data.sharedWork.entries.length).toBeGreaterThan(0);
+    expect(data.sharedWork.entries.length).toBeLessThanOrEqual(5);
+    expect(data.messages[0]).toMatch(/Which one should we use as a reference point\?/i);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('show me more excludes work already displayed by the server', async () => {
+    global.fetch = vi.fn();
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({
+      messages: [{ role: 'user', content: 'show me more' }],
+      context: { sharedWorkSlugs: ['milo', 'razer', 'msi'], isTeamConnected: false }
+    });
+
+    expect(res.status).toBe(200);
+    const slugs = data.sharedWork.entries.map((entry: { slug: string }) => entry.slug);
+    expect(slugs).not.toContain('milo');
+    expect(slugs).not.toContain('razer');
+    expect(slugs).not.toContain('msi');
+    expect(data.messages[0]).toMatch(/Which direction feels closest.*\?/i);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -1589,7 +1630,7 @@ describe('POST /api/chat', () => {
     expect(data.sharedWork.entries[0].image_url).toMatch(/squarespace-cdn/);
   });
 
-  test('share_work tool call drops invalid slugs and caps the result at 8 entries', async () => {
+  test('share_work tool call drops invalid slugs and caps the result at 5 entries', async () => {
     global.fetch = vi.fn(async () => makeToolCallResponse(
       'Here are a few pieces.',
       'share_work',
@@ -1619,7 +1660,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.sharedWork.entries.length).toBe(8);
+    expect(data.sharedWork.entries.length).toBe(5);
     const slugs = data.sharedWork.entries.map((e: { slug: string }) => e.slug);
     expect(slugs).not.toContain('made-up-slug');
     expect(data.sharedWork.entries[0].category).toBe('pitch');

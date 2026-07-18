@@ -33,10 +33,16 @@ import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } fr
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 import { classifyUrl, getReferencePresenceStatus, normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
 import { MAX_PROJECT_SCOPE_CHARACTERS, type TrustFeedbackResponse } from '@/lib/api/contracts';
+import { getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
+import { detectProjectIntent } from '@/lib/conversation/project-intent';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
 const OPTIONAL_ANSWER_ACTIONS = ['Not sure yet', 'Skip', 'Prefer not to share'] as const;
 const DELETION_RECEIPT_STORAGE_KEY = 'balance-assist-deletion-receipt';
+
+function isReviewNavigationOnly(text: string) {
+  return /^Your (?:core )?brief is ready\.\s*(?:Tap|Review)\b.*(?:tab|panel|right).*\.?$/i.test(text.trim());
+}
 
 let messageCounter = 0;
 function nextId() {
@@ -44,8 +50,8 @@ function nextId() {
   return `msg-${messageCounter}`;
 }
 
-export const WIDGET_WIDTH_CHAT_ONLY = 'min(380px, calc(100vw - 48px))';
-export const WIDGET_WIDTH_WITH_RAIL = 'min(820px, calc(100vw - 48px))';
+export const WIDGET_WIDTH_CHAT_ONLY = 'min(720px, calc(100vw - 48px))';
+export const WIDGET_WIDTH_WITH_RAIL = 'min(1100px, calc(100vw - 48px))';
 
 export function getWidgetWidth({
   isTeamConnected,
@@ -204,6 +210,7 @@ export function WidgetOverlay({
   const humanFileRequestNoteRef = useRef(humanFileRequestNote);
   const humanScheduleRequestOpenRef = useRef(humanScheduleRequestOpen);
   const attachmentDialogRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
 
   messagesRef.current = messages;
   draftRef.current = draft;
@@ -443,6 +450,7 @@ export function WidgetOverlay({
 
   const ensureSession = sessionDraft.ensureSession;
   const loadOrCreateSession = sessionDraft.loadOrCreateSession;
+  const getDraftSnapshot = sessionDraft.getDraftSnapshot;
 
   const startConversation = useCallback(async () => {
     if (aiBootstrapCompletedRef.current || isTeamConnected || !noticeConsent) return;
@@ -465,14 +473,24 @@ export function WidgetOverlay({
       }
 
       setHasStarted(true);
-      await advanceStep('intro', createDefaultLeadDraft(), bootstrapIsCurrent);
+      const restoredDraft = getDraftSnapshot();
+      if (detectProjectIntent(restoredDraft)) {
+        const restoredStep = getNextConversationStep(restoredDraft);
+        setCurrentStep(restoredStep);
+        await botSay(
+          `Welcome back. I restored your temporary brief. ${getNextMissingFieldPrompt(restoredDraft)}`,
+          { isValid: bootstrapIsCurrent }
+        );
+      } else {
+        await advanceStep('intro', createDefaultLeadDraft(), bootstrapIsCurrent);
+      }
       if (bootstrapIsCurrent()) aiBootstrapCompletedRef.current = true;
     } finally {
       if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) {
         aiBootstrapInFlightGenerationRef.current = null;
       }
     }
-  }, [advanceStep, isTeamConnected, loadOrCreateSession, noticeConsent]);
+  }, [advanceStep, botSay, getDraftSnapshot, isTeamConnected, loadOrCreateSession, noticeConsent]);
 
   function handleClose() {
     bootstrapGenerationRef.current += 1;
@@ -562,13 +580,17 @@ export function WidgetOverlay({
       !cancelRef.current &&
       !confidentialDiversionRef.current;
     try {
-      const llmMessages = history
-        .filter((message) => message.sender === 'user' && message.text.trim().length > 0)
-        .slice(-6)
-        .map((message) => ({
-          role: 'user' as const,
-          content: message.text
-        }));
+      const latestUser = [...history].reverse().find(
+        (message) => message.sender === 'user' && message.text.trim().length > 0
+      );
+      if (!latestUser) return;
+      const sharedWorkSlugs = history.flatMap((message) =>
+        message.sharedWork?.entries.map((entry) => entry.slug) ?? []
+      );
+      const lastBotText = [...history].reverse().find(
+        (message) => message.sender === 'bot' && message.text.trim().length > 0
+      )?.text ?? '';
+      const llmMessages = [{ role: 'user' as const, content: latestUser.text }];
 
       const capturedFields = computeCapturedFieldsFromDraft(draftRef.current);
 
@@ -579,7 +601,9 @@ export function WidgetOverlay({
           step: stepRef.current,
           isTeamConnected: teamRef.current,
           sessionId: sessionId ?? undefined,
-          capturedFields
+          capturedFields,
+          workSearchPending: /format or service|what kind of work|which direction/i.test(lastBotText),
+          sharedWorkSlugs: [...new Set(sharedWorkSlugs)].slice(-20)
         }
       });
       if (!isCurrent()) return;
@@ -632,14 +656,10 @@ export function WidgetOverlay({
         return;
       }
 
-      const replyChunks: string[] = (() => {
-        const replies = data.replies.length > 0
-          ? data.replies.map((reply) => reply.text)
-          : [CHAT_UNAVAILABLE_MESSAGE];
-        return data.briefReady
-          ? replies.slice(0, -1)
-          : replies;
-      })();
+      const replyChunks = (data.replies.length > 0
+        ? data.replies.map((reply) => reply.text)
+        : [CHAT_UNAVAILABLE_MESSAGE])
+        .filter((reply) => !data.briefReady || !isReviewNavigationOnly(reply));
       const sharedWork = data.sharedWork
         ? {
             entries: data.sharedWork.entries.map((entry) => ({
@@ -660,6 +680,12 @@ export function WidgetOverlay({
         }
       }
 
+      if (data.outcome === 'draft_persisted') {
+        for (const recap of data.stageRecaps) {
+          await botSay(recap, { isValid: isCurrent });
+          if (!isCurrent()) return;
+        }
+      }
       for (let i = 0; i < replyChunks.length; i++) {
         const isFirst = i === 0;
         const chunk = replyChunks[i];
@@ -668,12 +694,6 @@ export function WidgetOverlay({
           isValid: isCurrent
         });
         if (!isCurrent()) return;
-      }
-      if (data.outcome === 'draft_persisted') {
-        for (const recap of data.stageRecaps) {
-          await botSay(recap, { isValid: isCurrent });
-          if (!isCurrent()) return;
-        }
       }
     } catch {
       if (!isCurrent()) return;
@@ -1051,6 +1071,7 @@ export function WidgetOverlay({
     submitInFlightRef.current = true;
     const submitGeneration = ++submitGenerationRef.current;
     setInputValue('');
+    if (composerInputRef.current) composerInputRef.current.style.height = 'auto';
 
     try {
       const step = conversationSteps[currentStep];
@@ -1217,8 +1238,7 @@ export function WidgetOverlay({
     }
 
     if (isTeamConnected) {
-      await ensureSession();
-      const id = sessionId;
+      const id = await ensureSession();
       if (!id) return;
 
       const confirmed =
@@ -1301,6 +1321,7 @@ export function WidgetOverlay({
   const showHumanFallback = entryPath === 'human' && !humanRequested;
   const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
   const briefReady = entryPath === 'ai' && !isTeamConnected && isBriefReadyForApproval(draft);
+  const showContextBrief = entryPath === 'ai' && !isTeamConnected && hasProjectIntent && !briefApproved;
   const optionalAnswerActions =
     currentStep === 'objective' || currentStep === 'timeline'
       ? [OPTIONAL_ANSWER_ACTIONS[0]]
@@ -1325,7 +1346,7 @@ export function WidgetOverlay({
           aria-labelledby="balance-assist-dialog-title"
           tabIndex={-1}
           className="balance-widget-dialog balance-widget-wrap balance-widget-motion"
-          data-rail={!isTeamConnected && hasProjectIntent ? 'true' : 'false'}
+          data-rail={showContextBrief ? 'true' : 'false'}
         >
           {/* Calendly View Overlay */}
           {view === 'calendly' && calendlyUrl && (
@@ -1360,7 +1381,7 @@ export function WidgetOverlay({
             onClose={handleClose}
           />
 
-          {briefReady && isMobile && (
+          {briefReady && showContextBrief && isMobile && (
             <div
               role="status"
               aria-live="polite"
@@ -1403,7 +1424,7 @@ export function WidgetOverlay({
             </div>
           )}
 
-          {isMobile && !isTeamConnected && hasProjectIntent && (
+          {isMobile && showContextBrief && (
             <div
               role="tablist"
               aria-label="Widget sections"
@@ -1481,7 +1502,7 @@ export function WidgetOverlay({
           )}
 
           <div className="balance-widget-main">
-            {!isTeamConnected && hasProjectIntent && (
+            {showContextBrief && (
               <div
                 data-testid="review-rail"
                 id="widget-brief-panel"
@@ -1531,9 +1552,9 @@ export function WidgetOverlay({
               id="widget-chat-panel"
               role={isMobile ? 'tabpanel' : undefined}
               aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
-              aria-hidden={isMobile && tabMode !== 'chat' ? 'true' : undefined}
-              hidden={isMobile && tabMode !== 'chat'}
-              inert={isMobile && tabMode !== 'chat' ? true : undefined}
+               aria-hidden={isMobile && showContextBrief && tabMode !== 'chat' ? 'true' : undefined}
+               hidden={isMobile && showContextBrief && tabMode !== 'chat'}
+               inert={isMobile && showContextBrief && tabMode !== 'chat' ? true : undefined}
               tabIndex={0}
               className="balance-widget-chat balance-widget-motion"
             >
@@ -1617,7 +1638,7 @@ export function WidgetOverlay({
                 ) : showHumanFallback ? (
                   <HumanFallbacks calendlyUrl={configuredCalendlyUrl} unavailable={sessionUnavailable} />
                 ) : (
-                  <div role="log" aria-label="Conversation transcript" aria-live="polite" aria-relevant="additions text" style={{ display: 'contents' }}>
+                  <div role="log" aria-label="Conversation transcript" aria-live="polite" aria-relevant="additions text" className="balance-widget-transcript">
                     {messages.map((msg) => (
                       <MessageBubble key={msg.id} message={msg} onInlineCardClick={handleInlineCardClick} />
                     ))}
@@ -1639,8 +1660,69 @@ export function WidgetOverlay({
             </div>
           </div>
 
-          {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 12px 0' }}>
+          {briefApproved && !isTeamConnected && (
+            <div
+              data-testid="approve-confirmation"
+              className="balance-widget-approved-actions"
+            >
+              <strong role="status" aria-live="polite">
+                {telegramBroadcastStatus === 'sent'
+                  ? 'Delivered to the Balance team'
+                  : telegramBroadcastStatus === 'queued'
+                    ? 'Queued for the Balance team'
+                    : 'Brief saved'}
+              </strong>
+              <button
+                type="button"
+                className="balance-widget-action"
+                aria-label="Book a catch-up call"
+                onClick={() => {
+                  if (!configuredCalendlyUrl) {
+                    void botSay('Scheduling is currently unavailable. Please ask the Balance team to arrange a time.');
+                    return;
+                  }
+                  setCalendlyUrl(configuredCalendlyUrl);
+                  setView('calendly');
+                }}
+              >
+                Book a catch-up
+              </button>
+              <button type="button" className="balance-widget-action" onClick={() => void handleTeamConnect()}>
+                Talk to a human
+              </button>
+              <button
+                type="button"
+                className="balance-widget-action"
+                onClick={() => {
+                  setRailMode('summary');
+                  sessionDraft.reopenApproval();
+                  if (isMobile) setTabMode('brief');
+                }}
+              >
+                Refine brief
+              </button>
+              {sessionId && !deletionFrozen && (
+                <TrustFeedback
+                  submitted={trustFeedbackResponse !== null}
+                  onSubmit={handleTrustFeedback}
+                />
+              )}
+            </div>
+          )}
+
+          {canInteract && isMobile && showContextBrief && tabMode === 'brief' && (
+            <button
+              type="button"
+              className="balance-widget-action"
+              style={{ margin: '10px 14px' }}
+              onClick={() => void handleTeamConnect()}
+            >
+              Talk to the team without AI
+            </button>
+          )}
+
+          {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (!isMobile || !showContextBrief || tabMode === 'chat') && (
+            <div className="balance-widget-quick-actions">
               {optionalAnswerActions.map((action) => (
                 <button
                   key={action}
@@ -1656,7 +1738,7 @@ export function WidgetOverlay({
           )}
 
           {/* Input Bar */}
-          {canInteract && (
+          {canInteract && (!isMobile || !showContextBrief || tabMode === 'chat') && (
             <>
               {isTeamConnected && humanFileRequestOpen && <FileRequestInputHint />}
               {showAttachmentButton && !deletionFrozen && (
@@ -1714,6 +1796,7 @@ export function WidgetOverlay({
                 </details>
               )}
               <div className="balance-widget-composer">
+                <div className="balance-widget-composer-inner">
                 <label htmlFor="balance-widget-message-input" className="balance-widget-input-label">
                   {humanRequested ? 'Message the Balance team' : 'Message Balance Assist'}
                 </label>
@@ -1811,12 +1894,17 @@ export function WidgetOverlay({
                     />
                   </>
                 )}
-                <input
+                <textarea
+                  ref={composerInputRef}
                   id="balance-widget-message-input"
-                  type="text"
+                  rows={1}
                   value={inputValue}
                   maxLength={MAX_PROJECT_SCOPE_CHARACTERS}
-                  onChange={(e) => setInputValue(e.target.value)}
+                  onChange={(e) => {
+                    setInputValue(e.target.value);
+                    e.currentTarget.style.height = 'auto';
+                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 120)}px`;
+                  }}
                   onKeyDown={handleKeyDown}
                   disabled={humanStatus === 'sending' || deletionFrozen}
                   placeholder={deletionFrozen ? 'This session is frozen' : humanRequested ? 'Message the team request...' : 'Type your message...'}
@@ -1832,6 +1920,7 @@ export function WidgetOverlay({
                     <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke={inputValue.trim() && !isTyping && humanStatus !== 'sending' ? '#101010' : brandTokens.colors.mutedText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </button>
+                </div>
               </div>
 
               {!deletionFrozen && <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} calendlyUrl={configuredCalendlyUrl} onConnect={handleTeamConnect} />}

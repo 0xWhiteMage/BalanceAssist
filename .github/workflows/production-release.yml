@@ -808,6 +808,6 @@ jobs:
           curl --fail --silent --show-error --request POST \
             --header "Content-Type: application/json" \
             --header "Authorization: Bearer $SETUP_TOKEN" \
-            --data "{\"webhookUrl\":\"$PRODUCTION_URL/api/telegram/webhook\"}" \
+            --data "{\"webhookUrl\":\"$PRODUCTION_URL/api/telegram/webhook\",\"dropPending\":false}" \
             "$PRODUCTION_URL/api/telegram/setup"
           curl --fail --silent --show-error "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"

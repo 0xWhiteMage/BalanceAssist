@@ -58,7 +58,7 @@ export function getTelegramConfig(): { botToken: string; chatId: string } | null
 
 export async function sendTelegramMessage(
   text: string,
-  options?: { replyToMessageId?: number; threadId?: number; timeoutMs?: number }
+  options?: { replyToMessageId?: number; threadId?: number; timeoutMs?: number; plainText?: boolean }
 ): Promise<{ messageId: number } | null> {
   const config = getTelegramConfig();
 
@@ -71,9 +71,12 @@ export async function sendTelegramMessage(
   const body: Record<string, unknown> = {
     chat_id: config.chatId,
     text,
-    parse_mode: 'HTML',
     disable_web_page_preview: true
   };
+
+  if (!options?.plainText) {
+    body.parse_mode = 'HTML';
+  }
 
   if (options?.replyToMessageId) {
     body.reply_to_message_id = options.replyToMessageId;

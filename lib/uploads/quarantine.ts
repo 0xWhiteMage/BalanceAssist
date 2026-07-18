@@ -4,8 +4,8 @@ export const PRIVATE_ANALYSIS_UPLOAD_POLICY = {
   acceptedFormats: ['PNG', 'JPEG', 'GIF', 'WebP', 'PDF', 'TXT', 'CSV'],
   accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,.txt,.csv',
   maxFiles: 5,
-  maxFileSizeBytes: 10 * 1024 * 1024,
-  maxTotalSizeBytes: 25 * 1024 * 1024,
+  maxFileSizeBytes: 4 * 1024 * 1024,
+  maxTotalSizeBytes: 4 * 1024 * 1024,
   maxExtractedCharacters: 4000
 } as const;
 
@@ -77,7 +77,7 @@ export function validateFile(file: File, buffer: ArrayBuffer): FileQuarantineRes
   }
 
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    return { ok: false, reason: `File is too large. Maximum size is 10 MB.` };
+    return { ok: false, reason: `File is too large. Maximum size is ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB.` };
   }
 
   const detectedMime = detectMimeFromBytes(buffer);
@@ -127,7 +127,7 @@ export function validateFileBatch(
   }
 
   if (totalSize > MAX_TOTAL_SIZE_BYTES) {
-    return { ok: false, reason: `Total file size exceeds 25 MB limit.` };
+    return { ok: false, reason: `Total file size exceeds ${MAX_TOTAL_SIZE_BYTES / (1024 * 1024)} MB limit.` };
   }
 
   return { ok: true };

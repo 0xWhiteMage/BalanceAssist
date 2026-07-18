@@ -15,8 +15,8 @@ export const brandTokens = {
     panel: 'linear-gradient(180deg, #101010 0%, #1d1d1d 100%)'
   },
   typography: {
-    ui: '"Futura PT", Arial, sans-serif',
-    condensed: '"Futura PT Condensed", Arial, sans-serif',
+    ui: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    condensed: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     editorial: 'Calluna, Georgia, serif'
   },
   spacing: {

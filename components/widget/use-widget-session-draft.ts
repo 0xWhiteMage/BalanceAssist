@@ -348,10 +348,13 @@ export function useWidgetSessionDraft(dependencies: Dependencies) {
     setApproval(resetApproval);
   }, [invalidateBootstrap, transitionApproval]);
 
+  const getDraftSnapshot = useCallback(() => draftRef.current, []);
+  const reopenApproval = useCallback(() => transitionApproval('idle'), [transitionApproval]);
+
   return {
     noticeConsent, setNoticeConsent, sessionId, expiresAt, isSessionExpired, sessionUnavailable, draft, fieldProvenance, draftVersion,
     hasProjectIntent, briefApproved, approvalStatus, approvalInFlight: approvalStatus === 'pending', ensureSession, loadOrCreateSession, invalidateBootstrap,
-    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, beginApproval, finishApproval, finishApprovalSuccess, approval, referenceLinks, appendReferenceLink, removeReferenceLink, reset,
+    applyCanonicalDraft, beginDraftOperation, isDraftOperationCurrent, applyChatDraft, updateDraft, beginApproval, finishApproval, finishApprovalSuccess, approval, referenceLinks, appendReferenceLink, removeReferenceLink, reset, getDraftSnapshot, reopenApproval,
     setSessionId, setDraft, setDraftVersion, setHasProjectIntent, hydrateDraft,
     resetProject: () => sessionIdRef.current ? dependencies.resetProject(sessionIdRef.current) : Promise.resolve(false),
     requestProjectDeletion: () => sessionIdRef.current ? dependencies.requestProjectDeletion(sessionIdRef.current) : Promise.resolve({ ok: false })

@@ -1011,7 +1011,7 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('queued');
   });
 
-  test('promotes queued to delivered without attributing an incoming reply to the send', async () => {
+  test('promotes queued to delivered and clears waiting when a reply follows delivered output', async () => {
     const relay = vi.fn(async () => ({ persisted: true, queued: true, delivered: false }));
     const poll = vi.fn()
       .mockResolvedValueOnce({ outgoingStatus: 'queued', messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false })
@@ -1030,7 +1030,7 @@ describe('useTeamRelay', () => {
     expect(result.current.status).toBe('delivered');
     await act(async () => { await result.current.poll(); });
     expect(result.current.status).toBe('delivered');
-    expect(result.current.waitingForReply).toBe(true);
+    expect(result.current.waitingForReply).toBe(false);
     expect(result.current.isTeamConnected).toBe(true);
   });
 

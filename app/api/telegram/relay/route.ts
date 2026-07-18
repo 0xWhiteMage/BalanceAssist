@@ -32,6 +32,24 @@ export async function POST(request: Request) {
   if (error || !result) return jsonWithCors({ ok: false, error: 'relay_persist_failed' }, { status: 500 }, request);
   if (result.consent_required) return jsonWithCors({ ok: false, code: 'consent_required' }, { status: 403 }, request);
 
+  const dispatchSecret = process.env.INTERNAL_DISPATCH_SECRET ?? process.env.CRON_SECRET;
+  if (result.persisted === true && result.handoff_id && dispatchSecret) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12_000);
+    try {
+      // The durable scheduler remains the recovery path; this removes its normal interactive delay.
+      await fetch(new URL('/api/internal/handoff-dispatch', request.url), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${dispatchSecret}` },
+        signal: controller.signal
+      });
+    } catch {
+      // The outbox row is already durable and will be retried by the scheduler.
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   return jsonWithCors({
     ok: result.persisted === true,
     persisted: result.persisted === true,

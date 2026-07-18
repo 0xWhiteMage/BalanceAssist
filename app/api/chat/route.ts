@@ -3,7 +3,7 @@ import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
 import { formatIntakeStageRecap, getCompletedIntakeStageCount, getCurrentIntakeStage, INTAKE_STAGES } from '@/lib/conversation/intake-stage';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
-import { getLocalResponse, getFallbackResponse } from '@/lib/conversation/local-responses';
+import { getLocalResponse, getFallbackResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
@@ -87,6 +87,33 @@ function buildSharedWorkFromEntries(
     });
   }
   return { entries };
+}
+
+function contextualWorkResponse(
+  userMessage: string,
+  context?: { workSearchPending?: boolean; sharedWorkSlugs?: string[] }
+) {
+  const asksForMore = /\b(more|another|others|similar)\b/i.test(userMessage);
+  if (!context?.workSearchPending && !(asksForMore && context?.sharedWorkSlugs?.length)) return null;
+
+  const excluded = new Set(context.sharedWorkSlugs ?? []);
+  const candidates = asksForMore
+    ? listAllWorks()
+    : searchWorks(userMessage, 12);
+  const slugs = candidates
+    .map((entry) => entry.slug)
+    .filter((slug) => !excluded.has(slug))
+    .slice(0, 5);
+  if (slugs.length === 0) return null;
+
+  return {
+    messages: [
+      asksForMore
+        ? 'Here are a few different projects from our work. Which direction feels closest to what you have in mind?'
+        : `Here are the most relevant projects I found for “${userMessage.trim()}”. Which one should we use as a reference point?`
+    ],
+    sharedWork: buildSharedWorkFromEntries(slugs, 'reference')
+  };
 }
 
 async function fetchProvider(input: string, init: RequestInit) {
@@ -511,6 +538,9 @@ export async function POST(request: Request) {
   }
 
   const faqResponse = !context?.isTeamConnected ? getBalanceFaqResponse(lastUserMessage) : null;
+  const contextualWork = !context?.isTeamConnected
+    ? contextualWorkResponse(lastUserMessage, context)
+    : null;
 
   if (messages.some((message) => isCareersIntent(message.content))) {
     return jsonWithCors({ outcome: 'non_persistence', message: `Please apply through ${getCareersRedirect()}.` }, undefined, request);
@@ -543,6 +573,10 @@ export async function POST(request: Request) {
   }
 
   const env = getEnv();
+
+  if (contextualWork) {
+    return jsonWithCors({ outcome: 'non_persistence', ...contextualWork }, undefined, request);
+  }
 
   if (faqResponse) {
     const sharedWork = faqResponse.sharedWorkQuery
@@ -688,7 +722,14 @@ export async function POST(request: Request) {
       truncated
     });
   } catch {
-    return jsonWithCors(CHAT_PROVIDER_UNAVAILABLE, { status: 503 }, request);
+    const fallbackQuestion = getNextMissingFieldPrompt({
+      ...createDefaultLeadDraft(),
+      ...llmContext.priorDraft
+    });
+    return jsonWithCors({
+      outcome: 'non_persistence',
+      message: `AI is temporarily unavailable, so I did not save that answer. Please retry it, or talk to the Balance team. ${fallbackQuestion}`
+    }, undefined, request);
   }
 }
 

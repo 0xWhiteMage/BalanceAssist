@@ -19,7 +19,7 @@ export default function PrivacyPage() {
       </p>
       <h2 style={{ fontSize: '1.1rem', margin: '2rem 0 0.5rem' }}>Separate choices</h2>
       <p style={{ lineHeight: 1.6, fontSize: '0.95rem' }}>
-        AI analysis, human contact, and producer transfer are separate consent scopes. AI analysis sends AI-mode messages and relevant temporary context to DeepSeek. Human contact sends only your typed message through the Telegram relay. Files requested by a producer require a separate producer-transfer choice, are stored temporarily in private Supabase storage, and are made available to the Balance team through time-limited links. Producer transfer also sends the approved brief to the Balance team and may queue the approved CRM projection for Monday.com.
+        AI analysis, human contact, and producer transfer are separate consent scopes. AI analysis sends AI-mode messages and relevant temporary context to an AI processing service. Human contact sends only your typed message through the Telegram relay. Files requested by a producer require a separate producer-transfer choice, are stored temporarily in private Supabase storage, and are made available to the Balance team through time-limited links. Producer transfer also sends the approved brief to the Balance team and may queue the approved CRM projection for Monday.com.
       </p>
       <h2 style={{ fontSize: '1.1rem', margin: '2rem 0 0.5rem' }}>Temporary data and feedback</h2>
       <p style={{ lineHeight: 1.6, fontSize: '0.95rem' }}>

@@ -73,6 +73,9 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
         });
         if (next.messages.some((message) => message.sender === 'team')) {
           setIsTeamConnected(true);
+          if (next.outgoingStatus === 'delivered' && pendingSendGenerationRef.current === null) {
+            setWaitingForReply(false);
+          }
         }
       }
     } finally {

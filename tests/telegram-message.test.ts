@@ -50,6 +50,22 @@ describe('sendTelegramMessage', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://api.telegram.org/bottest-token/sendMessage', expect.any(Object));
   });
 
+  test('omits HTML parse mode for plain-text messages', async () => {
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
+    vi.stubEnv('TELEGRAM_CHAT_ID', '123');
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => ({ ok: true, result: { message_id: 7, chat: { id: 123 } } })
+    }) as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendTelegramMessage('<user supplied>', { plainText: true });
+
+    const request = fetchMock.mock.calls[0]![1];
+    expect(JSON.parse(String(request?.body))).toEqual(expect.objectContaining({ text: '<user supplied>' }));
+    expect(JSON.parse(String(request?.body))).not.toHaveProperty('parse_mode');
+  });
+
   test('aborts a stalled response body at the hard timeout, below the 90-second send reservation', async () => {
     vi.useFakeTimers();
     vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');

@@ -81,7 +81,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
         </span>
         <div
           style={{
-            maxWidth: '280px',
+            maxWidth: 'min(78%, 620px)',
             padding: '12px 16px',
             borderRadius: '4px 16px 16px 16px',
             background: 'rgba(74, 222, 128, 0.06)',
@@ -113,7 +113,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
             <div
               className={`balance-message-bubble${message.isDisclaimer ? ' balance-message-bubble--disclaimer' : ''}`}
               style={{
-                maxWidth: '280px',
+                maxWidth: 'min(78%, 620px)',
                 padding: '12px 16px',
                 borderRadius: '16px 16px 16px 4px',
                 background: message.isDisclaimer ? 'rgba(219, 181, 128, 0.08)' : 'rgba(255, 255, 255, 0.06)',
@@ -145,7 +145,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              maxWidth: '260px'
+              maxWidth: 'min(78%, 560px)'
             }}
           >
             <FileIcon />
@@ -191,7 +191,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
         )}
 
         {message.inlineCards && (
-          <div style={{ marginLeft: '36px', display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '300px', width: '100%' }}>
+          <div style={{ marginLeft: '36px', display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '680px', width: 'calc(100% - 36px)' }}>
             {message.inlineCards.map((card, i) => (
               <InlineCardView key={i} card={card} onClick={onInlineCardClick} />
             ))}
@@ -217,7 +217,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
       <div
         className="balance-message-bubble balance-message-bubble--user"
         style={{
-          maxWidth: '260px',
+          maxWidth: 'min(78%, 620px)',
           padding: '10px 14px',
           borderRadius: '16px 16px 4px 16px',
           background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,

@@ -51,6 +51,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Supabase client failed' }, { status: 503 });
   }
 
+  let claimedUpdateId: number | null = null;
+  const retryableFailure = async (error: string) => {
+    if (claimedUpdateId !== null) {
+      try {
+        const { error: releaseError } = await supabase
+          .from('processed_telegram_updates')
+          .delete()
+          .eq('update_id', claimedUpdateId);
+        if (releaseError) logger.error('Failed to release update_id', { updateId: claimedUpdateId });
+      } catch {
+        logger.error('Failed to release update_id', { updateId: claimedUpdateId });
+      }
+    }
+    return NextResponse.json({ ok: false, error }, { status: 500 });
+  };
+
   // Replay protection: persist update_id before any side effects
   if (typeof update.update_id === 'number') {
     const { error: dupeError } = await supabase
@@ -67,6 +83,7 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ ok: false, error: 'Failed to record update' }, { status: 500 });
     }
+    claimedUpdateId = update.update_id;
   }
 
   const message = update.message;
@@ -98,11 +115,16 @@ export async function POST(request: Request) {
 
   // Primary: thread ID lookup (most reliable)
   if (typeof message.message_thread_id === 'number') {
-    const { data: byThread } = await supabase
+    const { data: byThread, error: threadLookupError } = await supabase
       .from('sessions')
       .select('id')
       .eq('telegram_thread_id', message.message_thread_id)
       .maybeSingle();
+
+    if (threadLookupError) {
+      logger.error('Failed to look up session by thread', { updateId: update.update_id });
+      return retryableFailure('session_lookup_failed');
+    }
 
     const byThreadRow = byThread as { id?: string } | null;
     sessionId = byThreadRow?.id ?? null;
@@ -110,11 +132,16 @@ export async function POST(request: Request) {
 
   // Secondary: reply-to-message lookup
   if (!sessionId && message.reply_to_message?.message_id) {
-    const { data: parent } = await supabase
+    const { data: parent, error: parentLookupError } = await supabase
       .from('human_messages')
       .select('session_id')
       .eq('telegram_message_id', message.reply_to_message.message_id)
       .maybeSingle();
+
+    if (parentLookupError) {
+      logger.error('Failed to look up session by parent message', { updateId: update.update_id });
+      return retryableFailure('session_lookup_failed');
+    }
 
     const parentRow = parent as { session_id?: string } | null;
     sessionId = parentRow?.session_id ?? null;
@@ -150,7 +177,7 @@ export async function POST(request: Request) {
         text: `${senderName}: Scheduling is currently unavailable. We will arrange a time directly.`,
         telegram_thread_id: typeof message.message_thread_id === 'number' ? message.message_thread_id : null
       });
-      if (unavailableMessageError) return NextResponse.json({ ok: false, error: unavailableMessageError.message }, { status: 500 });
+      if (unavailableMessageError) return retryableFailure(unavailableMessageError.message);
       return NextResponse.json({ ok: true, sessionId, scheduleRequestOpen: false, schedulingAvailable: false });
     }
 
@@ -170,7 +197,7 @@ export async function POST(request: Request) {
         error: scheduleUpdateError.message,
         code: scheduleUpdateError.code
       });
-      return NextResponse.json({ ok: false, error: scheduleUpdateError.message }, { status: 500 });
+      return retryableFailure(scheduleUpdateError.message);
     }
 
     logger.info('Schedule request state updated', { sessionId });
@@ -189,7 +216,7 @@ export async function POST(request: Request) {
         sessionId,
         error: scheduleMessageError.message
       });
-      return NextResponse.json({ ok: false, error: scheduleMessageError.message }, { status: 500 });
+      return retryableFailure(scheduleMessageError.message);
     }
 
     return NextResponse.json({ ok: true, sessionId, scheduleRequestOpen: true });
@@ -215,7 +242,7 @@ export async function POST(request: Request) {
         error: sessionUpdateError.message,
         code: sessionUpdateError.code
       });
-      return NextResponse.json({ ok: false, error: sessionUpdateError.message }, { status: 500 });
+      return retryableFailure(sessionUpdateError.message);
     }
 
     logger.info('File request state updated', { sessionId });
@@ -235,7 +262,7 @@ export async function POST(request: Request) {
         error: requestMessageError.message,
         code: requestMessageError.code
       });
-      return NextResponse.json({ ok: false, error: requestMessageError.message }, { status: 500 });
+      return retryableFailure(requestMessageError.message);
     }
 
     logger.info('File request message inserted', { sessionId });
@@ -252,7 +279,7 @@ export async function POST(request: Request) {
 
   if (error) {
     logger.error('Failed to insert team message', { error: 'team_message_persist_failed' });
-    return NextResponse.json({ ok: false, error: 'team_message_persist_failed' }, { status: 500 });
+    return retryableFailure('team_message_persist_failed');
   }
 
   return NextResponse.json({ ok: true, sessionId });

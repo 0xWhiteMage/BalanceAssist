@@ -94,6 +94,19 @@ describe('POST /api/telegram/upload private storage', () => {
     vi.restoreAllMocks();
   });
 
+  test('returns a stable code when the session ID is missing', async () => {
+    const formDataSpy = vi.spyOn(Request.prototype, 'formData');
+    const { POST } = await import('@/app/api/telegram/upload/route');
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: { origin: 'https://www.balancestudio.tv' }
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'session_id_required' });
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
   test('rejects a missing capability before parsing multipart data', async () => {
     const formDataSpy = vi.spyOn(Request.prototype, 'formData');
     const { POST } = await import('@/app/api/telegram/upload/route');
@@ -141,7 +154,7 @@ describe('POST /api/telegram/upload private storage', () => {
 
   test('rejects an oversized declared multipart body before parsing', async () => {
     const response = await post(formWith(new File(['brief'], 'brief.txt', { type: 'text/plain' })), {
-      'content-length': String(27 * 1024 * 1024)
+      'content-length': String(5 * 1024 * 1024)
     });
 
     expect(response.status).toBe(413);
@@ -151,7 +164,7 @@ describe('POST /api/telegram/upload private storage', () => {
     const { POST } = await import('@/app/api/telegram/upload/route');
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(new Uint8Array(27 * 1024 * 1024));
+        controller.enqueue(new Uint8Array(5 * 1024 * 1024));
         controller.close();
       }
     });

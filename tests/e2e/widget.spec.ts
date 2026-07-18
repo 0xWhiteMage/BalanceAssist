@@ -28,7 +28,7 @@ test('uses a compact rounded AI shell and accessible icon launcher', async ({ pa
     expect(shell.top).toBeGreaterThan(0);
     expect(shell.right).toBeLessThanOrEqual(viewport.width);
     expect(shell.bottom).toBeLessThanOrEqual(viewport.height);
-    expect(shell.borderRadius).toBe(16);
+    expect(shell.borderRadius).toBe(10);
   }
 
   await page.getByRole('button', { name: 'Close Balance Assist' }).click();
@@ -263,5 +263,5 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const chooser = await chooserPromise;
   await chooser.setFiles(path.join(__dirname, 'fixtures', 'private-upload.txt'));
 
-  await expect(page.getByText('Stored privately', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Stored privately; no readable text was found for AI analysis/i)).toBeVisible();
 });

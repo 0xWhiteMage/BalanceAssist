@@ -20,7 +20,7 @@ function buildCorsHeaders(source: CorsSource): Record<string, string> {
   const origin = resolveOrigin(source);
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, x-request-id, x-session-capability, x-session-id',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, x-request-id, x-session-capability, x-session-id, x-upload-mode',
     'Vary': 'Origin'
   };
 

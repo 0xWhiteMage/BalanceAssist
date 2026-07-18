@@ -19,7 +19,7 @@ export type ReferenceLink = { id?: string; sessionId?: string; kind: 'youtube' |
 export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
 type ReferenceMutationOutcome = { status: 'saved' } | { status: 'failed'; message: string };
 
-type FileStatus = 'queued' | 'validating' | 'stored' | 'failed' | 'retryable';
+type FileStatus = 'queued' | 'validating' | 'stored' | 'stored-no-text' | 'analysis-failed' | 'failed' | 'retryable';
 
 type QueuedFile = {
   file: File;
@@ -36,6 +36,34 @@ async function readFileBuffer(file: File): Promise<ArrayBuffer> {
   return new Response(file).arrayBuffer();
 }
 
+function uploadErrorMessage(code: unknown, status: number): string {
+  switch (code) {
+    case 'confidential_file_not_allowed':
+      return CONFIDENTIAL_INTAKE_RESPONSE;
+    case 'session_id_required':
+      return 'Your secure session is not ready. Please wait before selecting a file.';
+    case 'analysis_consent_required':
+      return 'File analysis requires your AI brief consent. Please re-confirm it and retry.';
+    case 'file_validation_failed':
+      return 'The selected file could not be verified. Check its format and size, then retry.';
+    case 'file_uploads_unavailable':
+      return 'File sharing is unavailable, or the selection exceeds the current upload limits.';
+    case 'private_storage_recovery_unavailable':
+      return 'The upload could not be completed safely. Please retry later.';
+    case 'private_storage_unavailable':
+      return 'Private file storage is temporarily unavailable. Please retry later.';
+    case 'upload_mode_required':
+    case 'invalid_upload_mode':
+    case 'upload_mode_mismatch':
+      return 'The upload request was invalid. Please select the file again.';
+    default:
+      if (status === 401 || status === 403) {
+        return 'Your secure session or consent could not be verified. Please refresh and retry.';
+      }
+      return 'The file could not be uploaded. Please retry.';
+  }
+}
+
 export function AttachmentDropzone({
   onAddLink,
   onAddFile,
@@ -46,7 +74,7 @@ export function AttachmentDropzone({
 }: {
   onAddLink: (url: string) => Promise<ReferenceMutationOutcome>;
   onAddFile: (file: ReferenceFile) => void;
-  onFileAnalyzed?: (fileName: string, extractedText: string) => void;
+  onFileAnalyzed?: (fileName: string, extractedText: string) => Promise<void> | void;
   sessionId?: string | null;
   consent?: AttachmentConsent | null;
   messageContext?: string;
@@ -70,6 +98,7 @@ export function AttachmentDropzone({
   const acceptedFormats = `${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.slice(0, -1).join(', ')}, and ${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.at(-1)}`;
   const maxFileSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFileSizeBytes / (1024 * 1024);
   const maxTotalSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxTotalSizeBytes / (1024 * 1024);
+  const filesEnabled = privateStorageAvailable && Boolean(sessionId);
 
   function shouldDivertMessage(value: string): boolean {
     try {
@@ -88,6 +117,10 @@ export function AttachmentDropzone({
   }
 
   function openFileSelector() {
+    if (!sessionId) {
+      setError('Your secure session is still starting. Please wait before selecting a file.');
+      return;
+    }
     if (shouldDivertMessage(messageContext)) {
       setError(CONFIDENTIAL_INTAKE_RESPONSE);
       return;
@@ -104,7 +137,8 @@ export function AttachmentDropzone({
 
   async function persistConsent(scope: 'analysis' | 'producer_transfer'): Promise<boolean> {
     if (!sessionId) {
-      return true;
+      setError('Your secure session is still starting. Please wait before selecting a file.');
+      return false;
     }
     const res = await fetch(`/api/projects/${encodeURIComponent(sessionId)}/consent`, {
       method: 'POST',
@@ -141,76 +175,90 @@ export function AttachmentDropzone({
 
   async function handleFiles(input: HTMLInputElement) {
     const files = input.files;
-    if (!files) return;
+    const selectedFiles = files ? Array.from(files) : [];
+    try {
+      if (!files) return;
 
-    const fileArray = Array.from(files);
-    if (fileArray.some((file) => shouldDivertFilename(file.name))) {
-      input.value = '';
-      setError(CONFIDENTIAL_INTAKE_RESPONSE);
-      return;
-    }
-
-    const consentToUse = effectiveConsent ?? null;
-
-    if (!hasAnalysisConsent(consentToUse)) {
-      setError('File analysis is available after you choose the AI brief path.');
-      return;
-    }
-
-    if (!consentToUse) {
-      setError('Consent details are missing. Please re-confirm your upload permissions.');
-      return;
-    }
-
-    if (!await persistConsent('analysis')) return;
-
-    const buffers = await Promise.all(fileArray.map((f) => readFileBuffer(f)));
-    const batchResult = validateFileBatch(fileArray.map((file, i) => ({ file, buffer: buffers[i] })));
-    if (!batchResult.ok) {
-      setError(batchResult.reason ?? 'Files failed validation.');
-      return;
-    }
-    for (const [index, file] of fileArray.entries()) {
-      const validation = validateFile(file, buffers[index]);
-      if (!validation.ok) {
-        setError(validation.reason);
+      const fileArray = selectedFiles;
+      if (!sessionId) {
+        setError('Your secure session is still starting. Please wait before selecting a file.');
         return;
       }
-    }
+      if (fileArray.some((file) => shouldDivertFilename(file.name))) {
+        setError(CONFIDENTIAL_INTAKE_RESPONSE);
+        return;
+      }
 
-    const newQueued: QueuedFile[] = fileArray.map((file) => ({ file, status: 'queued' as FileStatus }));
-    setQueuedFiles((prev) => [...prev, ...newQueued]);
-    setError(null);
+      const consentToUse = effectiveConsent ?? null;
+      if (!hasAnalysisConsent(consentToUse)) {
+        setError('File analysis is available after you choose the AI brief path.');
+        return;
+      }
+      if (!consentToUse) {
+        setError('Consent details are missing. Please re-confirm your upload permissions.');
+        return;
+      }
+      if (!await persistConsent('analysis')) return;
 
-    const fd = new FormData();
-    fd.set('mode', 'analysis');
-    for (const file of fileArray) {
-      updateFileStatus(file.name, 'validating');
-      fd.append('files', file, file.name);
-    }
-    const res = await fetch('/api/telegram/upload', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'x-upload-mode': 'analysis',
-        ...(sessionId ? { 'x-session-id': sessionId } : {})
-      },
-      body: fd
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      const uploadError = body?.code === 'confidential_file_not_allowed'
-        ? CONFIDENTIAL_INTAKE_RESPONSE
-        : body?.error ?? 'Failed to upload file.';
-      setError(uploadError);
-      for (const file of fileArray) updateFileStatus(file.name, 'retryable', uploadError);
-      return;
-    }
-    const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
-    for (const [index, file] of fileArray.entries()) {
-      const extractedText = body.analyses?.[index]?.extractedText;
-      if (typeof extractedText === 'string') onFileAnalyzed?.(file.name, extractedText);
-      updateFileStatus(file.name, 'stored');
+      const buffers = await Promise.all(fileArray.map((f) => readFileBuffer(f)));
+      const batchResult = validateFileBatch(fileArray.map((file, i) => ({ file, buffer: buffers[i] })));
+      if (!batchResult.ok) {
+        setError(batchResult.reason ?? 'Files failed validation.');
+        return;
+      }
+      for (const [index, file] of fileArray.entries()) {
+        const validation = validateFile(file, buffers[index]);
+        if (!validation.ok) {
+          setError(validation.reason);
+          return;
+        }
+      }
+
+      const newQueued: QueuedFile[] = fileArray.map((file) => ({ file, status: 'queued' as FileStatus }));
+      setQueuedFiles((prev) => [...prev, ...newQueued]);
+      setError(null);
+
+      const fd = new FormData();
+      fd.set('mode', 'analysis');
+      for (const file of fileArray) {
+        updateFileStatus(file.name, 'validating');
+        fd.append('files', file, file.name);
+      }
+      const res = await fetch('/api/telegram/upload', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'x-upload-mode': 'analysis', 'x-session-id': sessionId },
+        body: fd
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { code?: unknown } | null;
+        const uploadError = uploadErrorMessage(body?.code, res.status);
+        setError(uploadError);
+        for (const file of fileArray) updateFileStatus(file.name, 'retryable', uploadError);
+        return;
+      }
+      const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
+      for (const [index, file] of fileArray.entries()) {
+        const extractedText = body.analyses?.[index]?.extractedText;
+        if (typeof extractedText !== 'string' || !extractedText.trim()) {
+          updateFileStatus(file.name, 'stored-no-text');
+          continue;
+        }
+        try {
+          await onFileAnalyzed?.(file.name, extractedText);
+          updateFileStatus(file.name, 'stored');
+        } catch {
+          const analysisError = 'Stored privately, but its text could not be added to the AI draft.';
+          updateFileStatus(file.name, 'analysis-failed', analysisError);
+          setError(analysisError);
+        }
+      }
+    } catch {
+      const processingError = 'The file could not be processed. Please retry.';
+      setError(processingError);
+      for (const file of selectedFiles) updateFileStatus(file.name, 'retryable', processingError);
+    } finally {
+      input.value = '';
     }
   }
 
@@ -229,9 +277,11 @@ export function AttachmentDropzone({
           Share files to help us understand your project
         </div>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
-          {privateStorageAvailable
-            ? 'Files stay private for up to 24 hours. Supported text is analysed by DeepSeek for this draft and never sent to the Balance team. Use the human-only path for protected material.'
-            : 'File sharing is temporarily unavailable. Add a reference link instead.'}
+          {!sessionId
+            ? 'File sharing will be ready when your secure session starts. You can add a reference link now.'
+            : privateStorageAvailable
+              ? 'Files stay private for up to 24 hours. Supported text is processed by an AI processing service for this draft and never sent to the Balance team. Use the human-only path for protected material.'
+              : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
       </div>
 
@@ -292,7 +342,8 @@ export function AttachmentDropzone({
           retention period. TXT and PDF may yield up to{' '}
           {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters.toLocaleString('en-US')} characters
           of server-extracted text; accepted images and CSV may yield no extracted text. Any extracted
-          text used in AI mode is processed by DeepSeek. Consent, filename checks, private storage, and
+          text used in AI mode is processed by an AI processing service. Files with no readable text remain
+          stored privately but cannot inform the AI draft. Consent, filename checks, private storage, and
           extraction do not prove a file is non-confidential. Use the human-only path for protected material.
         </div>
       </details>
@@ -300,7 +351,7 @@ export function AttachmentDropzone({
       <button
         type="button"
         aria-describedby="private-analysis-upload-disclosure attachment-private-note"
-        disabled={!privateStorageAvailable}
+        disabled={!filesEnabled}
         onClick={openFileSelector}
         style={{
           width: '100%',
@@ -308,7 +359,7 @@ export function AttachmentDropzone({
           borderRadius: 10,
           border: `1px dashed ${brandTokens.colors.border}`,
           textAlign: 'center',
-          cursor: privateStorageAvailable ? 'pointer' : 'not-allowed',
+          cursor: filesEnabled ? 'pointer' : 'not-allowed',
           color: brandTokens.colors.mutedText,
           display: 'grid',
           justifyItems: 'center',
@@ -327,10 +378,12 @@ export function AttachmentDropzone({
             letterSpacing: '0.16em'
           }}
         >
-          {privateStorageAvailable ? 'Store file privately' : 'File sharing unavailable'}
+          {filesEnabled ? 'Store file privately' : !sessionId ? 'Secure session starting' : 'File sharing unavailable'}
         </span>
         <span id="attachment-private-note" style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
-          {privateStorageAvailable ? 'Temporarily retained only to analyse this draft. Never sent to the team.' : 'Add a reference link above instead.'}
+          {filesEnabled
+            ? 'Temporarily retained only to analyse this draft. Never sent to the team.'
+            : !sessionId ? 'Please wait before selecting a file.' : 'Add a reference link above instead.'}
         </span>
       </button>
       <input
@@ -339,7 +392,7 @@ export function AttachmentDropzone({
         type="file"
         multiple
         accept={PRIVATE_ANALYSIS_UPLOAD_POLICY.accept}
-        disabled={!privateStorageAvailable}
+        disabled={!filesEnabled}
         onChange={(event) => { void handleFiles(event.currentTarget); }}
         tabIndex={-1}
         aria-hidden="true"
@@ -357,6 +410,8 @@ export function AttachmentDropzone({
                 {qf.status === 'queued' && 'Queued'}
                 {qf.status === 'validating' && 'Validating...'}
                 {qf.status === 'stored' && 'Stored privately'}
+                {qf.status === 'stored-no-text' && 'Stored privately; no readable text was found for AI analysis'}
+                {qf.status === 'analysis-failed' && qf.error}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}
                 {qf.status === 'retryable' && `Retry: ${qf.error}`}
               </span>

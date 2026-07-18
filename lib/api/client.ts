@@ -592,6 +592,8 @@ export type ChatRequestPayload = {
     draft?: string;
     sessionId?: string;
     capturedFields?: string[];
+    workSearchPending?: boolean;
+    sharedWorkSlugs?: string[];
   };
 };
 

@@ -12,7 +12,7 @@ import {
   validateHumanUploadBatch
 } from '@/lib/uploads/file-policy';
 
-const ANALYSIS_MULTIPART_BODY_BYTES = 26 * 1024 * 1024;
+const ANALYSIS_MULTIPART_BODY_BYTES = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxTotalSizeBytes + 64 * 1024;
 const HUMAN_MULTIPART_BODY_BYTES = HUMAN_UPLOAD_POLICY.maxTotalSizeBytes + 1024 * 1024;
 
 class MultipartBodyTooLargeError extends Error {}
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const requestedSessionId = request.headers.get('x-session-id')?.trim();
   if (!requestedSessionId) {
-    return jsonWithCors({ ok: false, error: 'Session ID required' }, { status: 400 }, request);
+    return jsonWithCors({ ok: false, code: 'session_id_required' }, { status: 400 }, request);
   }
 
   const authResult = await requireSession(request, requestedSessionId);

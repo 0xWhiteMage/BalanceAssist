@@ -182,6 +182,7 @@ describe('production release workflows', () => {
     expect(telegram?.run).toContain('test -n "$PRODUCTION_URL"');
     expect(telegram?.run).toContain('test -n "$SETUP_TOKEN"');
     expect(telegram?.run).toContain('test -n "$TELEGRAM_BOT_TOKEN"');
+    expect(telegram?.run).toContain('\\"dropPending\\":false');
     expect(telegram?.run).not.toContain('Skipping');
     expect(JSON.stringify(release)).toContain('refs/heads/main:refs/remotes/origin/main');
     const migrate = jobs.migration?.steps?.find((step) => step.name === 'Apply production migrations');

@@ -186,10 +186,10 @@ async function startAiConversation() {
   fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
 
   const input = (await waitFor(() => {
-    const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;
+    const el = document.querySelector('textarea[placeholder]') as HTMLTextAreaElement | null;
     if (!el) throw new Error('input not yet rendered');
     return el;
-  })) as HTMLInputElement;
+  })) as HTMLTextAreaElement;
 
   await waitFor(() => {
     expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
@@ -315,7 +315,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     }));
     expect(screen.getByText('Thanks for the feedback.')).toHaveAttribute('role', 'status');
 
-    expect(screen.getByTestId('review-panel').textContent).not.toMatch(/crm|telegram|revision|reviewed/i);
+    expect(screen.getByTestId('approve-confirmation').textContent).not.toMatch(/crm|telegram|revision|reviewed/i);
   });
 
   test('when finalization persists without queue or delivery, the rail says Brief saved', async () => {
@@ -465,7 +465,8 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.click(retry);
     await waitFor(() => expect(finalizeLeadMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('Queued for the Balance team')).toBeInTheDocument();
-    expect(screen.getByTestId('review-rail')).toBe(mountedRail);
+    expect(screen.queryByTestId('review-rail')).toBeNull();
+    expect(mountedRail).not.toBeInTheDocument();
   }, 20_000);
 
   test('reports verified delivery instead of merely saved or queued', async () => {

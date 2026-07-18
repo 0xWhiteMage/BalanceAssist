@@ -25,8 +25,8 @@ describe('getWidgetWidth', () => {
     const chatOnly = parseInt(WIDGET_WIDTH_CHAT_ONLY.match(/min\((\d+)px/)?.[1] ?? '0', 10);
     const withRail = parseInt(WIDGET_WIDTH_WITH_RAIL.match(/min\((\d+)px/)?.[1] ?? '0', 10);
     expect(withRail).toBeGreaterThan(chatOnly);
-    expect(chatOnly).toBe(380);
-    expect(withRail).toBe(820);
+    expect(chatOnly).toBe(720);
+    expect(withRail).toBe(1100);
   });
 });
 

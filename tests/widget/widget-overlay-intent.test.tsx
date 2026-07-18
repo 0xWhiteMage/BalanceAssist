@@ -602,7 +602,6 @@ describe('WidgetOverlay passes captured fields to /api/chat (Fix 1)', () => {
     }, { timeout: 4000 });
 
     expect(chatBodies[1]?.messages).toEqual([
-      { role: 'user', content: 'We need a launch film.' },
       { role: 'user', content: 'The audience is regional.' }
     ]);
   }, 10000);

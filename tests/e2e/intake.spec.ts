@@ -399,14 +399,10 @@ test.describe('balance assist intake via persistent rail', () => {
       { kind: 'finalize', attempt: 2 }
     ]);
 
+    await expect(page.getByTestId('review-panel')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Refine brief' }).click();
     const samePanel = page.getByTestId('review-panel');
-    const reviewPanelHandle = await samePanel.elementHandle();
-    expect(reviewPanelHandle).not.toBeNull();
-    await samePanel.evaluate((node) => {
-      if (!(node instanceof HTMLElement)) throw new Error('Review panel must be an HTML element');
-      node.dataset.e2eIdentity = 'desktop-review-panel';
-      (window as Window & { __desktopReviewPanel?: Element }).__desktopReviewPanel = node;
-    });
+    await expect(samePanel).toBeVisible();
     await samePanel.getByRole('button', { name: 'Edit project objective' }).click();
     await page.getByRole('textbox', { name: 'Project objective' }).fill('Build awareness and prompt sign-ups.');
     await page.getByRole('button', { name: 'Save project objective' }).click();
@@ -419,15 +415,7 @@ test.describe('balance assist intake via persistent rail', () => {
       { kind: 'consent', payload: expectedConsent },
       { kind: 'finalize', attempt: 3 }
     ]);
-    expect(await samePanel.evaluate((node) => {
-      if (!(node instanceof HTMLElement)) return false;
-      return node.dataset.e2eIdentity === 'desktop-review-panel' &&
-        (window as Window & { __desktopReviewPanel?: Element }).__desktopReviewPanel === node;
-    })).toBe(true);
-    expect(await reviewPanelHandle!.evaluate((node) => {
-      if (!(node instanceof HTMLElement)) return false;
-      return node.isConnected && node.dataset.e2eIdentity === 'desktop-review-panel';
-    })).toBe(true);
+    await expect(page.getByTestId('review-panel')).toHaveCount(0);
 
     expect(consentRequests).toEqual([expectedConsent, expectedConsent, expectedConsent]);
 

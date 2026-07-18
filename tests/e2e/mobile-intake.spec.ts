@@ -368,10 +368,10 @@ test.describe('mobile intake', () => {
 
     const approvalConfirmation = page.getByTestId('approve-confirmation');
     await expect(approvalConfirmation).toContainText('Queued for the Balance team');
-    await assertMinimumTarget(approvalConfirmation.getByRole('button', { name: 'Talk to a human team member' }));
+    await assertMinimumTarget(approvalConfirmation.getByRole('button', { name: 'Talk to a human' }));
     await assertNoHorizontalOverflow(page.locator('html'), 'queued document');
     await assertNoHorizontalOverflow(page.locator('#widget-chat-panel'), 'queued Chat panel');
-    await assertNoHorizontalOverflow(page.locator('#widget-brief-panel'), 'queued Brief panel');
+    await expect(page.locator('#widget-brief-panel')).toHaveCount(0);
     await assertNoHorizontalOverflow(approvalConfirmation, 'queued approval');
     await assertNoHorizontalOverflow(approvalConfirmation.locator('button, a'), 'queued approval actions');
     const clearYes = page.getByRole('button', { name: 'Yes', exact: true });

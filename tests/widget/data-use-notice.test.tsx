@@ -83,7 +83,7 @@ describe('DataUseNotice', () => {
     const onConsent = vi.fn();
     renderNotice({ onConsent });
 
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/DeepSeek/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI processing service/i);
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/nothing is sent to Balance until you separately review and approve the brief/i);
     expect(onConsent).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
@@ -139,7 +139,7 @@ describe('DataUseNotice', () => {
   test('distinguishes AI session processing from team-contact relay delivery', () => {
     renderNotice();
 
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/DeepSeek receives each message and relevant temporary draft or extracted file text/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI processing service receives each message and relevant temporary draft or extracted file text/i);
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/team-contact mode.*message.*Balance team through Telegram/i);
   });
 
@@ -153,12 +153,12 @@ describe('DataUseNotice', () => {
     expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/job application|cv|resume/i);
   });
 
-  test('names DeepSeek as the sole AI-mode processor and preserves the human-only route', () => {
+  test('describes the AI processing service without a customer-visible vendor name and preserves the human-only route', () => {
     renderNotice();
     const notice = screen.getByTestId('data-use-notice');
-    expect(notice).toHaveTextContent(/DeepSeek receives each message/i);
+    expect(notice).toHaveTextContent(/AI processing service receives each message/i);
     expect(notice).toHaveTextContent(/non-confidential, high-level project brief/i);
     expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
-    expect(notice.textContent).not.toMatch(/MiniMax|OpenAI|fallback provider/i);
+    expect(notice.textContent).not.toMatch(/DeepSeek|MiniMax|OpenAI|fallback provider/i);
   });
 });

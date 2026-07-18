@@ -242,9 +242,9 @@ describe('shareWorkSchema', () => {
     }
   });
 
-  test('accepts up to 8 slugs', () => {
+  test('accepts up to 5 slugs', () => {
     const result = shareWorkSchema.safeParse({
-      slugs: ['milo', 'razer', 'msi', 'handshakes', 'compare-club', 'filmninja', 'sccc5x', 'sccc-kaki-says'],
+      slugs: ['milo', 'razer', 'msi', 'handshakes', 'compare-club'],
       category: 'pitch'
     });
     expect(result.success).toBe(true);
@@ -253,7 +253,7 @@ describe('shareWorkSchema', () => {
     }
   });
 
-  test('rejects more than 8 slugs', () => {
+  test('rejects more than 5 slugs', () => {
     const result = shareWorkSchema.safeParse({
       slugs: ['milo', 'razer', 'msi', 'handshakes', 'compare-club', 'filmninja', 'sccc5x', 'sccc-kaki-says', 'sph-the-future-of-skills']
     });
@@ -292,7 +292,7 @@ describe('sanitizeShareWork', () => {
     expect(result.slugs).toEqual(['milo', 'razer']);
   });
 
-  test('caps slugs at 8', () => {
+  test('caps slugs at 5', () => {
     const result = sanitizeShareWork({
       slugs: [
         'milo',
@@ -307,7 +307,7 @@ describe('sanitizeShareWork', () => {
       ],
       category: 'reference'
     });
-    expect(result.slugs.length).toBe(8);
+    expect(result.slugs.length).toBe(5);
   });
 
   test('returns slugs=[] when every slug is invalid', () => {

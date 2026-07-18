@@ -57,7 +57,7 @@ async function startWithBalanceAssist() {
 
 async function findChatInput() {
   return waitFor(() => {
-    const input = document.querySelector('input[placeholder]') as HTMLInputElement | null;
+    const input = document.querySelector('textarea[placeholder]') as HTMLTextAreaElement | null;
     if (!input) {
       throw new Error('chat input not yet rendered');
     }
@@ -247,6 +247,8 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await waitFor(() => {
       expect(requestLog.some((entry) => entry.url.includes('/api/projects/stored-good-session/draft'))).toBe(true);
       expect(screen.queryByTestId('review-rail')).not.toBeNull();
+      expect(screen.getByRole('log')).toHaveTextContent(/Welcome back.*What should this project achieve\?/i);
+      expect(screen.getByRole('log')).not.toHaveTextContent(/What can I help you with today\?/i);
     });
   });
 

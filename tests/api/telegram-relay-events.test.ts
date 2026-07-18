@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const { requireSessionMock } = vi.hoisted(() => ({ requireSessionMock: vi.fn() }));
 vi.mock('@/lib/api/require-session', () => ({ requireSession: requireSessionMock }));
@@ -11,8 +11,11 @@ describe('POST /api/telegram/relay', () => {
   const rpc = vi.fn();
   beforeEach(() => {
     rpc.mockReset();
+    delete process.env.INTERNAL_DISPATCH_SECRET;
+    delete process.env.CRON_SECRET;
     requireSessionMock.mockResolvedValue({ ok: true, auth: { sessionId: 'sess-relay' }, supabase: { rpc } });
   });
+  afterEach(() => vi.unstubAllGlobals());
 
   test('uses the request ID for atomic message and outbox persistence', async () => {
     rpc.mockResolvedValue({ data: [{ persisted: true, consent_required: false, message_id: 33, handoff_id: 'handoff-33', thread_id: 42 }], error: null });
@@ -23,6 +26,24 @@ describe('POST /api/telegram/relay', () => {
 
     expect(rpc).toHaveBeenCalledWith('relay_human_message', { p_session_id: 'sess-relay', p_request_id: retryRequestId, p_text: 'Same text' });
     await expect(response.json()).resolves.toEqual({ ok: true, persisted: true, queued: true });
+  });
+
+  test('dispatches a persisted interactive relay immediately while retaining the durable outbox', async () => {
+    process.env.INTERNAL_DISPATCH_SECRET = 'dispatch-secret';
+    const dispatchFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', dispatchFetch);
+    rpc.mockResolvedValue({ data: [{ persisted: true, consent_required: false, handoff_id: 'handoff-33' }], error: null });
+    const { POST } = await import('@/app/api/telegram/relay/route');
+
+    const response = await POST(new Request('https://balance.example/api/telegram/relay', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': retryRequestId }, body: JSON.stringify({ sessionId: 'sess-relay', text: 'Same text' })
+    }));
+
+    expect(dispatchFetch).toHaveBeenCalledWith(
+      new URL('https://balance.example/api/internal/handoff-dispatch'),
+      expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer dispatch-secret' } })
+    );
+    await expect(response.json()).resolves.toMatchObject({ persisted: true, queued: true });
   });
 
   test('returns only the stable persistence error when the RPC fails', async () => {

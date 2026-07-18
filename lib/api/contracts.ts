@@ -121,13 +121,15 @@ export const chatRequestPayloadSchema = z.object({
       isTeamConnected: z.boolean().optional(),
       draft: z.string().max(MAX_CHAT_CONTEXT_DRAFT_CHARACTERS).optional(),
       sessionId: z.string().max(MAX_CHAT_CONTEXT_SESSION_ID_CHARACTERS).optional(),
-      capturedFields: z.array(z.string().max(MAX_CHAT_CAPTURED_FIELD_CHARACTERS)).max(MAX_CHAT_CAPTURED_FIELDS).optional()
+      capturedFields: z.array(z.string().max(MAX_CHAT_CAPTURED_FIELD_CHARACTERS)).max(MAX_CHAT_CAPTURED_FIELDS).optional(),
+      workSearchPending: z.boolean().optional(),
+      sharedWorkSlugs: z.array(z.string().max(120)).max(20).optional()
     })
     .optional()
   })
   .superRefine((value, context) => {
     const currentMessage = value.messages[value.messages.length - 1];
-    if (!currentMessage || currentMessage.content.trim().length === 0) {
+    if (!currentMessage || currentMessage.role !== 'user' || currentMessage.content.trim().length === 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['messages', value.messages.length - 1, 'content'],
