@@ -140,9 +140,9 @@ jobs:
       - name: Apply hash-verified consent 1.2 cutover
         env:
           EXPECTED_SUPABASE_PROJECT_REF: vbdqjgwcmckutwehrbvo
-          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -152,9 +152,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)"
           node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run
           node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import pg from 'pg';
-          const required = ['PRODUCTION_DATABASE_URL', 'PRODUCTION_URL', 'RELEASE_SHA', 'VERCEL_ORG_ID', 'VERCEL_PROJECT_ID', 'VERCEL_TOKEN'];
+          const required = ['PRODUCTION_URL', 'RELEASE_SHA', 'SUPABASE_ACCESS_TOKEN', 'VERCEL_ORG_ID', 'VERCEL_PROJECT_ID', 'VERCEL_TOKEN'];
           if (required.some((name) => !process.env[name]?.trim())) process.exit(1);
           const headers = { Authorization: `Bearer ${process.env.VERCEL_TOKEN}` };
           const projectResponse = await fetch(`https://api.vercel.com/v9/projects/${process.env.VERCEL_PROJECT_ID}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
@@ -170,11 +168,19 @@ jobs:
           const deployment = await deploymentResponse.json();
           const deploymentSha = deployment.meta?.githubCommitSha ?? deployment.gitSource?.sha;
           if (deployment.projectId !== process.env.VERCEL_PROJECT_ID || deployment.readyState !== 'READY' || deployment.target !== 'production' || deploymentSha !== process.env.RELEASE_SHA) process.exit(1);
-          const database = new URL(process.env.PRODUCTION_DATABASE_URL);
-          const projectRef = process.env.EXPECTED_SUPABASE_PROJECT_REF;
-          const direct = database.hostname === `db.${projectRef}.supabase.co` && database.username === 'postgres';
-          const pooled = database.hostname.endsWith('.pooler.supabase.com') && database.username === `postgres.${projectRef}`;
-          if ((database.protocol !== 'postgresql:' && database.protocol !== 'postgres:') || (!direct && !pooled) || database.pathname !== '/postgres' || database.search || database.hash) process.exit(1);
+          NODE
+          npx --no-install supabase link --project-ref "$EXPECTED_SUPABASE_PROJECT_REF" --yes
+          migration_state="$(npx --no-install supabase db query --linked --output-format json "SELECT filename FROM public.schema_migrations WHERE version = '060'" | node -e "let input=''; process.stdin.on('data', chunk => input += chunk).on('end', () => { const rows=JSON.parse(input).rows; if (!Array.isArray(rows)) process.exit(1); if (!rows.length) process.stdout.write('missing'); else if (rows.length === 1 && rows[0].filename === '060_consent_1_2_cutover.sql') process.stdout.write('exact'); else process.exit(1); });")"
+          if [ "$migration_state" = "missing" ]; then
+            npx --no-install supabase db query --linked --file supabase/production-consent-1-2-cutover-060.sql
+          else
+            test "$migration_state" = "exact"
+          fi
+          verification_path="$(mktemp)"
+          trap 'rm -f "$verification_path"' EXIT
+          npx --no-install supabase db query --linked --output-format json --file supabase/verify-consent-1-2-cutover-060.sql > "$verification_path"
+          node --input-type=module - "$verification_path" <<'NODE'
+          import fs from 'node:fs';
           const source = fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8').replace(/\r\n/g, '\n');
           function reviewedBody(functionName) {
             const signature = source.indexOf(`FUNCTION public.${functionName}`);
@@ -190,47 +196,15 @@ jobs:
             ['reserve_handoff_send', ['boolean', 'search_path=public, pg_temp']],
             ['delete_session_for_deletion_job', ['boolean', 'search_path=public, pg_temp']],
           ]);
-          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL, ssl: { rejectUnauthorized: true } });
-          try {
-            await client.connect();
-            const recorded = await client.query("SELECT filename FROM public.schema_migrations WHERE version = '060'");
-            if (!recorded.rows.length) {
-              await client.query(fs.readFileSync('supabase/production-consent-1-2-cutover-060.sql', 'utf8'));
-            } else if (recorded.rows.length !== 1 || recorded.rows[0].filename !== '060_consent_1_2_cutover.sql') {
-              process.exit(1);
-            }
-            const live = await client.query(`
-              SELECT p.proname, p.prosrc, p.prosecdef, p.proconfig, l.lanname,
-                pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result,
-                has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_execute,
-                has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_execute,
-                has_function_privilege('service_role', p.oid, 'EXECUTE') AS service_role_execute,
-                EXISTS (
-                  SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
-                  WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
-                ) AS public_execute
-              FROM pg_proc p
-              JOIN pg_language l ON l.oid = p.prolang
-              WHERE p.oid IN (
-                'public.assert_session_processing_allowed(uuid)'::regprocedure,
-                'public.finalize_session_lead(uuid)'::regprocedure,
-                'public.relay_human_message(uuid,text,text)'::regprocedure,
-                'public.reserve_handoff_send(uuid,uuid)'::regprocedure,
-                'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure
-              )
-                AND EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '060' AND filename = '060_consent_1_2_cutover.sql')
-            `);
-            if (live.rows.length !== expected.size) process.exit(1);
-            for (const fn of live.rows) {
-              const policy = expected.get(fn.proname);
-              if (!policy || fn.prosrc.trim() !== reviewedBody(`${fn.proname}(`) || fn.prosecdef !== true || fn.lanname !== 'plpgsql' || fn.result !== policy[0] || !fn.proconfig?.includes(policy[1]) || fn.owner !== 'postgres') process.exit(1);
-              if (fn.public_execute !== false || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) process.exit(1);
-              expected.delete(fn.proname);
-            }
-            if (expected.size) process.exit(1);
-          } finally {
-            await client.end();
+          const live = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).rows;
+          if (!Array.isArray(live) || live.length !== expected.size) process.exit(1);
+          for (const fn of live) {
+            const policy = expected.get(fn.proname);
+            if (!policy || fn.prosrc.trim() !== reviewedBody(`${fn.proname}(`) || fn.prosecdef !== true || fn.lanname !== 'plpgsql' || fn.result !== policy[0] || !fn.proconfig?.includes(policy[1]) || fn.owner !== 'postgres') process.exit(1);
+            if (fn.public_execute !== false || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) process.exit(1);
+            expected.delete(fn.proname);
           }
+          if (expected.size) process.exit(1);
           NODE
       - name: Verify production cutover and recover workers
         env:

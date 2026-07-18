@@ -67,6 +67,7 @@ describe('production consent 1.2 cutover migration 060 policy', () => {
 
   test('supports an audited owner-authorized emergency cutover without weakening normal review gates', async () => {
     const workflow = await readFile(resolve(root, '.github/workflows/emergency-consent-1-2-cutover.yml'), 'utf8');
+    const verification = await readFile(resolve(root, 'supabase/verify-consent-1-2-cutover-060.sql'), 'utf8');
     expect(workflow).toContain('environment: production-consent-cutover');
     expect(workflow).toContain('AUTHORIZE CONSENT 1.2 EMERGENCY CUTOVER');
     expect(workflow).toContain("comment.author_association === 'OWNER'");
@@ -79,10 +80,14 @@ describe('production consent 1.2 cutover migration 060 policy', () => {
     expect(workflow).toContain("project.gitProviderOptions?.createDeployments !== 'disabled'");
     expect(workflow).toContain('git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main');
     expect(workflow).toContain('node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run');
+    expect(workflow).toContain('SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}');
+    expect(workflow).toContain('supabase db query --linked --file supabase/production-consent-1-2-cutover-060.sql');
+    expect(workflow).toContain('supabase/verify-consent-1-2-cutover-060.sql');
+    expect(workflow).not.toContain('PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}');
     expect(workflow).toContain('supabase/production-consent-1-2-cutover-060.sql');
-    expect(workflow).toContain("'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure");
+    expect(verification).toContain("'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure");
     expect(workflow).toContain("'search_path=public, extensions, pg_temp'");
-    expect(workflow).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')");
+    expect(verification).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')");
     expect(workflow).toContain('/api/internal/handoff-dispatch');
     expect(workflow).toContain('/api/internal/deletion-worker');
     expect(workflow).toContain('session-after-deletion.json');
