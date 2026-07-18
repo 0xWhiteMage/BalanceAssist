@@ -22,7 +22,14 @@ function parseEnvironment(output) {
   return Object.fromEntries(
     output.split(/\r?\n/).flatMap((line) => {
       const separator = line.indexOf('=');
-      return separator > 0 ? [[line.slice(0, separator), line.slice(separator + 1)]] : [];
+      if (separator <= 0) return [];
+      const value = line.slice(separator + 1);
+      const unquoted = value.startsWith('"') && value.endsWith('"')
+        ? JSON.parse(value)
+        : value.startsWith("'") && value.endsWith("'")
+          ? value.slice(1, -1)
+          : value;
+      return [[line.slice(0, separator), unquoted]];
     })
   );
 }
