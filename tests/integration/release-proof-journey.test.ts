@@ -82,6 +82,12 @@ function databaseSupabase(client: import('pg').Client) {
         return {
           then: (resolve: (value: { error: null }) => unknown) => client.query(sql, values).then(() => resolve({ error: null })),
           eq: (column: string, value: unknown) => update([...filters, [column, value]]),
+          gt: (column: string, value: unknown) => ({
+            select: () => ({
+              maybeSingle: () => client.query(`${sql} and ${column} > $${values.length + 1} returning *`, [...values, value])
+                .then(({ rows }) => ({ data: rows[0] ?? null, error: null }))
+            })
+          }),
           is: (column: string, value: unknown) => ({
             select: async () => {
               const nullableSql = `${sql} and ${column} is ${value === null ? 'null' : '$' + (values.length + 1)} returning *`;

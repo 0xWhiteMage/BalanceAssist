@@ -1119,7 +1119,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       expect(dsr.rows).toEqual([{ queued: true }]);
       expect(job.rows).toHaveLength(1);
       expect(started.rows).toEqual([{ started: true }]);
-      expect(blocked.rows).toEqual([{ deleted: false }]);
+      expect(blocked.rows).toEqual([{ deleted: true }]);
     } finally {
       await client!.query('delete from public.monday_sync_outbox where crm_lead_id = any($1::uuid[])', [[terminal, dueReview, graceExpired, dsrLead, barrierLead]]);
       await client!.query('delete from public.crm_leads where id = any($1::uuid[])', [[terminal, dueReview, graceExpired, dsrLead, barrierLead]]);
