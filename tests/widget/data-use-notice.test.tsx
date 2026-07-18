@@ -54,7 +54,7 @@ describe('DataUseNotice', () => {
       });
     }
 
-    expect(new Set(actions.map((action) => action.className))).toEqual(new Set(['balance-entry-action']));
+    expect(actions.every((action) => action.classList.contains('balance-entry-action'))).toBe(true);
   }
 
   test('keeps the shared boundary above 3:1 against every panel gradient endpoint', () => {
@@ -79,23 +79,14 @@ describe('DataUseNotice', () => {
     expect(screen.queryByRole('button', { name: /I understand/i })).not.toBeInTheDocument();
   });
 
-  test('keeps the exact visual contract after opening the AI disclosure', () => {
-    renderNotice();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
-
-    expectEqualEntryActions(['Continue with AI', 'Talk to the team without AI', 'Leave']);
-  });
-
-  test('records AI consent only after Continue with AI', () => {
+  test('records AI consent through the single informed AI action', () => {
     const onConsent = vi.fn();
     renderNotice({ onConsent });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
-    expect(screen.getByText(/DeepSeek processes AI-mode messages/i)).toBeInTheDocument();
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/DeepSeek/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/nothing is sent to Balance until you separately review and approve the brief/i);
     expect(onConsent).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
     expect(onConsent).toHaveBeenCalledOnce();
     const record = onConsent.mock.calls[0][0];
     expect(record.consentVersion).toBe(CONSENT_VERSION);
@@ -164,10 +155,9 @@ describe('DataUseNotice', () => {
 
   test('names DeepSeek as the sole AI-mode processor and preserves the human-only route', () => {
     renderNotice();
-    fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
     const notice = screen.getByTestId('data-use-notice');
-    expect(notice).toHaveTextContent(/DeepSeek processes AI-mode messages/i);
-    expect(notice).toHaveTextContent(/non-confidential, high-level project information only/i);
+    expect(notice).toHaveTextContent(/DeepSeek receives each message/i);
+    expect(notice).toHaveTextContent(/non-confidential, high-level project brief/i);
     expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
     expect(notice.textContent).not.toMatch(/MiniMax|OpenAI|fallback provider/i);
   });

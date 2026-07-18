@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { brandTokens } from '@/lib/brand-tokens';
 import { DATA_USE_NOTICE_COPY, CONSENT_VERSION, type ConsentRecord } from '@/lib/privacy/notice';
 
@@ -13,8 +12,6 @@ export function DataUseNotice({
   onHuman: () => void;
   onLeave: () => void;
 }) {
-  const [showAiDisclosure, setShowAiDisclosure] = useState(false);
-
   function handleAcknowledge() {
     onConsent({
       consentedAt: new Date().toISOString(),
@@ -50,8 +47,14 @@ export function DataUseNotice({
           fontFamily: brandTokens.typography.ui
         }}
       >
-        {DATA_USE_NOTICE_COPY.body}
+        {DATA_USE_NOTICE_COPY.summary}
       </p>
+      <details style={{ marginBottom: 12, color: brandTokens.colors.mutedText, fontSize: 11, lineHeight: 1.5 }}>
+        <summary style={{ minHeight: 32, padding: '7px 0', cursor: 'pointer', color: brandTokens.colors.lightText }}>
+          How your data is handled
+        </summary>
+        <p style={{ margin: '4px 0 0' }}>{DATA_USE_NOTICE_COPY.body}</p>
+      </details>
       <a
         href={DATA_USE_NOTICE_COPY.privacyLink}
         style={{
@@ -66,26 +69,14 @@ export function DataUseNotice({
       >
         {DATA_USE_NOTICE_COPY.privacyLinkLabel}
       </a>
-      {showAiDisclosure ? (
-        <div style={{ display: 'grid', gap: 8 }}>
-          <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: brandTokens.colors.lightText }}>
-            {DATA_USE_NOTICE_COPY.aiDisclosure}
-          </p>
-          <button type="button" className="balance-entry-action" onClick={handleAcknowledge} style={entryActionStyle}>
-            Continue with AI
-          </button>
-          <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>
-            Talk to the team without AI
-          </button>
-          <button type="button" className="balance-entry-action" onClick={onLeave} style={entryActionStyle}>Leave</button>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gap: 8 }}>
-          <button type="button" className="balance-entry-action" onClick={() => setShowAiDisclosure(true)} style={entryActionStyle}>Build a brief with AI</button>
-          <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>Talk to the team without AI</button>
-          <button type="button" className="balance-entry-action" onClick={onLeave} style={entryActionStyle}>Leave</button>
-        </div>
-      )}
+      <p style={{ margin: '0 0 10px', fontSize: 11, lineHeight: 1.5, color: brandTokens.colors.mutedText }}>
+        Choosing AI accepts this use for the temporary brief. You will review it before anything is sent to Balance.
+      </p>
+      <div style={{ display: 'grid', gap: 8 }}>
+        <button type="button" className="balance-entry-action balance-entry-action--primary" onClick={handleAcknowledge} style={entryActionStyle}>Build a brief with AI</button>
+        <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>Talk to the team without AI</button>
+        <button type="button" className="balance-entry-action balance-entry-action--tertiary" onClick={onLeave} style={entryActionStyle}>Leave</button>
+      </div>
     </div>
   );
 }

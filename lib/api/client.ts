@@ -1,4 +1,5 @@
 import type { EventPayload } from '@/lib/api/contracts';
+import { CHAT_CLIENT_TIMEOUT_MS } from '@/lib/conversation/chat-timeouts';
 
 export type SessionResponse = {
   sessionId: string;
@@ -38,9 +39,9 @@ export type FinalizeLeadResponse =
 
 const REQUEST_TIMEOUT_MS = 10000;
 
-async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(input, {
@@ -673,7 +674,7 @@ export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResp
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(sanitizedPayload),
       keepalive: true
-    });
+    }, CHAT_CLIENT_TIMEOUT_MS);
     responseBody = await response.json();
   } catch {
     return null;

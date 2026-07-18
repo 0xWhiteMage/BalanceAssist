@@ -55,7 +55,6 @@ function chatSessionResponse() {
 
 async function startAiConversation() {
   fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 
   const input = (await waitFor(() => {
     const el = screen.getByPlaceholderText(/Type your message|Message the team/i) as HTMLInputElement;
@@ -132,6 +131,9 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
       if (url.includes('/consent')) {
         return new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 });
       }
+      if (url.includes('/api/telegram/relay')) {
+        return new Response(JSON.stringify({ ok: true, persisted: true, queued: true }), { status: 200 });
+      }
       if (url.includes('/api/sessions')) {
         return new Response(JSON.stringify({ sessionId: 'mock-session', persisted: true }), { status: 200 });
       }
@@ -145,7 +147,11 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     await waitFor(() => expect(requests.filter((url) => url.includes('/api/chat'))).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: /talk to the team without ai/i }));
-    await screen.findByPlaceholderText(/message the team request/i);
+    const humanInput = await screen.findByPlaceholderText(/message the team request/i);
+    expect(humanInput).toBeEnabled();
+    fireEvent.change(humanInput, { target: { value: 'Please send this to the team' } });
+    fireEvent.keyDown(humanInput, { key: 'Enter' });
+    await waitFor(() => expect(requests.some((url) => url.includes('/api/telegram/relay'))).toBe(true));
 
     await act(async () => {
       pendingChat.resolve(new Response(JSON.stringify({

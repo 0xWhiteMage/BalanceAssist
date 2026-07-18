@@ -61,7 +61,6 @@ describe('producer-requested human uploads', () => {
   test('does not expose the producer upload control in AI mode', async () => {
     render(<WidgetOverlay autoOpen={true} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 
     expect(screen.queryByRole('button', { name: 'Upload requested files' })).toBeNull();
   });

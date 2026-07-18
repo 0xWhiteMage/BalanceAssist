@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { createClient } from '@supabase/supabase-js';
 
 const diagnosticsDir = '.artifacts/supabase-release-proof';
 const proofRequired = process.env.CI === 'true' || process.env.REQUIRE_SUPABASE_RELEASE_PROOF === '1';
@@ -22,9 +23,30 @@ function parseEnvironment(output) {
   return Object.fromEntries(
     output.split(/\r?\n/).flatMap((line) => {
       const separator = line.indexOf('=');
-      return separator > 0 ? [[line.slice(0, separator), line.slice(separator + 1)]] : [];
+      if (separator <= 0) return [];
+      const value = line.slice(separator + 1);
+      const unquoted = value.startsWith('"') && value.endsWith('"')
+        ? JSON.parse(value)
+        : value.startsWith("'") && value.endsWith("'")
+          ? value.slice(1, -1)
+          : value;
+      return [[line.slice(0, separator), unquoted]];
     })
   );
+}
+
+async function ensurePrivateUploadBucket(environment) {
+  const client = createClient(environment.API_URL, environment.SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+  const bucket = 'temporary-attachments';
+  const existing = await client.storage.getBucket(bucket);
+  if (!existing.error) {
+    if (existing.data.public) throw new Error('Local private upload bucket is public.');
+    return;
+  }
+  const created = await client.storage.createBucket(bucket, { public: false });
+  if (created.error) throw new Error('Local private upload bucket could not be created.');
 }
 
 const cli = run('supabase', ['--version']);
@@ -50,6 +72,8 @@ if (cli.error || cli.status !== 0) {
         if (!environment.API_URL || !environment.ANON_KEY || !environment.SERVICE_ROLE_KEY || !environment.DB_URL) {
           throw new Error('Local Supabase stack did not provide the required test configuration.');
         }
+
+        await ensurePrivateUploadBucket(environment);
 
         const migrate = run('node', ['scripts/apply-test-migrations.mjs'], {
           stdio: 'inherit',

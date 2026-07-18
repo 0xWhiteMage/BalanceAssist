@@ -106,6 +106,17 @@ describe('test migration runner', () => {
     expect(workflow).toContain('- run: npm run test:supabase');
   });
 
+  it('keeps protected tables available to the service role while denying browser roles', async () => {
+    const migration = await readFile(resolve(process.cwd(), 'supabase/migrations/018_public_schema_rls.sql'), 'utf8');
+
+    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE[\s\S]*FROM anon/i);
+    expect(migration).toMatch(/REVOKE ALL PRIVILEGES ON TABLE[\s\S]*FROM authenticated/i);
+    expect(migration).toMatch(/GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE[\s\S]*public\.sessions[\s\S]*TO service_role/i);
+    expect(migration).toMatch(/GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role/i);
+    expect(migration).toMatch(/ALTER DEFAULT PRIVILEGES IN SCHEMA public[\s\S]*GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO service_role/i);
+    expect(migration).toMatch(/ALTER DEFAULT PRIVILEGES IN SCHEMA public[\s\S]*GRANT USAGE, SELECT ON SEQUENCES TO service_role/i);
+  });
+
   it('runs the release-proof journey after local stack setup and publishes failure evidence', async () => {
     const workflow = await readFile(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
     const playwright = await readFile(resolve(process.cwd(), 'playwright.config.ts'), 'utf8');

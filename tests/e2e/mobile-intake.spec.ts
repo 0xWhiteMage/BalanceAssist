@@ -3,7 +3,6 @@ import path from 'node:path';
 
 async function enterAiIntake(page: Page) {
   await page.getByRole('button', { name: 'Build a brief with AI' }).click();
-  await page.getByRole('button', { name: 'Continue with AI' }).click();
 
   const input = page.getByPlaceholder(/Type your message|Message the team/i);
   await expect(input).toBeVisible();
@@ -228,15 +227,12 @@ test.describe('mobile intake', () => {
     await page.goto('/preview');
     const input = await enterAiIntake(page);
     const sendMessage = page.getByRole('button', { name: 'Send message' });
-    const progress = page.getByTestId('intake-stage-progress');
-    await expect(progress).toContainText('Stage 1 of 4');
-    await expect(progress).toContainText('Project and objective');
+    await expect(page.getByTestId('intake-stage-progress')).toHaveCount(0);
     await assertDirectContactRoutes(page);
     await assertMinimumTarget(sendMessage);
 
     await input.fill(`${originalWording}. The objective is to introduce it to customers.`);
     await input.press('Enter');
-    await expect(progress).toContainText('Stage 2 of 4');
     await expect(page.getByRole('log').getByText(stages[0].recap, { exact: true })).toBeVisible();
     await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
     await assertDirectContactRoutes(page);
@@ -264,11 +260,9 @@ test.describe('mobile intake', () => {
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
-    await expect(progress).toContainText('Stage 3 of 4');
     await assertMinimumTarget(page.getByRole('button', { name: 'Not sure yet', exact: true }));
     await assertDirectContactRoutes(page);
     await page.getByRole('button', { name: 'Not sure yet', exact: true }).click();
-    await expect(progress).toContainText('Stage 4 of 4');
     await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
     await assertDirectContactRoutes(page);
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
@@ -321,7 +315,6 @@ test.describe('mobile intake', () => {
       const selectors = [
         'html',
         '[role="dialog"][aria-label="Balance Assist"]',
-        '[data-testid="intake-stage-progress"]',
         '#widget-brief-panel',
         '[data-testid="review-panel"]',
         '[data-row-key="projectScope"]',
@@ -391,7 +384,6 @@ test.describe('mobile intake', () => {
       eventName: 'trust_feedback',
       properties: { dimension: 'clarity_helpfulness', response: 'not_quite' }
     }]);
-    await expect(progress).toContainText('Stage 4 of 4');
     const motion = await page.locator('.balance-widget-motion').evaluateAll((elements) => elements.map((element) => {
       const style = getComputedStyle(element);
       return {
@@ -482,7 +474,6 @@ test.describe('mobile intake', () => {
     });
     await page.goto('/preview');
     await page.getByRole('button', { name: 'Build a brief with AI' }).click();
-    await page.getByRole('button', { name: 'Continue with AI' }).click();
 
     const attachment = page.getByRole('button', { name: 'Attach references' });
     await expect(attachment).toBeVisible();

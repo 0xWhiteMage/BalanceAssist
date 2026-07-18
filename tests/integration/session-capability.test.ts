@@ -29,6 +29,13 @@ describe.skipIf(!connectionString)('persisted session capabilities', () => {
     hasSupabaseServerConfigMock.mockReturnValue(true);
     createServerSupabaseClientMock.mockImplementation(() => ({
       rpc: async (name: string, args: Record<string, unknown>) => {
+        if (name === 'record_session_consent') {
+          const result = await client!.query(
+            'select * from public.record_session_consent($1, $2, $3, $4)',
+            [args.p_session_id, args.p_scope, args.p_granted, args.p_notice_version]
+          );
+          return { data: result.rows, error: null };
+        }
         const result = await client!.query(
           `select * from public.${name}($1, $2, $3)`,
           [args.p_key_hash, args.p_limit, args.p_window_seconds]
@@ -114,7 +121,15 @@ describe.skipIf(!connectionString)('persisted session capabilities', () => {
       }));
       expect(rejected.ok).toBe(false);
     } finally {
-      await client!.query('delete from sessions where id = $1', [sessionId]);
+      await client!.query('begin');
+      try {
+        await client!.query("set local app.session_purge = 'on'");
+        await client!.query('delete from sessions where id = $1', [sessionId]);
+        await client!.query('commit');
+      } catch (error) {
+        await client!.query('rollback');
+        throw error;
+      }
     }
   });
 });

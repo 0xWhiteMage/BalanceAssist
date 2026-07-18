@@ -31,13 +31,13 @@ import {
   classifyConfidentialIntent,
   CONFIDENTIAL_INTAKE_RESPONSE
 } from '@/lib/privacy/confidential-intent';
+import { CHAT_PROVIDER_TIMEOUT_MS } from '@/lib/conversation/chat-timeouts';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
 }
 
 type OpenAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-const PROVIDER_TIMEOUT_MS = 15000;
 const CHAT_PROVIDER_UNAVAILABLE = {
   outcome: 'provider_unavailable',
   error: 'Chat service unavailable',
@@ -91,7 +91,7 @@ function buildSharedWorkFromEntries(
 
 async function fetchProvider(input: string, init: RequestInit) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), CHAT_PROVIDER_TIMEOUT_MS);
 
   try {
     return await fetch(input, {

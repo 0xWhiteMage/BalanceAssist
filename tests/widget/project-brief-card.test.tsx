@@ -285,6 +285,18 @@ describe('ProjectBriefCard', () => {
     expect(screen.getByText('A naturalistic launch campaign')).toBeInTheDocument();
   });
 
+  test('does not repeat a generated summary that matches the original wording', () => {
+    render(
+      <ProjectBriefCard
+        draft={{ ...readyDraft, scopePolished: readyDraft.projectScope }}
+        provenance={{ projectScope: 'user-stated', scopePolished: 'inferred' }}
+      />
+    );
+
+    expect(screen.queryByText('AI-drafted summary')).toBeNull();
+    expect(screen.getByText('Original wording')).toBeVisible();
+  });
+
   test('opens long semantic fields in labelled multiline editors', () => {
     const onChange = vi.fn();
     render(

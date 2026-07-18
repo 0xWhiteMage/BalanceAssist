@@ -6,10 +6,11 @@ import type { AddressInfo } from 'node:net';
 import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { installTelegramTransportForTests, sendDocument } from '@/lib/telegram';
+import { sendDocument } from '@/lib/telegram';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const databaseUrl = process.env.TEST_DATABASE_URL;
 const artifactsDir = process.env.RELEASE_PROOF_ARTIFACTS_DIR;
 const runId = `release-proof-${crypto.randomUUID()}`;
 const clientIp = `203.0.113.${Math.floor(Math.random() * 200) + 1}`;
@@ -18,7 +19,7 @@ let appUrl = '';
 let telegramUrl = '';
 let telegramServer: ReturnType<typeof createServer> | undefined;
 let productionServer: ReturnType<typeof createServer> | undefined;
-let uninstallTelegramTransport: (() => void) | undefined;
+const originalFetch = global.fetch;
 const telegramRequests: Array<{ path: string; body: Record<string, unknown> }> = [];
 let sessionId: string | undefined;
 
@@ -79,10 +80,12 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     });
     await new Promise<void>((resolve) => telegramServer!.listen(0, '127.0.0.1', resolve));
     telegramUrl = `http://127.0.0.1:${(telegramServer.address() as AddressInfo).port}`;
-    uninstallTelegramTransport = installTelegramTransportForTests((input, init) => {
-      const telegramRequest = new URL(typeof input === 'string' ? input : input.toString());
-      return fetch(new URL(telegramRequest.pathname, telegramUrl), init);
-    });
+    global.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(typeof input === 'string' ? input : input.toString());
+      return requestUrl.hostname === 'api.telegram.org'
+        ? originalFetch(new URL(requestUrl.pathname, telegramUrl), init)
+        : originalFetch(input, init);
+    }) as typeof fetch;
 
     const port = 39000 + Math.floor(Math.random() * 1000);
     appUrl = `http://127.0.0.1:${port}`;
@@ -105,7 +108,22 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
   });
 
   afterEach(async () => {
-    if (sessionId) await supabase!.from('sessions').delete().eq('id', sessionId);
+    if (sessionId && databaseUrl) {
+      const { Client } = await import('pg');
+      const cleanup = new Client({ connectionString: databaseUrl });
+      await cleanup.connect();
+      try {
+        await cleanup.query('begin');
+        await cleanup.query("set local app.session_purge = 'on'");
+        await cleanup.query('delete from public.sessions where id = $1', [sessionId]);
+        await cleanup.query('commit');
+      } catch (error) {
+        await cleanup.query('rollback');
+        throw error;
+      } finally {
+        await cleanup.end();
+      }
+    }
     await supabase!.from('processed_telegram_updates').delete().eq('update_id', updateId);
     await supabase!.from('api_rate_limits').delete().eq(
       'key_hash',
@@ -116,7 +134,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
   });
 
   afterAll(async () => {
-    uninstallTelegramTransport?.();
+    global.fetch = originalFetch;
     if (productionServer) await new Promise<void>((resolve) => productionServer!.close(() => resolve()));
     if (telegramServer) await new Promise<void>((resolve) => telegramServer!.close(() => resolve()));
   });
@@ -152,7 +170,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     attachment.set('sessionId', sessionId);
     attachment.set('mode', 'analysis');
     attachment.set('file', new Blob(['private analysis'], { type: 'text/plain' }), 'private-analysis.txt');
-    await expect(fetch(`${appUrl}/api/telegram/upload`, {
+    const uploadResponse = await fetch(`${appUrl}/api/telegram/upload`, {
       method: 'POST',
       headers: {
         origin: appUrl,
@@ -161,7 +179,12 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
         'x-upload-mode': 'analysis'
       },
       body: attachment
-    })).resolves.toHaveProperty('status', 200);
+    });
+    const uploadBody = await uploadResponse.json();
+    expect({ status: uploadResponse.status, body: uploadBody }).toMatchObject({
+      status: 200,
+      body: { ok: true, status: 'stored' }
+    });
     const relayRequestId = crypto.randomUUID();
     const relay = await fetch(`${appUrl}/api/telegram/relay`, {
       method: 'POST', headers: { ...authorizedHeaders, 'x-request-id': relayRequestId },

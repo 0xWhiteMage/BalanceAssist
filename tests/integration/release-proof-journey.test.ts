@@ -41,7 +41,11 @@ function result(data: unknown, error: unknown = null) {
 function databaseSupabase(client: import('pg').Client) {
   const selectOne = (table: string, columns: string, column: string, value: unknown) => client
     .query(`select ${columns} from public.${table} where ${column} = $1 limit 1`, [value])
-    .then(({ rows }) => ({ data: rows[0] ?? null, error: null }));
+    .then(({ rows }) => {
+      const data = rows[0] ?? null;
+      if (data && typeof data.telegram_thread_id === 'string') data.telegram_thread_id = Number(data.telegram_thread_id);
+      return { data, error: null };
+    });
   const filtered = (table: string, columns: string, filters: Array<[string, unknown]>) => {
     const where = filters.map(([column], index) => `${column} = $${index + 1}`).join(' and ');
     return client.query(`select ${columns} from public.${table} where ${where}`, filters.map(([, value]) => value));
@@ -68,6 +72,16 @@ function databaseSupabase(client: import('pg').Client) {
       eq: (column: string, value: unknown) => ({
         maybeSingle: () => selectOne(name, columns, column, value),
         order: (_order: string, _options: unknown) => filtered(name, columns, [[column, value]]).then(({ rows }) => ({ data: rows, error: null })),
+        contains: (jsonColumn: string, contained: Record<string, unknown>) => ({
+          order: (orderColumn: string, options: { ascending: boolean }) => ({
+            limit: (limit: number) => ({
+              maybeSingle: () => client.query(
+                `select ${columns} from public.${name} where ${column} = $1 and ${jsonColumn} @> $2::jsonb order by ${orderColumn} ${options.ascending ? 'asc' : 'desc'} limit $3`,
+                [value, JSON.stringify(contained), limit]
+              ).then(({ rows }) => ({ data: rows[0] ?? null, error: null }))
+            })
+          })
+        }),
         eq: (nextColumn: string, nextValue: unknown) => ({
           order: () => ({ limit: () => ({ gt: () => result([], null) }) }),
           maybeSingle: () => filtered(name, columns, [[column, value], [nextColumn, nextValue]]).then(({ rows }) => ({ data: rows[0] ?? null, error: null }))
@@ -82,6 +96,12 @@ function databaseSupabase(client: import('pg').Client) {
         return {
           then: (resolve: (value: { error: null }) => unknown) => client.query(sql, values).then(() => resolve({ error: null })),
           eq: (column: string, value: unknown) => update([...filters, [column, value]]),
+          gt: (column: string, value: unknown) => ({
+            select: () => ({
+              maybeSingle: () => client.query(`${sql} and ${column} > $${values.length + 1} returning *`, [...values, value])
+                .then(({ rows }) => ({ data: rows[0] ?? null, error: null }))
+            })
+          }),
           is: (column: string, value: unknown) => ({
             select: async () => {
               const nullableSql = `${sql} and ${column} is ${value === null ? 'null' : '$' + (values.length + 1)} returning *`;
@@ -338,8 +358,17 @@ describe.skipIf(!connectionString)('release proof journey', () => {
       await expect(client!.query('select public.assert_session_processing_allowed($1) as allowed', [sessionId]))
         .resolves.toMatchObject({ rows: [{ allowed: true }] });
     } finally {
-      await client!.query('delete from public.session_consents where session_id = $1', [sessionId]);
-      await client!.query('delete from public.sessions where id = $1', [sessionId]);
+      await client!.query('begin');
+      try {
+        await client!.query('set local session_replication_role = replica');
+        await client!.query('delete from public.session_consents where session_id = $1', [sessionId]);
+        await client!.query('set local session_replication_role = origin');
+        await client!.query('delete from public.sessions where id = $1', [sessionId]);
+        await client!.query('commit');
+      } catch (error) {
+        await client!.query('rollback');
+        throw error;
+      }
     }
   });
 });

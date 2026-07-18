@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getRetryDelay, shouldEscalate, getMaxRetries, type HandoffSLA } from '@/lib/handoff/sla';
 
 describe('handoff/sla', () => {
@@ -33,6 +33,13 @@ describe('handoff/sla', () => {
   });
 
   describe('shouldEscalate', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-18T00:00:00.000Z'));
+    });
+
+    afterEach(() => vi.useRealTimers());
+
     it('returns false for a recent handoff', () => {
       const now = new Date().toISOString();
       expect(shouldEscalate(now)).toBe(false);

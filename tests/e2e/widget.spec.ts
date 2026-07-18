@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
 
-test('uses an explicit editorial AI shell and labeled launcher', async ({ page }) => {
+test('uses a compact rounded AI shell and accessible icon launcher', async ({ page }) => {
   await page.goto('/preview');
 
   const dialog = page.getByRole('dialog', { name: 'Balance Assist' });
@@ -28,13 +28,12 @@ test('uses an explicit editorial AI shell and labeled launcher', async ({ page }
     expect(shell.top).toBeGreaterThan(0);
     expect(shell.right).toBeLessThanOrEqual(viewport.width);
     expect(shell.bottom).toBeLessThanOrEqual(viewport.height);
-    expect(shell.borderRadius).toBeLessThanOrEqual(4);
+    expect(shell.borderRadius).toBe(16);
   }
 
   await page.getByRole('button', { name: 'Close Balance Assist' }).click();
   const launcher = page.getByRole('button', { name: 'Open Balance Assist' });
   await expect(launcher).toBeVisible();
-  await expect(launcher).toContainText('Balance Assist');
   const launcherBounds = await launcher.boundingBox();
   expect(launcherBounds).not.toBeNull();
   expect(launcherBounds!.width).toBeGreaterThanOrEqual(56);
@@ -123,7 +122,6 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
   await page.goto('/preview');
 
   const initialNames = ['Build a brief with AI', 'Talk to the team without AI', 'Leave'];
-  const disclosedNames = ['Continue with AI', 'Talk to the team without AI', 'Leave'];
   const actions = page.locator('[data-testid="data-use-notice"] .balance-entry-action');
   const panelBackgrounds = ['#101010', '#1d1d1d'];
 
@@ -188,9 +186,7 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
 
   await expectActionOrderSizeAndFocus(initialNames);
   await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Space');
-  await expectActionOrderSizeAndFocus(disclosedNames);
 
-  await page.getByRole('button', { name: 'Continue with AI', exact: true }).press('Enter');
   await expect(page.getByRole('button', { name: 'Attach references' })).toBeVisible();
 
   await reloadEntry();
@@ -198,7 +194,6 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
   await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
 
   await reloadEntry();
-  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Enter');
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Space');
   await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
 
@@ -207,7 +202,6 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
   await expect(page.getByRole('dialog', { name: 'Balance Assist' })).toHaveCount(0);
 
   await reloadEntry();
-  await page.getByRole('button', { name: 'Build a brief with AI', exact: true }).press('Space');
   await page.getByRole('button', { name: 'Leave', exact: true }).press('Enter');
   await expect(page.getByRole('dialog', { name: 'Balance Assist' })).toHaveCount(0);
 });
@@ -222,7 +216,6 @@ test('restores focus after closing its nested reference dialog without force cli
   await page.goto('/preview');
 
   await page.getByRole('button', { name: 'Build a brief with AI' }).click();
-  await page.getByRole('button', { name: 'Continue with AI' }).click();
   const attachment = page.getByRole('button', { name: 'Attach references' });
   await attachment.focus();
   await attachment.press('Enter');
@@ -257,13 +250,11 @@ test('stores an available private upload through the keyboard path', async ({ pa
   await page.goto('/preview');
 
   await page.getByRole('button', { name: 'Build a brief with AI' }).click();
-  await page.getByRole('button', { name: 'Continue with AI' }).click();
   const attachment = page.getByRole('button', { name: 'Attach references' });
   await attachment.focus();
   await attachment.press('Enter');
   await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeVisible();
 
-  await page.getByLabel(/Balance Assist may analyse these files/i).check();
   const privateUpload = page.getByRole('button', { name: /store file privately/i });
   await expect(privateUpload).toBeEnabled();
   await privateUpload.focus();

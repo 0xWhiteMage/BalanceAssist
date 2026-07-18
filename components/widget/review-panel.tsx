@@ -123,7 +123,7 @@ export function ReviewPanel({
             data-in-flight={approvalInFlight ? 'true' : 'false'}
             data-ready={ready ? 'true' : 'false'}
             aria-busy={approvalInFlight || undefined}
-            aria-describedby={!ready ? 'approve-disabled-hint' : undefined}
+            aria-describedby={!ready ? 'approve-disabled-hint' : 'producer-transfer-note'}
             style={{
               width: '100%',
               minHeight: 44,
@@ -143,6 +143,11 @@ export function ReviewPanel({
           >
             {approveButtonLabel}
           </button>
+          {ready && (
+            <div id="producer-transfer-note" style={{ fontSize: 10, color: brandTokens.colors.mutedText, lineHeight: 1.5, textAlign: 'center' }}>
+              Sends this brief and its reference links to Balance through Telegram and may create a Monday.com record. Those copies have separate retention.
+            </div>
+          )}
           {approvalInFlight && (
             <span
               role="status"

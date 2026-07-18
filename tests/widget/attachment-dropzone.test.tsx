@@ -8,9 +8,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function enableAnalysisConsent() {
-  fireEvent.click(screen.getByLabelText(/balance assist may analyse/i));
-}
+const analysisConsent = { aiAnalysis: true, producerShare: false, consentedAt: '2026-07-18T00:00:00.000Z' };
 
 function mockPrivateStorageAvailable() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -78,11 +76,10 @@ test('blocks a confidential filename before consent persistence, byte reads, upl
       onAddFile={onAddFile}
       onFileAnalyzed={onFileAnalyzed}
       sessionId="sess-guard"
+      consent={analysisConsent}
     />
   );
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
-  enableAnalysisConsent();
-
   const file = new File(['do not read'], 'confidential-client-brief.txt', { type: 'text/plain' });
   const arrayBufferSpy = vi.fn(async () => new ArrayBuffer(0));
   Object.defineProperty(file, 'arrayBuffer', { value: arrayBufferSpy });
@@ -105,10 +102,9 @@ test('allows a benign filename containing a near-match', async () => {
   });
   global.fetch = fetchMock as unknown as typeof fetch;
   const { container } = render(
-    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-safe" />
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-safe" consent={analysisConsent} />
   );
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
-  enableAnalysisConsent();
   const input = container.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(input, {
     target: { files: [new File(['hello'], 'personal-project.txt', { type: 'text/plain' })] }
@@ -128,10 +124,9 @@ test('shows the stable non-echoing diversion when the server rejects a filename'
     });
   }) as unknown as typeof fetch;
   const { container } = render(
-    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-server-guard" />
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-server-guard" consent={analysisConsent} />
   );
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
-  enableAnalysisConsent();
   fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
     target: { files: [new File(['ordinary'], filename, { type: 'text/plain' })] }
   });
@@ -198,10 +193,10 @@ test('dropzone states that file sharing is unavailable and disables selection', 
   expect(document.querySelector('input[type="file"]')).toBeDisabled();
 });
 
-test('shows analysis consent for files but no producer-review checkbox', () => {
+test('does not repeat AI or producer consent at the file boundary', () => {
   render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} />);
 
-  expect(screen.getByLabelText(/balance assist may analyse/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/balance assist may analyse/i)).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/balance team may review anything/i)).not.toBeInTheDocument();
 });
 
@@ -262,8 +257,6 @@ test('does not attempt analysis-only uploads while file sharing is unavailable',
     <AttachmentDropzone onAddLink={vi.fn()} onAddFile={onAddFile} onFileAnalyzed={onFileAnalyzed} sessionId="sess-2" />
   );
 
-  enableAnalysisConsent();
-
   const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
   if (!fileInput) {
     throw new Error('File input missing');
@@ -288,9 +281,8 @@ test('forwards only the server-derived analysis payload to the draft callback', 
     }
     return new Response('{}', { status: 404 });
   }) as unknown as typeof fetch;
-  const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} onFileAnalyzed={onFileAnalyzed} sessionId="sess-2" />);
+  const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} onFileAnalyzed={onFileAnalyzed} sessionId="sess-2" consent={analysisConsent} />);
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
-  enableAnalysisConsent();
   const input = container.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [new File(['client text'], 'brief.txt', { type: 'text/plain' })] } });
 

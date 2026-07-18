@@ -184,7 +184,6 @@ function mockWidgetFetch() {
 
 async function startAiConversation() {
   fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Continue with AI' }));
 
   const input = (await waitFor(() => {
     const el = document.querySelector('input[placeholder]') as HTMLInputElement | null;
@@ -200,7 +199,7 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay approved confirmation (Fix 5)', () => {
-  test('renders one live canonical ready direction that follows viewport changes without entering chat history', async () => {
+  test('uses the rail on desktop and one live ready direction on mobile without entering chat history', async () => {
     const resize = setResponsiveViewport(false);
     mockWidgetFetch();
     render(<WidgetOverlay autoOpen={true} />);
@@ -208,16 +207,17 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.change(input, { target: { value: '30s animation for social media' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    const readyStatus = await screen.findByRole('status', { name: 'Brief ready' }, { timeout: 7000 });
-    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the brief panel.');
+    expect(await screen.findByText('Core brief ready', {}, { timeout: 7000 })).toBeVisible();
+    expect(screen.queryByRole('status', { name: 'Brief ready' })).toBeNull();
     expect(screen.getByRole('log')).not.toHaveTextContent(/Your core brief is ready|tab on the right/i);
 
     act(() => resize(true));
+    const readyStatus = screen.getByRole('status', { name: 'Brief ready' });
     expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the Brief tab.');
     expect(screen.getAllByText(/Your core brief is ready/i)).toHaveLength(1);
 
     act(() => resize(false));
-    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the brief panel.');
+    expect(screen.queryByRole('status', { name: 'Brief ready' })).toBeNull();
     expect(screen.queryByText(/tab on the right|rail on the right/i)).toBeNull();
   }, 15_000);
 
