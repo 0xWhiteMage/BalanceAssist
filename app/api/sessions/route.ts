@@ -103,7 +103,7 @@ export async function POST(request: Request) {
       .single();
 
     if (error || !data || data.id !== sessionId) {
-      logger.error('Failed to persist session', { errorCode: error?.code });
+      logger.error('Failed to persist session', { databaseCode: error?.code });
       return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
     }
 
