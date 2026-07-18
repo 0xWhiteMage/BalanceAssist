@@ -199,7 +199,7 @@ async function startAiConversation() {
 }
 
 describe('WidgetOverlay approved confirmation (Fix 5)', () => {
-  test('uses the rail on desktop and one live ready direction on mobile without entering chat history', async () => {
+  test('uses Brief tabs in compact desktop and mobile modes without entering directions in chat history', async () => {
     const resize = setResponsiveViewport(false);
     mockWidgetFetch();
     render(<WidgetOverlay autoOpen={true} />);
@@ -207,9 +207,12 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.change(input, { target: { value: '30s animation for social media' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(await screen.findByText('Core brief ready', {}, { timeout: 7000 })).toBeVisible();
+    const transcript = screen.getByRole('log');
+    const desktopBriefTab = await screen.findByRole('tab', { name: 'Brief' }, { timeout: 7000 });
+    fireEvent.click(desktopBriefTab);
+    expect(screen.getByText('Ready to send. Add context if useful.')).toBeVisible();
     expect(screen.queryByRole('status', { name: 'Brief ready' })).toBeNull();
-    expect(screen.getByRole('log')).not.toHaveTextContent(/Your core brief is ready|tab on the right/i);
+    expect(transcript).not.toHaveTextContent(/Your core brief is ready|tab on the right/i);
 
     act(() => resize(true));
     const readyStatus = screen.getByRole('status', { name: 'Brief ready' });
@@ -426,6 +429,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     const input = await startAiConversation();
     fireEvent.change(input, { target: { value: '30s animation for social media' } });
     fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Brief' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
 
     expect(await screen.findByRole('alert', {}, { timeout: 7000 })).toHaveTextContent(/changed.*reload|reload.*retry/i);
@@ -481,6 +485,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.change(input, { target: { value: '30s animation for social media' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Brief' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
 
     expect(await screen.findByText('Delivered to the Balance team')).toBeInTheDocument();

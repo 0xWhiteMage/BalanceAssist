@@ -327,6 +327,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       expect(screen.queryByTestId('review-rail')).not.toBeNull();
     });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Brief' }));
     fireEvent.click(screen.getByTestId('brief-row-edit-contactName'));
     const editor = await screen.findByDisplayValue('Taylor');
     fireEvent.change(editor, { target: { value: 'Jordan' } });

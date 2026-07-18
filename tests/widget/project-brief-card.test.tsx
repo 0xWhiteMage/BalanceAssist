@@ -108,7 +108,7 @@ describe('ProjectBriefCard', () => {
       />
     );
     fireEvent.change(screen.getByRole('textbox', { name: 'Reference URL' }), { target: { value: 'https://example.com/board' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add reference link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add link' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Link could not be saved.');
     expect(screen.getByRole('textbox', { name: 'Reference URL' })).toHaveValue('https://example.com/board');
 

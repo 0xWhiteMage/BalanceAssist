@@ -73,11 +73,13 @@ function getBackgroundElements(dialog: HTMLElement): HTMLElement[] {
 export function useDialogFocus({
   active,
   dialogRef,
-  onDismiss
+  onDismiss,
+  modal = true
 }: {
   active: boolean;
   dialogRef: RefObject<HTMLElement | null>;
   onDismiss: () => void;
+  modal?: boolean;
 }) {
   const dismissRef = useRef(onDismiss);
   dismissRef.current = onDismiss;
@@ -88,7 +90,7 @@ export function useDialogFocus({
     const dialog = dialogRef.current;
     if (!dialog) return;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const backgroundElements = getBackgroundElements(dialog);
+    const backgroundElements = modal ? getBackgroundElements(dialog) : [];
     dialogStack.push(dialog);
     backgroundElements.forEach(claimInert);
 
@@ -102,7 +104,7 @@ export function useDialogFocus({
         dismissRef.current();
         return;
       }
-      if (event.key !== 'Tab') return;
+      if (event.key !== 'Tab' || !modal) return;
 
       const elements = focusables();
       if (elements.length === 0) {
@@ -129,5 +131,5 @@ export function useDialogFocus({
       backgroundElements.forEach(releaseInert);
       if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
-  }, [active, dialogRef]);
+  }, [active, dialogRef, modal]);
 }

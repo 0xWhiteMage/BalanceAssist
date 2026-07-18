@@ -117,12 +117,23 @@ describe('WidgetOverlay accessibility', () => {
     expect(dialog).toHaveAttribute('aria-label', 'Balance Assist');
   });
 
-  test('widget is a labelled modal dialog at mobile and desktop widths', () => {
+  test('compact desktop is nonmodal while maximized and mobile modes are modal', () => {
     stubFetch();
-    const { container } = render(<WidgetOverlay autoOpen={true} />);
-    const dialog = container.querySelector('[role="dialog"]');
-    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    const { container, unmount } = render(<WidgetOverlay autoOpen={true} />);
+    let dialog = container.querySelector('[role="dialog"]');
+    expect(dialog).not.toHaveAttribute('aria-modal');
     expect(dialog).toHaveAttribute('aria-labelledby', 'balance-assist-dialog-title');
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize Balance Assist' }));
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveAttribute('data-maximized', 'true');
+    unmount();
+
+    setMobileViewport(true);
+    stubFetch();
+    const mobile = render(<WidgetOverlay autoOpen={true} />);
+    dialog = mobile.container.querySelector('[role="dialog"]');
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(screen.queryByRole('button', { name: /maximize balance assist/i })).not.toBeInTheDocument();
   });
 
   test('pressing Escape closes the widget', async () => {
@@ -179,6 +190,7 @@ describe('WidgetOverlay accessibility', () => {
       expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     });
 
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize Balance Assist' }));
     const dialog = container.querySelector('[role="dialog"]')!;
     const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
@@ -206,6 +218,7 @@ describe('WidgetOverlay accessibility', () => {
       expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     });
 
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize Balance Assist' }));
     const dialog = container.querySelector('[role="dialog"]')!;
     const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));

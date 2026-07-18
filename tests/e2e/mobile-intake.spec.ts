@@ -260,9 +260,10 @@ test.describe('mobile intake', () => {
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
-    await assertMinimumTarget(page.getByRole('button', { name: 'Not sure yet', exact: true }));
     await assertDirectContactRoutes(page);
-    await page.getByRole('button', { name: 'Not sure yet', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Not sure yet', exact: true })).toHaveCount(0);
+    await input.fill('Not sure yet');
+    await input.press('Enter');
     await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
     await assertDirectContactRoutes(page);
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
@@ -666,7 +667,7 @@ test.describe('mobile intake', () => {
 
     const referenceInput = page.getByRole('textbox', { name: 'Reference URL' });
     await referenceInput.fill('https://vimeo.com/123');
-    await page.getByRole('button', { name: 'Add reference link' }).click();
+    await page.getByRole('button', { name: 'Add link' }).click();
     const referenceLink = page.getByRole('link', { name: 'https://vimeo.com/123' });
     await expect(referenceLink).toBeVisible();
     await page.getByRole('button', { name: 'Remove https://vimeo.com/123' }).click();
@@ -683,9 +684,9 @@ test.describe('mobile intake', () => {
     await expect(briefTab).toBeFocused();
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
 
-    const human = page.getByRole('button', { name: 'Talk to the team without AI', exact: true });
+    const human = page.getByRole('button', { name: 'Team', exact: true });
     await expect(human).toBeVisible();
-    await expect(human).toHaveClass(/balance-widget-action/);
+    await expect(human).toHaveClass(/balance-widget-contact-action/);
     const humanBounds = await human.boundingBox();
     expect(humanBounds).not.toBeNull();
     expect(humanBounds!.width).toBeGreaterThanOrEqual(44);

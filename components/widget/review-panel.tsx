@@ -43,6 +43,10 @@ export function ReviewPanel({
   onChange,
   onBookCatchUp,
   onTalkToHuman,
+  onViewBrief,
+  onClearBrief,
+  onWithdrawTransfer,
+  onRequestDeletion,
   provenance = {},
   referenceLinks = [],
   onAddReference,
@@ -59,6 +63,10 @@ export function ReviewPanel({
   onChange?: (key: string, value: string) => Promise<BriefMutationOutcome>;
   onBookCatchUp?: () => void;
   onTalkToHuman?: () => void;
+  onViewBrief?: () => void;
+  onClearBrief?: () => void;
+  onWithdrawTransfer?: () => void;
+  onRequestDeletion?: () => void;
   provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
   referenceLinks?: ReadonlyArray<{ id: string; kind: string; url: string }>;
   onAddReference?: (url: string) => Promise<BriefMutationOutcome>;
@@ -68,6 +76,8 @@ export function ReviewPanel({
   requiresReapproval?: boolean;
 }) {
   const ready = isBriefReadyForApproval(draft);
+  const hasProjectNeed = Boolean(draft.projectScope.trim() || draft.projectObjective.trim() || draft.service.trim());
+  const hasContactDetail = Boolean(draft.contactName.trim() || draft.contactEmail.trim());
 
   const approveDisabled = !ready || approved || approvalInFlight;
   const approveButtonLabel = approvalInFlight
@@ -88,17 +98,31 @@ export function ReviewPanel({
       data-mode={mode}
       aria-label="Project brief review"
     >
-      <section aria-label="Core brief status" style={{ display: 'grid', gap: 4 }}>
-        <strong style={{ color: ready ? '#4ade80' : brandTokens.colors.warmGold, fontSize: 12 }}>
-          {ready ? 'Core brief ready' : 'Core brief needs a project need and contact detail'}
-        </strong>
+      <section aria-label="Brief readiness" className="balance-widget-readiness">
+        <div className={`balance-widget-readiness-item${hasProjectNeed ? ' is-complete' : ''}`}>
+          <span className="balance-widget-readiness-mark" aria-hidden="true">{hasProjectNeed ? '\u2713' : '1'}</span>
+          <span>Project need</span>
+        </div>
+        <div className={`balance-widget-readiness-item${hasContactDetail ? ' is-complete' : ''}`}>
+          <span className="balance-widget-readiness-mark" aria-hidden="true">{hasContactDetail ? '\u2713' : '2'}</span>
+          <span>Contact detail</span>
+        </div>
+        <p className="balance-widget-readiness-note">
+          {ready ? 'Ready to send. Add context if useful.' : 'Complete both items to send.'}
+        </p>
       </section>
 
-      <section aria-label="Optional brief details" style={{ display: 'grid', gap: 4 }}>
-        <span style={{ color: brandTokens.colors.mutedText, fontSize: 11, lineHeight: 1.45 }}>
-          Add any useful context, or leave these for the team conversation
-        </span>
-      </section>
+      {(onViewBrief || onClearBrief || onWithdrawTransfer || onRequestDeletion) && (
+        <details className="balance-widget-data-controls">
+          <summary>Brief &amp; data</summary>
+          <div className="balance-widget-data-actions" aria-label="Brief and data controls">
+            {onViewBrief && <button type="button" className="balance-widget-inline-action" onClick={onViewBrief}>View brief</button>}
+            {onClearBrief && <button type="button" className="balance-widget-inline-action" onClick={onClearBrief}>Clear brief</button>}
+            {onWithdrawTransfer && <button type="button" className="balance-widget-inline-action" onClick={onWithdrawTransfer}>Withdraw consent</button>}
+            {onRequestDeletion && <button type="button" className="balance-widget-inline-action balance-widget-inline-action-danger" onClick={onRequestDeletion}>Request deletion</button>}
+          </div>
+        </details>
+      )}
 
       <ProjectBriefCard
         draft={draft}
@@ -111,6 +135,25 @@ export function ReviewPanel({
         onAddReference={onAddReference}
         onRemoveReference={onRemoveReference}
       />
+
+      <div className="balance-widget-contact-actions" aria-label="Contact options">
+        <a href="mailto:hello@balancestudio.tv" className="balance-widget-contact-action">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+          Email
+        </a>
+        {onBookCatchUp && (
+          <button type="button" onClick={onBookCatchUp} className="balance-widget-contact-action">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 011 1v14H4V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            Schedule
+          </button>
+        )}
+        {onTalkToHuman && (
+          <button type="button" onClick={onTalkToHuman} className="balance-widget-contact-action">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+            Team
+          </button>
+        )}
+      </div>
 
       {!approved && (
         <div style={{ display: 'grid', gap: 6 }}>
@@ -176,8 +219,6 @@ export function ReviewPanel({
           style={{ display: 'grid', gap: 10, padding: 12, border: '1px solid rgba(74, 222, 128, 0.6)', borderRadius: 10, background: 'rgba(74, 222, 128, 0.10)' }}
         >
           <strong style={{ color: '#4ade80', fontSize: 12 }}>{confirmation}</strong>
-          {onBookCatchUp && <SecondaryButton onClick={onBookCatchUp} ariaLabel="Book a catch-up call">Book a catch-up</SecondaryButton>}
-          {onTalkToHuman && <SecondaryButton onClick={onTalkToHuman} ariaLabel="Talk to a human team member">Talk to a human</SecondaryButton>}
         </div>
       )}
     </div>

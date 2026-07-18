@@ -16,10 +16,16 @@ export const balanceLogoUrl =
 export function WidgetOverlayHeader({
   isTeamConnected,
   humanRelayActive,
+  isMaximized,
+  canResize,
+  onToggleMaximized,
   onClose
 }: {
   isTeamConnected: boolean;
   humanRelayActive: boolean;
+  isMaximized: boolean;
+  canResize: boolean;
+  onToggleMaximized: () => void;
   onClose: () => void;
 }) {
   return (
@@ -44,13 +50,20 @@ export function WidgetOverlayHeader({
           </p>
         </div>
       </div>
-      <button
-        onClick={onClose}
-        className="balance-widget-action balance-widget-header-close"
-        aria-label="Close Balance Assist"
-      >
-        &#10005;
-      </button>
+      <div className="balance-widget-header-actions">
+        {canResize && (
+          <button type="button" onClick={onToggleMaximized} className="balance-widget-action balance-widget-header-icon" aria-label={isMaximized ? 'Minimize Balance Assist' : 'Maximize Balance Assist'}>
+            {isMaximized ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 4v5H4M15 20v-5h5M4 9l6-6M20 15l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            )}
+          </button>
+        )}
+        <button type="button" onClick={onClose} className="balance-widget-action balance-widget-header-icon" aria-label="Close Balance Assist">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
+      </div>
     </header>
   );
 }
@@ -1009,9 +1022,9 @@ function ReferenceLinkManager({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+    <div className="balance-widget-reference-manager">
       <label htmlFor="brief-reference-url" style={{ fontSize: labelFontSize, color: brandTokens.colors.mutedText }}>Reference links</label>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="balance-widget-reference-form">
         <input
           id="brief-reference-url"
           type="url"
@@ -1019,16 +1032,16 @@ function ReferenceLinkManager({
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           disabled={pending === 'add'}
-          style={{ flex: 1, minWidth: 0, minHeight: 44 }}
+          className="balance-widget-reference-input"
         />
-        <button type="button" onClick={() => void add()} disabled={!onAdd || Boolean(pending) || !url.trim()} style={{ minWidth: 44, minHeight: 44 }}>
-          Add reference link
+        <button type="button" onClick={() => void add()} disabled={!onAdd || Boolean(pending) || !url.trim()} className="balance-widget-reference-button">
+          Add link
         </button>
       </div>
       {links.length > 0 ? links.map((link) => {
         const supported = normalizePublicReferenceUrl(link.url) !== null;
         return (
-        <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <div key={link.id} className="balance-widget-reference-row">
           <div style={{ minWidth: 0, flex: 1 }}>
             {supported ? (
               <a href={link.url} target="_blank" rel="noreferrer" style={{ color: brandTokens.colors.warmGold, overflowWrap: 'anywhere' }}>{link.url}</a>
@@ -1042,8 +1055,9 @@ function ReferenceLinkManager({
             aria-label={`Remove ${link.url}`}
             onClick={() => void remove(link.id)}
             disabled={!onRemove || Boolean(pending)}
-            style={{ minWidth: 44, minHeight: 44 }}
+            className="balance-widget-reference-remove"
           >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M8 10v8M12 10v8M16 10v8M7 7l1 14h8l1-14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
             Remove
           </button>
         </div>

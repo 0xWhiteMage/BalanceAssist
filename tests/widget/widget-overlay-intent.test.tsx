@@ -778,6 +778,7 @@ describe('canonical chat response ownership', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await screen.findByText('Original launch film', {}, { timeout: 7000 });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Brief' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit project description' }));
     const scopeInput = screen.getByRole('textbox', { name: 'Project description' });
     fireEvent.change(scopeInput, { target: { value: 'Late stale edit' } });
@@ -841,11 +842,13 @@ describe('canonical chat response ownership', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await screen.findByText('Original launch film', {}, { timeout: 7000 });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Brief' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit project description' }));
     const scopeInput = screen.getByRole('textbox', { name: 'Project description' });
     fireEvent.change(scopeInput, { target: { value: 'Saved after provider outage' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save project description' }));
     await waitFor(() => expect(editCalls).toBe(1));
+    fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
     const chatInput = screen.getByPlaceholderText(/Type your message/i);
     await waitFor(() => expect(chatInput).not.toBeDisabled(), { timeout: 7000 });
 
@@ -878,7 +881,7 @@ describe('canonical chat response ownership', () => {
 });
 
 describe('thesis-aligned optional intake actions', () => {
-  test('routes the objective non-answer through chat without qualification or handoff', async () => {
+  test('accepts a typed objective non-answer without rendering the removed shortcut', async () => {
     const chatBodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
     const requestedUrls: string[] = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -914,9 +917,10 @@ describe('thesis-aligned optional intake actions', () => {
     fireEvent.change(input, { target: { value: 'We need a launch film' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
-    const action = await screen.findByRole('button', { name: 'Not sure yet' }, { timeout: 7000 });
-    await waitFor(() => expect(action).not.toBeDisabled(), { timeout: 7000 });
-    fireEvent.click(action);
+    await waitFor(() => expect(chatBodies).toHaveLength(1), { timeout: 7000 });
+    expect(screen.queryByRole('button', { name: 'Not sure yet' })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'Not sure yet' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     await waitFor(() => expect(chatBodies).toHaveLength(2), { timeout: 7000 });
     expect(chatBodies[1].messages.at(-1)).toEqual({ role: 'user', content: 'Not sure yet' });

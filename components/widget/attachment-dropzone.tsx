@@ -36,31 +36,39 @@ async function readFileBuffer(file: File): Promise<ArrayBuffer> {
   return new Response(file).arrayBuffer();
 }
 
-function uploadErrorMessage(code: unknown, status: number): string {
+function uploadErrorDetails(code: unknown, status: number): { message: string; retryable: boolean } {
   switch (code) {
     case 'confidential_file_not_allowed':
-      return CONFIDENTIAL_INTAKE_RESPONSE;
+      return { message: CONFIDENTIAL_INTAKE_RESPONSE, retryable: false };
     case 'session_id_required':
-      return 'Your secure session is not ready. Please wait before selecting a file.';
+      return { message: 'Your secure session is not ready. Please wait before selecting a file.', retryable: false };
     case 'analysis_consent_required':
-      return 'File analysis requires your AI brief consent. Please re-confirm it and retry.';
+      return { message: 'File analysis requires your AI brief consent. Please re-confirm it before uploading.', retryable: false };
     case 'file_validation_failed':
-      return 'The selected file could not be verified. Check its format and size, then retry.';
+      return { message: 'The selected file could not be verified. Check its format and size, then select it again.', retryable: false };
     case 'file_uploads_unavailable':
-      return 'File sharing is unavailable, or the selection exceeds the current upload limits.';
+      return status === 413
+        ? { message: 'The upload request is too large. Choose fewer or smaller files.', retryable: false }
+        : { message: 'File sharing is temporarily unavailable. Try again in a moment.', retryable: true };
+    case 'private_storage_upload_failed':
+      return { message: 'Private storage could not accept the file. Try the upload again.', retryable: true };
+    case 'private_storage_metadata_failed':
+      return { message: 'The file could not be registered safely after upload. Try again in a moment.', retryable: true };
     case 'private_storage_recovery_unavailable':
-      return 'The upload could not be completed safely. Please retry later.';
+      return { message: 'The upload could not be completed safely. Try again later.', retryable: true };
     case 'private_storage_unavailable':
-      return 'Private file storage is temporarily unavailable. Please retry later.';
+      return { message: 'Private file storage is temporarily unavailable. Try again later.', retryable: true };
     case 'upload_mode_required':
     case 'invalid_upload_mode':
     case 'upload_mode_mismatch':
-      return 'The upload request was invalid. Please select the file again.';
+      return { message: 'The upload request was invalid. Please select the file again.', retryable: false };
     default:
       if (status === 401 || status === 403) {
-        return 'Your secure session or consent could not be verified. Please refresh and retry.';
+        return { message: 'Your secure session or consent could not be verified. Refresh before uploading again.', retryable: false };
       }
-      return 'The file could not be uploaded. Please retry.';
+      if (status === 413) return { message: 'The upload request is too large. Choose fewer or smaller files.', retryable: false };
+      if (status >= 500) return { message: `The upload service is temporarily unavailable (${status}). Try again in a moment.`, retryable: true };
+      return { message: `The upload request failed (${status}). Select the file again.`, retryable: false };
   }
 }
 
@@ -173,6 +181,52 @@ export function AttachmentDropzone({
     }
   }
 
+  async function uploadFiles(fileArray: File[]) {
+    if (!sessionId) return;
+    try {
+      const fd = new FormData();
+      fd.set('mode', 'analysis');
+      for (const file of fileArray) {
+        updateFileStatus(file.name, 'validating');
+        fd.append('files', file, file.name);
+      }
+      const res = await fetch('/api/telegram/upload', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'x-upload-mode': 'analysis', 'x-session-id': sessionId },
+        body: fd
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { code?: unknown } | null;
+        const details = uploadErrorDetails(body?.code, res.status);
+        setError(details.message);
+        for (const file of fileArray) updateFileStatus(file.name, details.retryable ? 'retryable' : 'failed', details.message);
+        return;
+      }
+      const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
+      setError(null);
+      for (const [index, file] of fileArray.entries()) {
+        const extractedText = body.analyses?.[index]?.extractedText;
+        if (typeof extractedText !== 'string' || !extractedText.trim()) {
+          updateFileStatus(file.name, 'stored-no-text');
+          continue;
+        }
+        try {
+          await onFileAnalyzed?.(file.name, extractedText);
+          updateFileStatus(file.name, 'stored');
+        } catch {
+          const analysisError = 'Stored privately, but its text could not be added to the AI draft.';
+          updateFileStatus(file.name, 'analysis-failed', analysisError);
+          setError(analysisError);
+        }
+      }
+    } catch {
+      const uploadError = 'The upload service could not be reached. Check your connection and try again.';
+      setError(uploadError);
+      for (const file of fileArray) updateFileStatus(file.name, 'retryable', uploadError);
+    }
+  }
+
   async function handleFiles(input: HTMLInputElement) {
     const files = input.files;
     const selectedFiles = files ? Array.from(files) : [];
@@ -218,41 +272,7 @@ export function AttachmentDropzone({
       setQueuedFiles((prev) => [...prev, ...newQueued]);
       setError(null);
 
-      const fd = new FormData();
-      fd.set('mode', 'analysis');
-      for (const file of fileArray) {
-        updateFileStatus(file.name, 'validating');
-        fd.append('files', file, file.name);
-      }
-      const res = await fetch('/api/telegram/upload', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'x-upload-mode': 'analysis', 'x-session-id': sessionId },
-        body: fd
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null) as { code?: unknown } | null;
-        const uploadError = uploadErrorMessage(body?.code, res.status);
-        setError(uploadError);
-        for (const file of fileArray) updateFileStatus(file.name, 'retryable', uploadError);
-        return;
-      }
-      const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
-      for (const [index, file] of fileArray.entries()) {
-        const extractedText = body.analyses?.[index]?.extractedText;
-        if (typeof extractedText !== 'string' || !extractedText.trim()) {
-          updateFileStatus(file.name, 'stored-no-text');
-          continue;
-        }
-        try {
-          await onFileAnalyzed?.(file.name, extractedText);
-          updateFileStatus(file.name, 'stored');
-        } catch {
-          const analysisError = 'Stored privately, but its text could not be added to the AI draft.';
-          updateFileStatus(file.name, 'analysis-failed', analysisError);
-          setError(analysisError);
-        }
-      }
+      await uploadFiles(fileArray);
     } catch {
       const processingError = 'The file could not be processed. Please retry.';
       setError(processingError);
@@ -285,7 +305,7 @@ export function AttachmentDropzone({
         </div>
       </div>
 
-      <form onSubmit={handleUrlSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+      <form onSubmit={handleUrlSubmit} className="balance-widget-reference-form">
         <label htmlFor="attachment-reference-url" style={{ width: '100%', fontSize: 11, color: brandTokens.colors.lightText }}>
           Reference link
         </label>
@@ -295,33 +315,11 @@ export function AttachmentDropzone({
           placeholder="Paste a reference link..."
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            padding: '8px 10px',
-            borderRadius: 999,
-            border: `1px solid ${brandTokens.colors.border}`,
-            background: 'transparent',
-            color: brandTokens.colors.lightText,
-            fontSize: 16
-          }}
+          className="balance-widget-reference-input"
         />
         <button
           type="submit"
-          className="balance-widget-action"
-          style={{
-            padding: '8px 14px',
-            borderRadius: 999,
-            border: 'none',
-            background: `linear-gradient(135deg, ${brandTokens.colors.warmGold} 0%, ${brandTokens.colors.lightGold} 100%)`,
-            color: brandTokens.colors.baseBlack,
-            fontSize: 10,
-            fontWeight: 700,
-            cursor: 'pointer',
-            textTransform: 'uppercase',
-            letterSpacing: '0.16em',
-            flexShrink: 0
-          }}
+          className="balance-widget-reference-button"
         >
           Add link
         </button>
@@ -403,7 +401,7 @@ export function AttachmentDropzone({
         <div role="status" aria-live="polite" style={{ display: 'grid', gap: 4, fontSize: 11, color: brandTokens.colors.mutedText }}>
           {queuedFiles.map((qf) => (
             <div key={qf.file.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: qf.status === 'failed' ? 'tomato' : brandTokens.colors.lightText }}>
+              <span style={{ color: qf.status === 'failed' || qf.status === 'retryable' ? 'tomato' : brandTokens.colors.lightText }}>
                 {qf.file.name}
               </span>
               <span style={{ fontSize: 10 }}>
@@ -413,8 +411,13 @@ export function AttachmentDropzone({
                 {qf.status === 'stored-no-text' && 'Stored privately; no readable text was found for AI analysis'}
                 {qf.status === 'analysis-failed' && qf.error}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}
-                {qf.status === 'retryable' && `Retry: ${qf.error}`}
+                {qf.status === 'retryable' && qf.error}
               </span>
+              {qf.status === 'retryable' && (
+                <button type="button" className="balance-widget-inline-action" onClick={() => void uploadFiles([qf.file])}>
+                  Retry upload
+                </button>
+              )}
             </div>
           ))}
         </div>

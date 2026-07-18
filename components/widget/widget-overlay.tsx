@@ -37,7 +37,7 @@ import { getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
-const OPTIONAL_ANSWER_ACTIONS = ['Not sure yet', 'Skip', 'Prefer not to share'] as const;
+const OPTIONAL_ANSWER_ACTIONS = ['Skip', 'Prefer not to share'] as const;
 const DELETION_RECEIPT_STORAGE_KEY = 'balance-assist-deletion-receipt';
 
 function isReviewNavigationOnly(text: string) {
@@ -148,6 +148,7 @@ export function WidgetOverlay({
   calendlyUrlOverride?: string;
 }) {
   const [isOpen, setIsOpen] = useState(autoOpen);
+  const [isMaximized, setIsMaximized] = useState(false);
   const [view, setView] = useState<'chat' | 'calendly'>('chat');
   const [calendlyUrl, setCalendlyUrl] = useState<string | null>(null);
   const [scheduleRequestDismissed, setScheduleRequestDismissed] = useState(false);
@@ -526,7 +527,12 @@ export function WidgetOverlay({
     if (entryPath === 'ai' && noticeConsent && !aiBootstrapCompletedRef.current) void startConversation();
   }
 
-  useDialogFocus({ active: isOpen, dialogRef: widgetContainerRef, onDismiss: handleClose });
+  useDialogFocus({
+    active: isOpen,
+    dialogRef: widgetContainerRef,
+    onDismiss: handleClose,
+    modal: isMobile || isMaximized
+  });
   useDialogFocus({ active: attachmentOpen, dialogRef: attachmentDialogRef, onDismiss: () => setAttachmentOpen(false) });
 
   useEffect(() => {
@@ -1322,15 +1328,12 @@ export function WidgetOverlay({
   const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
   const briefReady = entryPath === 'ai' && !isTeamConnected && isBriefReadyForApproval(draft);
   const showContextBrief = entryPath === 'ai' && !isTeamConnected && hasProjectIntent && !briefApproved;
+  const useBriefTabs = showContextBrief && (isMobile || !isMaximized);
   const optionalAnswerActions =
-    currentStep === 'objective' || currentStep === 'timeline'
+    currentStep === 'audience' || currentStep === 'outputs' || currentStep === 'references'
       ? [OPTIONAL_ANSWER_ACTIONS[0]]
-      : currentStep === 'audience' || currentStep === 'outputs'
-        ? [OPTIONAL_ANSWER_ACTIONS[0], OPTIONAL_ANSWER_ACTIONS[1]]
         : currentStep === 'budget'
-          ? [OPTIONAL_ANSWER_ACTIONS[2]]
-          : currentStep === 'references'
-            ? [OPTIONAL_ANSWER_ACTIONS[1]]
+          ? [OPTIONAL_ANSWER_ACTIONS[1]]
             : [];
 
   return (
@@ -1341,12 +1344,13 @@ export function WidgetOverlay({
         <div
           ref={widgetContainerRef}
           role="dialog"
-          aria-modal="true"
+          aria-modal={isMobile || isMaximized ? 'true' : undefined}
           aria-label="Balance Assist"
           aria-labelledby="balance-assist-dialog-title"
           tabIndex={-1}
           className="balance-widget-dialog balance-widget-wrap balance-widget-motion"
           data-rail={showContextBrief ? 'true' : 'false'}
+          data-maximized={isMaximized ? 'true' : 'false'}
         >
           {/* Calendly View Overlay */}
           {view === 'calendly' && calendlyUrl && (
@@ -1378,6 +1382,9 @@ export function WidgetOverlay({
           <WidgetOverlayHeader
             isTeamConnected={isTeamConnected}
             humanRelayActive={humanRequested || entryPath === 'human'}
+            isMaximized={isMaximized}
+            canResize={!isMobile}
+            onToggleMaximized={() => setIsMaximized((value) => !value)}
             onClose={handleClose}
           />
 
@@ -1424,7 +1431,7 @@ export function WidgetOverlay({
             </div>
           )}
 
-          {isMobile && showContextBrief && (
+          {useBriefTabs && (
             <div
               role="tablist"
               aria-label="Widget sections"
@@ -1506,11 +1513,11 @@ export function WidgetOverlay({
               <div
                 data-testid="review-rail"
                 id="widget-brief-panel"
-                role={isMobile ? 'tabpanel' : undefined}
-                aria-labelledby={isMobile ? 'widget-brief-tab' : undefined}
-                aria-hidden={isMobile && tabMode !== 'brief' ? 'true' : undefined}
-                hidden={isMobile && tabMode !== 'brief'}
-                inert={isMobile && tabMode !== 'brief' ? true : undefined}
+                role={useBriefTabs ? 'tabpanel' : undefined}
+                aria-labelledby={useBriefTabs ? 'widget-brief-tab' : undefined}
+                aria-hidden={useBriefTabs && tabMode !== 'brief' ? 'true' : undefined}
+                hidden={useBriefTabs && tabMode !== 'brief'}
+                inert={useBriefTabs && tabMode !== 'brief' ? true : undefined}
                 className="balance-widget-rail"
               >
                 <ReviewPanel
@@ -1538,6 +1545,13 @@ export function WidgetOverlay({
                     setView('calendly');
                   }}
                   onTalkToHuman={handleTeamConnect}
+                  onViewBrief={() => void showMemoryInventory()}
+                  onClearBrief={() => void clearEditableDraft()}
+                  onWithdrawTransfer={() => void withdrawTransferConsent()}
+                  onRequestDeletion={() => {
+                    setDeletionConfirmationPending(true);
+                    void botSay('Deletion freezes new work for this session and queues removal of its stored project data. Reply DELETE exactly to confirm. Work already reserved with a provider may still complete, and provider copies or backups have separate retention controls.');
+                  }}
                 />
                 {briefApproved && sessionId && !deletionFrozen && (
                   <TrustFeedback
@@ -1550,11 +1564,11 @@ export function WidgetOverlay({
 
             <div
               id="widget-chat-panel"
-              role={isMobile ? 'tabpanel' : undefined}
-              aria-labelledby={isMobile ? 'widget-chat-tab' : undefined}
-               aria-hidden={isMobile && showContextBrief && tabMode !== 'chat' ? 'true' : undefined}
-               hidden={isMobile && showContextBrief && tabMode !== 'chat'}
-               inert={isMobile && showContextBrief && tabMode !== 'chat' ? true : undefined}
+              role={useBriefTabs ? 'tabpanel' : undefined}
+              aria-labelledby={useBriefTabs ? 'widget-chat-tab' : undefined}
+              aria-hidden={useBriefTabs && tabMode !== 'chat' ? 'true' : undefined}
+              hidden={useBriefTabs && tabMode !== 'chat'}
+              inert={useBriefTabs && tabMode !== 'chat' ? true : undefined}
               tabIndex={0}
               className="balance-widget-chat balance-widget-motion"
             >
@@ -1696,7 +1710,7 @@ export function WidgetOverlay({
                 onClick={() => {
                   setRailMode('summary');
                   sessionDraft.reopenApproval();
-                  if (isMobile) setTabMode('brief');
+                  if (useBriefTabs) setTabMode('brief');
                 }}
               >
                 Refine brief
@@ -1710,18 +1724,7 @@ export function WidgetOverlay({
             </div>
           )}
 
-          {canInteract && isMobile && showContextBrief && tabMode === 'brief' && (
-            <button
-              type="button"
-              className="balance-widget-action"
-              style={{ margin: '10px 14px' }}
-              onClick={() => void handleTeamConnect()}
-            >
-              Talk to the team without AI
-            </button>
-          )}
-
-          {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (!isMobile || !showContextBrief || tabMode === 'chat') && (
+          {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (!useBriefTabs || tabMode === 'chat') && (
             <div className="balance-widget-quick-actions">
               {optionalAnswerActions.map((action) => (
                 <button
@@ -1738,7 +1741,7 @@ export function WidgetOverlay({
           )}
 
           {/* Input Bar */}
-          {canInteract && (!isMobile || !showContextBrief || tabMode === 'chat') && (
+          {canInteract && (!useBriefTabs || tabMode === 'chat') && (
             <>
               {isTeamConnected && humanFileRequestOpen && <FileRequestInputHint />}
               {showAttachmentButton && !deletionFrozen && (
@@ -1766,34 +1769,6 @@ export function WidgetOverlay({
                     Accepted file types
                   </button>
                 </div>
-              )}
-              {!deletionFrozen && sessionId && (
-                <details
-                  data-testid="project-data-controls"
-                  style={{ padding: '8px 12px', borderTop: `1px solid ${brandTokens.colors.subtleBorder}`, color: brandTokens.colors.mutedText, fontSize: 11 }}
-                >
-                  <summary style={{ cursor: 'pointer', color: brandTokens.colors.lightText, minHeight: 32, display: 'flex', alignItems: 'center' }}>
-                    Editable brief and data controls
-                  </summary>
-                  <p style={{ margin: '6px 0 8px', lineHeight: 1.5 }}>
-                    View or clear the editable brief, withdraw transfer consent, or request durable deletion. The brief view is not a complete inventory of stored or provider data.
-                  </p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    <button type="button" className="balance-widget-action" onClick={() => void showMemoryInventory()}>View editable brief</button>
-                    <button type="button" className="balance-widget-action" onClick={() => void clearEditableDraft()}>Clear editable brief</button>
-                    <button type="button" className="balance-widget-action" onClick={() => void withdrawTransferConsent()}>Withdraw transfer consent</button>
-                    <button
-                      type="button"
-                      className="balance-widget-action"
-                      onClick={() => {
-                        setDeletionConfirmationPending(true);
-                        void botSay('Deletion freezes new work for this session and queues removal of its stored project data. Reply DELETE exactly to confirm. Work already reserved with a provider may still complete, and provider copies or backups have separate retention controls.');
-                      }}
-                    >
-                      Request deletion
-                    </button>
-                  </div>
-                </details>
               )}
               <div className="balance-widget-composer">
                 <div className="balance-widget-composer-inner">

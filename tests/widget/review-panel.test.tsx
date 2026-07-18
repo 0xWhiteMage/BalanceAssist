@@ -28,7 +28,9 @@ describe('ReviewPanel', () => {
   test('renders semantic core and optional groups without field counts or internal words', () => {
     render(<ReviewPanel {...baseProps} draft={readyDraft} />);
 
-    expect(screen.getByText('Core brief ready')).toBeInTheDocument();
+    expect(screen.getByText('Ready to send. Add context if useful.')).toBeInTheDocument();
+    expect(screen.getByText('Project need').closest('div')).toHaveClass('is-complete');
+    expect(screen.getByText('Contact detail').closest('div')).toHaveClass('is-complete');
     expect(screen.getByRole('group', { name: 'Optional details' })).toBeInTheDocument();
     expect(screen.queryByText(/\d+ of \d+ captured/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('review-panel').textContent).not.toMatch(
@@ -39,8 +41,7 @@ describe('ReviewPanel', () => {
   test('explains the semantic requirements when the core brief is not ready', () => {
     render(<ReviewPanel {...baseProps} draft={createDefaultLeadDraft()} />);
 
-    expect(screen.getByText('Core brief needs a project need and contact detail')).toBeInTheDocument();
-    expect(screen.getByText('Add any useful context, or leave these for the team conversation')).toBeInTheDocument();
+    expect(screen.getByText('Complete both items to send.')).toBeInTheDocument();
     expect(screen.getByTestId('approve-button')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Send brief to Balance' })).toHaveAccessibleDescription(
       'Add a project need and contact detail to enable sending.'
@@ -61,7 +62,7 @@ describe('ReviewPanel', () => {
 
     expect(screen.getByText('Project summary')).toBeInTheDocument();
     expect(screen.getByText('Legacy generated interpretation')).toBeInTheDocument();
-    expect(screen.getByText('Core brief needs a project need and contact detail')).toBeInTheDocument();
+    expect(screen.getByText('Complete both items to send.')).toBeInTheDocument();
     expect(screen.getByTestId('approve-button')).toBeDisabled();
   });
 
@@ -150,5 +151,25 @@ describe('ReviewPanel', () => {
     );
 
     expect(screen.getByRole('link', { name: 'https://vimeo.com/123' })).toBeInTheDocument();
+  });
+
+  test('offers concise email, schedule, team, and brief data actions', () => {
+    render(
+      <ReviewPanel
+        {...baseProps}
+        draft={readyDraft}
+        onBookCatchUp={vi.fn()}
+        onTalkToHuman={vi.fn()}
+        onViewBrief={vi.fn()}
+        onClearBrief={vi.fn()}
+        onWithdrawTransfer={vi.fn()}
+        onRequestDeletion={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('link', { name: /email/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(screen.getByRole('button', { name: /schedule/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /team/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Brief & data'));
+    expect(screen.getByRole('button', { name: 'Request deletion' })).toBeInTheDocument();
   });
 });

@@ -144,7 +144,7 @@ test('classifies a pasted YouTube URL and adds a chip', async () => {
   render(<AttachmentDropzone onAddLink={onAdd} onAddFile={vi.fn()} />);
   const input = screen.getByRole('textbox', { name: 'Reference link' });
   expect(input).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Add link' })).toHaveClass('balance-widget-action');
+  expect(screen.getByRole('button', { name: 'Add link' })).toHaveClass('balance-widget-reference-button');
   fireEvent.change(input, { target: { value: 'https://youtu.be/abc' } });
   fireEvent.submit(input.closest('form')!);
   await waitFor(() => expect(onAdd).toHaveBeenCalledWith('https://youtu.be/abc'));
@@ -346,14 +346,19 @@ test('awaits file analyses sequentially and reports stored files with no readabl
   expect(input.value).toBe('');
 });
 
-test('maps server error codes and clears the input so the same file can be retried', async () => {
+test('maps storage errors, retains the file, and retries without another selection', async () => {
+  let uploadAttempts = 0;
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes('/consent')) return new Response('{}', { status: 200 });
     if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
-    return new Response(JSON.stringify({ code: 'private_storage_unavailable', error: 'internal detail' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    uploadAttempts += 1;
+    if (uploadAttempts === 1) {
+      return new Response(JSON.stringify({ code: 'private_storage_upload_failed', error: 'internal detail' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response(JSON.stringify({ ok: true, analyses: [{ extractedText: '' }] }), { status: 200 });
   }) as unknown as typeof fetch;
   const { container } = render(
     <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-retry" consent={analysisConsent} />
@@ -363,7 +368,27 @@ test('maps server error codes and clears the input so the same file can be retri
   const file = new File(['retry me'], 'retry.txt', { type: 'text/plain' });
   fireEvent.change(input, { target: { files: [file] } });
 
-  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/private file storage is temporarily unavailable/i));
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/private storage could not accept/i));
   expect(screen.getByRole('alert')).not.toHaveTextContent(/internal detail/i);
   expect(input.value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }));
+  await waitFor(() => expect(screen.getByText(/stored privately; no readable text/i)).toBeInTheDocument());
+  expect(uploadAttempts).toBe(2);
+});
+
+test('explains a 413 response without offering a blind retry', async () => {
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/consent')) return new Response('{}', { status: 200 });
+    if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
+    return new Response('', { status: 413 });
+  }) as unknown as typeof fetch;
+  const { container } = render(
+    <AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-large" consent={analysisConsent} />
+  );
+  await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
+  fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+    target: { files: [new File(['small fixture'], 'brief.txt', { type: 'text/plain' })] }
+  });
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/upload request is too large/i));
+  expect(screen.queryByRole('button', { name: 'Retry upload' })).not.toBeInTheDocument();
 });

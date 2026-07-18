@@ -104,7 +104,7 @@ test.describe('balance assist intake via persistent rail', () => {
     expect(chatCallCount).toBe(2);
   });
 
-  test('drives the four-stage canonical intake through correction, retry, and reapproval', async ({ page }) => {
+  test('drives the maximized four-stage intake through correction, retry, and reapproval', async ({ page }) => {
     const sessionId = 'desktop-thesis-session';
     const originalWording = 'A launch film for our new accessibility initiative';
     const correctedWording = 'A launch film for our accessibility programme';
@@ -319,6 +319,7 @@ test.describe('balance assist intake via persistent rail', () => {
     await page.goto('/preview');
 
     const input = await enterAiIntake(page);
+    await page.getByRole('button', { name: 'Maximize Balance Assist' }).click();
 
     const rail = page.getByTestId('review-rail');
     await expect(rail).toHaveCount(0);
@@ -364,7 +365,9 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(rail.getByText(correctedWording, { exact: true })).toBeVisible();
     await assertDirectContactRoutes(page);
 
-    await page.getByRole('button', { name: 'Not sure yet', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Not sure yet', exact: true })).toHaveCount(0);
+    await input.fill('Not sure yet');
+    await input.press('Enter');
     await expect(page.getByRole('log').getByText(stages[2].message, { exact: true })).toBeVisible();
     await expect(page.getByRole('log').getByText(stages[2].recap, { exact: true })).toBeVisible();
     await expect(rail.getByText('Prefer not to share', { exact: true })).toBeVisible();
@@ -378,7 +381,7 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(page.getByRole('log').getByText(stages[3].recap, { exact: true })).toBeVisible();
     const reviewPanel = page.getByTestId('review-panel');
     await expect(reviewPanel).toHaveAttribute('data-mode', 'summary');
-    await expect(reviewPanel.getByText('Core brief ready', { exact: true })).toBeVisible();
+    await expect(reviewPanel.getByText('Ready to send. Add context if useful.', { exact: true })).toBeVisible();
     await expect(reviewPanel.getByText('Optional details', { exact: true })).toBeVisible();
     await expect(reviewPanel).not.toContainText('8 of 8');
     await assertDirectContactRoutes(page);
