@@ -121,7 +121,15 @@ describe.skipIf(!connectionString)('persisted session capabilities', () => {
       }));
       expect(rejected.ok).toBe(false);
     } finally {
-      await client!.query('delete from sessions where id = $1', [sessionId]);
+      await client!.query('begin');
+      try {
+        await client!.query("set local app.session_purge = 'on'");
+        await client!.query('delete from sessions where id = $1', [sessionId]);
+        await client!.query('commit');
+      } catch (error) {
+        await client!.query('rollback');
+        throw error;
+      }
     }
   });
 });

@@ -276,11 +276,16 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                 '052_monday_scheduler_health.sql',
                 '053_monday_reconciliation.sql',
                  '054_human_contact_consent.sql',
-                 '055_final_review_approval.sql'
+                  '055_final_review_approval.sql',
+                  '056_trust_centered_session_controls.sql',
+                  '057_event_deletion_freeze.sql',
+                  '058_unsent_crm_deletion.sql',
+                  '059_consent_1_2_compatibility.sql',
+                  '060_consent_1_2_cutover.sql'
     ]);
   });
 
-  it('removes a prefixed cleanup record and its storage object after its session was deleted', async () => {
+  it('queues a prefixed storage object for cleanup after its session was deleted', async () => {
     const { Client } = await import('pg');
     const runner = await loadRunner();
     const database = `balance_assist_legacy_cleanup_${process.pid}_${Date.now()}`;
@@ -315,7 +320,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
           [objectKey]
         );
 
-        expect(remaining.rows).toEqual([{ cleanup: false, object: false }]);
+        expect(remaining.rows).toEqual([{ cleanup: true, object: true }]);
       } finally {
         await cleanupClient.end();
       }
@@ -976,7 +981,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
-  it('serializes concurrent claims and suppresses a claim revoked before send reservation', async () => {
+  it('serializes concurrent claims and removes an unsent claim revoked before send reservation', async () => {
     const session = await client!.query("insert into public.sessions (source_url) values ('https://claim-revocation.example.test') returning id");
     const sessionId = session.rows[0].id;
     const crmLead = await client!.query(
@@ -1011,7 +1016,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       expect(claimed.rows[0]).toMatchObject({ id: outbox.rows[0].id, resolution: 'claimed' });
       expect(empty.rows).toEqual([]);
       expect(reserved.rows).toEqual([]);
-      expect(state.rows).toEqual([{ state: 'suppressed', claim_token: null }]);
+      expect(state.rows).toEqual([]);
     } finally {
       await competingClient.end();
       await client!.query('delete from public.monday_sync_outbox where crm_lead_id = $1', [crmLeadId]);
@@ -1106,11 +1111,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       const blocked = await client!.query('select public.delete_session_for_deletion_job($1, $2) as deleted', [claim.rows[0].id, claim.rows[0].lease_token]);
 
       expect(queued.rows).toEqual([{ count: 3 }]);
-      expect(states.rows).toEqual(expect.arrayContaining([
-        { id: terminal, lifecycle_state: 'deletion_requested' },
-        { id: dueReview, lifecycle_state: 'review_overdue' },
-        { id: graceExpired, lifecycle_state: 'deletion_requested' },
-      ]));
+      expect(states.rows).toEqual([{ id: dueReview, lifecycle_state: 'review_overdue' }]);
       expect(renewed.rows).toEqual([{ renewed: true }]);
       expect(afterRenewal.rows).toEqual([{ lifecycle_state: 'active', due_after_renewal: true }]);
       expect(purged.rows[0].count).toEqual(expect.objectContaining({ deleted_sessions: expect.any(Number) }));
@@ -1214,7 +1215,12 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                   '052:052_monday_scheduler_health.sql',
                   '053:053_monday_reconciliation.sql',
                   '054:054_human_contact_consent.sql',
-                  '055:055_final_review_approval.sql'
+                   '055:055_final_review_approval.sql',
+                   '056:056_trust_centered_session_controls.sql',
+                   '057:057_event_deletion_freeze.sql',
+                   '058:058_unsent_crm_deletion.sql',
+                   '059:059_consent_1_2_compatibility.sql',
+                   '060:060_consent_1_2_cutover.sql'
     ]);
   });
 
@@ -1648,7 +1654,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
     }
   });
 
-  it('queues CRM deletion when producer-transfer consent is revoked', async () => {
+  it('removes an unsent CRM projection when producer-transfer consent is revoked', async () => {
     const session = await client!.query("insert into public.sessions (source_url) values ('https://crm-revocation.example.test') returning id");
     const sessionId = session.rows[0].id;
     const crmLead = await client!.query("insert into public.crm_leads (source_session_id, desired_revision, review_due_at) values ($1, 1, now() + interval '1 day') returning id", [sessionId]);
@@ -1659,8 +1665,8 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       const lead = await client!.query('select lifecycle_state from public.crm_leads where id = $1', [crmLeadId]);
       const deletion = await client!.query("select operation, state from public.monday_sync_outbox where crm_lead_id = $1 and operation = 'delete'", [crmLeadId]);
 
-      expect(lead.rows).toEqual([{ lifecycle_state: 'deletion_requested' }]);
-      expect(deletion.rows).toEqual([{ operation: 'delete', state: 'pending' }]);
+      expect(lead.rows).toEqual([]);
+      expect(deletion.rows).toEqual([]);
     } finally {
       await client!.query('delete from public.monday_sync_outbox where crm_lead_id = $1', [crmLeadId]);
       await client!.query('delete from public.crm_leads where id = $1', [crmLeadId]);

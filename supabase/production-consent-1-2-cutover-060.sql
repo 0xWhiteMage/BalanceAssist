@@ -54,7 +54,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, extensions, pg_temp
 AS $$
 DECLARE
   v_session public.sessions%ROWTYPE;
@@ -160,7 +160,7 @@ BEGIN
   SELECT * INTO v_crm FROM public.crm_leads WHERE source_session_id = p_session_id FOR UPDATE;
 
   SELECT revision INTO v_revision FROM public.crm_lead_revisions
-  WHERE crm_lead_id = v_crm.id AND approval_input_hash = v_approval_hash;
+  WHERE crm_lead_id = v_crm.id AND crm_lead_revisions.approval_input_hash = v_approval_hash;
   IF v_revision IS NULL THEN
     v_revision := v_crm.desired_revision + 1;
     v_approved_at := now();

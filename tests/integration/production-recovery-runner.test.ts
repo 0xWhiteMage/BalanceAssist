@@ -35,6 +35,7 @@ type RecoveryRunner = {
 
 const temporaryDirectories: string[] = [];
 const versions = Array.from({ length: 19 }, (_, index) => String(index + 19).padStart(3, '0'));
+const normalizeNewlines = (value: string) => value.replace(/\r\n?/g, '\n');
 
 async function loadRunner(): Promise<RecoveryRunner> {
   return import(
@@ -57,7 +58,7 @@ afterEach(async () => {
 
 describe('production recovery runner', () => {
   it('keeps the SQL Editor fallback transactional, source-verified, and storage-neutral', async () => {
-    const artifact = await readFile(resolve(process.cwd(), 'supabase/production-recovery-019-037.sql'), 'utf8');
+    const artifact = normalizeNewlines(await readFile(resolve(process.cwd(), 'supabase/production-recovery-019-037.sql'), 'utf8'));
     const documentation = (await readFile(resolve(process.cwd(), 'docs/private-attachment-storage.md'), 'utf8')).replace(/\r\n/g, '\n');
     const migrations = (await import(pathToFileURL(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs')).href))
       .getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')) as Migration[];
@@ -88,7 +89,7 @@ describe('production recovery runner', () => {
     expect(artifact.indexOf("RAISE EXCEPTION 'recovery migrations 019-037 are already recorded: %'")).toBeLessThan(firstSourceSection);
 
     for (const migration of recoveryMigrations) {
-      const source = await readFile(migration.path, 'utf8');
+      const source = normalizeNewlines(await readFile(migration.path, 'utf8'));
       const section = new RegExp(
         `-- BEGIN ${migration.filename.replace('.', '\\.')}\\r?\\n-- =+\\r?\\n([\\s\\S]*?)-- END ${migration.filename.replace('.', '\\.')}\\r?\\n`
       ).exec(artifact);
@@ -101,7 +102,7 @@ describe('production recovery runner', () => {
     expect((artifact.match(/-- BEGIN 0(?:19|2[0-9]|3[0-7])_/g) ?? [])).toHaveLength(19);
 
     for (const migration of excludedMigrations) {
-      const source = await readFile(migration.path, 'utf8');
+      const source = normalizeNewlines(await readFile(migration.path, 'utf8'));
       expect(artifact).not.toContain(migration.filename);
       expect(artifact).not.toContain(source);
     }
@@ -151,7 +152,7 @@ describe('production recovery runner', () => {
   });
 
   it('labels the production bundle as source evidence while preserving every source section', async () => {
-    const bundle = await readFile(resolve(process.cwd(), 'supabase/production-migrations-019-043.sql'), 'utf8');
+    const bundle = normalizeNewlines(await readFile(resolve(process.cwd(), 'supabase/production-migrations-019-043.sql'), 'utf8'));
     const migrations = (await import(pathToFileURL(resolve(process.cwd(), 'scripts/apply-test-migrations.mjs')).href))
       .getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')) as Migration[];
 
@@ -160,7 +161,7 @@ describe('production recovery runner', () => {
     expect(bundle).toContain('approved 019-037');
     expect(bundle).toContain('038-043 require their protected workflow');
     for (const migration of migrations.filter(({ version }) => BigInt(version) >= 19n && BigInt(version) <= 43n)) {
-      const source = await readFile(migration.path, 'utf8');
+      const source = normalizeNewlines(await readFile(migration.path, 'utf8'));
       const section = new RegExp(
         `-- BEGIN ${migration.filename.replace('.', '\\.')}\\r?\\n-- =+\\r?\\n([\\s\\S]*?)\\r?\\n-- END ${migration.filename.replace('.', '\\.')}\\r?\\n`
       ).exec(bundle);

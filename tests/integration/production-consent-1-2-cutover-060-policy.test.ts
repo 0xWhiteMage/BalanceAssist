@@ -31,6 +31,8 @@ describe('production consent 1.2 cutover migration 060 policy', () => {
     expect(source).toContain("v_human_contact.notice_version IS DISTINCT FROM '1.2'");
     expect(source).toContain("v_session.deletion_state <> 'active'");
     expect(source).toContain("consent.notice_version IS DISTINCT FROM '1.2'");
+    expect(source).toContain('SET search_path = public, extensions, pg_temp');
+    expect(source).toContain('crm_lead_revisions.approval_input_hash = v_approval_hash');
     expect(source).not.toContain("notice_version IS DISTINCT FROM '1.1'");
     expect(artifact.trimEnd()).toMatch(/COMMIT;$/);
   });
