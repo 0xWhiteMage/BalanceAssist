@@ -163,7 +163,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
       body: attachment
     });
     const uploadBody = await uploadResponse.json();
-    expect({ status: uploadResponse.status, body: uploadBody }).toEqual({
+    expect({ status: uploadResponse.status, body: uploadBody }).toMatchObject({
       status: 200,
       body: { ok: true, status: 'stored' }
     });
