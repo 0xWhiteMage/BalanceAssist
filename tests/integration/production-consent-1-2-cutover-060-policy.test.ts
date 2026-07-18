@@ -59,5 +59,33 @@ describe('production consent 1.2 cutover migration 060 policy', () => {
     expect(workflow).toContain('previous_deployment_url');
     expect(workflow).toContain('vercel alias set "$PREVIOUS_DEPLOYMENT_URL" "$PRODUCTION_URL"');
     expect(workflow).toContain("version = '060' AND filename = '060_consent_1_2_cutover.sql'");
+    expect(workflow).toContain("'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure");
+    expect(workflow).toContain("'search_path=public, extensions, pg_temp'");
+    expect(workflow).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')");
+    expect(workflow).toContain('fn.public_execute !== false');
+  });
+
+  test('supports an audited owner-authorized emergency cutover without weakening normal review gates', async () => {
+    const workflow = await readFile(resolve(root, '.github/workflows/emergency-consent-1-2-cutover.yml'), 'utf8');
+    expect(workflow).toContain('environment: production-consent-cutover');
+    expect(workflow).toContain('AUTHORIZE CONSENT 1.2 EMERGENCY CUTOVER');
+    expect(workflow).toContain("comment.author_association === 'OWNER'");
+    expect(workflow).toContain("line('Normal-Review-Path', 'unavailable-solo-owner-repository')");
+    expect(workflow).toContain('test "$release_sha" = "$(git rev-parse refs/remotes/origin/main)"');
+    expect(workflow).toContain("run.event === 'push'");
+    expect(workflow).toContain("run.path === '.github/workflows/ci.yml'");
+    expect(workflow).toContain("deployment.readyState !== 'READY'");
+    expect(workflow).toContain('sha !== process.env.RELEASE_SHA');
+    expect(workflow).toContain("project.gitProviderOptions?.createDeployments !== 'disabled'");
+    expect(workflow).toContain('git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main');
+    expect(workflow).toContain('node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run');
+    expect(workflow).toContain('supabase/production-consent-1-2-cutover-060.sql');
+    expect(workflow).toContain("'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure");
+    expect(workflow).toContain("'search_path=public, extensions, pg_temp'");
+    expect(workflow).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')");
+    expect(workflow).toContain('/api/internal/handoff-dispatch');
+    expect(workflow).toContain('/api/internal/deletion-worker');
+    expect(workflow).toContain('session-after-deletion.json');
+    expect(workflow).toContain('/api/internal/scheduler-health');
   });
 });
