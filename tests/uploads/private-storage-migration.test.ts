@@ -59,6 +59,15 @@ describe('private attachment storage migration', () => {
     expect(migration).toMatch(/service-role cleanup worker[\s\S]*?delete.*object,[\s\S]*?then.*cleanup/i);
   });
 
+  test('queues orphaned Storage objects instead of deleting Storage metadata directly', () => {
+    const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/045_orphaned_private_attachment_cleanup.sql'), 'utf8');
+
+    expect(migration).toMatch(/INSERT INTO public\.private_attachment_cleanup/i);
+    expect(migration).toMatch(/FROM storage\.objects/i);
+    expect(migration).toMatch(/'pending_cleanup'/i);
+    for (const pattern of storageMutationPatterns) expect(migration).not.toMatch(pattern);
+  });
+
   test('uses read-only catalog checks for private bucket, Storage RLS, and browser policies', () => {
     const liveAttestation = readFileSync(resolve(process.cwd(), 'supabase/migrations/033_private_attachment_live_attestation.sql'), 'utf8');
     const effectiveAttestation = readFileSync(resolve(process.cwd(), 'supabase/migrations/034_private_attachment_effective_attestation.sql'), 'utf8');
