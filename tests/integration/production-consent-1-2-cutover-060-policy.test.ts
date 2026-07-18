@@ -82,6 +82,8 @@ describe('production consent 1.2 cutover migration 060 policy', () => {
     expect(workflow).toContain('node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run');
     expect(workflow).toContain('SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}');
     expect(workflow).toContain('supabase db query --linked --file supabase/production-consent-1-2-cutover-060.sql');
+    expect(workflow).toContain("readSupabaseQueryRows(process.argv[2])");
+    expect(workflow).not.toContain('JSON.parse(input).rows');
     expect(workflow).toContain('supabase/verify-consent-1-2-cutover-060.sql');
     expect(workflow).not.toContain('PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}');
     expect(workflow).toContain('supabase/production-consent-1-2-cutover-060.sql');

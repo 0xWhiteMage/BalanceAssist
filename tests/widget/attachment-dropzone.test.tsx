@@ -116,7 +116,7 @@ test('allows a benign filename containing a near-match', async () => {
   await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
 });
 
-test('shows the stable non-echoing diversion when the server rejects a filename', async () => {
+test('shows the stable diversion only in the latest upload log when the server rejects a filename', async () => {
   const filename = 'ordinary-client-brief.txt';
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
@@ -134,8 +134,9 @@ test('shows the stable non-echoing diversion when the server rejects a filename'
     target: { files: [new File(['ordinary'], filename, { type: 'text/plain' })] }
   });
 
-  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/cannot process confidential/i));
-  expect(screen.getByRole('alert').textContent).not.toContain(filename);
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/cannot process confidential/i));
+  expect(screen.getByRole('status')).not.toHaveTextContent(/code|internal detail/i);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
 test('classifies a pasted YouTube URL and adds a chip', async () => {
@@ -181,7 +182,7 @@ test('requires an HTTPS URL before invoking the canonical mutation', async () =>
 test('renders the uppercase section header and short subhead describing the upload affordance', () => {
   render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-unavailable-copy" />);
   expect(
-    screen.getByText(/share files to help us understand your project/i)
+    screen.getByText(/add project files/i)
   ).toBeInTheDocument();
   expect(
     screen.getByText(/file sharing is temporarily unavailable.*reference link/i)
@@ -213,7 +214,8 @@ test('enables file selection only after the server verifies private storage', as
   const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} onAddFile={vi.fn()} sessionId="sess-ready" />);
 
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
-  expect(screen.getByText(/never sent to the team/i)).toBeInTheDocument();
+  expect(screen.getByText(/private for 24 hours.*used only for this AI draft/i)).toBeInTheDocument();
+  expect(screen.getByTestId('private-analysis-upload-disclosure')).toHaveTextContent(/never sent to the Balance team/i);
 });
 
 test('keeps file selection disabled until a secure session ID exists', async () => {
@@ -368,8 +370,9 @@ test('maps storage errors, retains the file, and retries without another selecti
   const file = new File(['retry me'], 'retry.txt', { type: 'text/plain' });
   fireEvent.change(input, { target: { files: [file] } });
 
-  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/private storage could not accept/i));
-  expect(screen.getByRole('alert')).not.toHaveTextContent(/internal detail/i);
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/private storage could not accept/i));
+  expect(screen.getByRole('status')).not.toHaveTextContent(/internal detail/i);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(input.value).toBe('');
   fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }));
   await waitFor(() => expect(screen.getByText(/stored privately; no readable text/i)).toBeInTheDocument());
@@ -389,6 +392,7 @@ test('explains a 413 response without offering a blind retry', async () => {
   fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
     target: { files: [new File(['small fixture'], 'brief.txt', { type: 'text/plain' })] }
   });
-  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/upload request is too large/i));
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/upload request is too large/i));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Retry upload' })).not.toBeInTheDocument();
 });

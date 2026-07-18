@@ -16,9 +16,12 @@ describe('human relay public status', () => {
 
     const action = screen.getByRole('button', { name: /Talk to the team without AI/ });
     expect(action).toHaveAttribute('type', 'button');
-    expect(action).toHaveClass('balance-widget-action');
+    expect(action).toHaveClass('balance-widget-contact-action');
     expect(screen.getByRole('link', { name: 'Email the team' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
     expect(screen.getByRole('link', { name: 'Book a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+    expect(screen.getByText('Email')).toBeVisible();
+    expect(screen.getByText('Schedule')).toBeVisible();
+    expect(screen.getByText('Team')).toBeVisible();
   });
 
   test('describes unavailable delivery without provider detail', () => {

@@ -25,22 +25,18 @@ function formWith(file: File, mode: 'analysis' | 'human' = 'analysis') {
 const sessionId = '11111111-2222-3333-4444-555555555555';
 
 async function post(form: FormData, headers: HeadersInit = {}) {
-  const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
-  try {
-    const { POST } = await import('@/app/api/telegram/upload/route');
-    return await POST(new Request('http://localhost/api/telegram/upload', {
-      method: 'POST',
-      headers: {
-        origin: 'https://www.balancestudio.tv',
-        'x-session-capability': 'capability',
-        'x-session-id': sessionId,
-        'x-upload-mode': String(form.get('mode') ?? 'analysis'),
-        ...headers
-      }
-    }));
-  } finally {
-    formDataSpy.mockRestore();
-  }
+  const { POST } = await import('@/app/api/telegram/upload/route');
+  return POST(new Request('http://localhost/api/telegram/upload', {
+    method: 'POST',
+    headers: {
+      origin: 'https://www.balancestudio.tv',
+      'x-session-capability': 'capability',
+      'x-session-id': sessionId,
+      'x-upload-mode': String(form.get('mode') ?? 'analysis'),
+      ...headers
+    },
+    body: form
+  }));
 }
 
 describe('POST /api/telegram/upload private storage', () => {
@@ -183,6 +179,33 @@ describe('POST /api/telegram/upload private storage', () => {
     } as RequestInit));
 
     expect(response.status).toBe(413);
+  });
+
+  test('returns a stable code when multipart data cannot be parsed', async () => {
+    const { POST } = await import('@/app/api/telegram/upload/route');
+    const response = await POST(new Request('http://localhost/api/telegram/upload', {
+      method: 'POST',
+      headers: {
+        origin: 'https://www.balancestudio.tv',
+        'x-session-capability': 'capability',
+        'x-session-id': sessionId,
+        'x-upload-mode': 'analysis',
+        'content-type': 'multipart/form-data; boundary=missing'
+      },
+      body: 'not multipart data'
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'invalid_form_data' });
+  });
+
+  test('returns a stable code when multipart data contains no files', async () => {
+    const form = new FormData();
+    form.set('mode', 'analysis');
+    const response = await post(form);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ ok: false, code: 'files_required' });
   });
 
   test('requires a valid mode header before parsing multipart data', async () => {
@@ -411,22 +434,20 @@ describe('POST /api/telegram/upload private storage', () => {
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ extractedText: 'ordinary project scope' }));
   });
 
-  test('reads each file once during preflight and passes verified bytes to storage', async () => {
+  test('passes multipart-parsed verified bytes to storage without retaining the File', async () => {
     const bytes = new TextEncoder().encode('valid text');
     const file = new File([bytes], 'brief.txt', { type: 'text/plain' });
-    const arrayBufferSpy = vi.fn(async () => bytes.buffer);
-    Object.defineProperty(file, 'arrayBuffer', { value: arrayBufferSpy });
 
     const response = await post(formWith(file));
 
     expect(response.status).toBe(200);
-    expect(arrayBufferSpy).toHaveBeenCalledOnce();
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
-      buffer: bytes.buffer,
       verifiedMime: 'text/plain',
       extractedText: 'valid text'
     }));
-    expect(storePrivateUploadMock.mock.calls[0]?.[0]).not.toHaveProperty('file');
+    const storageInput = storePrivateUploadMock.mock.calls[0]?.[0] as { buffer: ArrayBuffer };
+    expect(new Uint8Array(storageInput.buffer)).toEqual(bytes);
+    expect(storageInput).not.toHaveProperty('file');
   });
 
   test('rejects invalid files before private persistence', async () => {

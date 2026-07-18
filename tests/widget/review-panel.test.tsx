@@ -153,23 +153,20 @@ describe('ReviewPanel', () => {
     expect(screen.getByRole('link', { name: 'https://vimeo.com/123' })).toBeInTheDocument();
   });
 
-  test('offers concise email, schedule, team, and brief data actions', () => {
+  test('keeps contact actions out of the brief and exposes a clear data manager', () => {
     render(
       <ReviewPanel
         {...baseProps}
         draft={readyDraft}
-        onBookCatchUp={vi.fn()}
-        onTalkToHuman={vi.fn()}
         onViewBrief={vi.fn()}
         onClearBrief={vi.fn()}
         onWithdrawTransfer={vi.fn()}
         onRequestDeletion={vi.fn()}
       />
     );
-    expect(screen.getByRole('link', { name: /email/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-    expect(screen.getByRole('button', { name: /schedule/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /team/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Brief & data'));
+    expect(screen.queryByRole('link', { name: /email the team/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /talk to the team/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Manage brief & data'));
     expect(screen.getByRole('button', { name: 'Request deletion' })).toBeInTheDocument();
   });
 });

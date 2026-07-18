@@ -158,6 +158,11 @@ a {
   scroll-behavior: smooth;
 }
 
+.balance-widget-rail[role="tabpanel"] {
+  width: 100%;
+  border-right: 0;
+}
+
 .balance-widget-transcript {
   width: min(100%, 720px);
   margin: 0 auto;
@@ -224,6 +229,11 @@ a {
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
+}
+
+.balance-widget-dialog[data-maximized="true"] .balance-widget-composer-inner {
+  width: 100%;
+  max-width: none;
 }
 
 .balance-widget-approved-actions {
@@ -549,12 +559,24 @@ a {
 }
 
 .balance-widget-data-controls > summary {
-  min-height: 32px;
+  min-height: 40px;
   display: flex;
   align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--balance-border-subtle);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
   color: var(--balance-muted);
+  font-weight: 650;
+  list-style: none;
   cursor: pointer;
 }
+
+.balance-widget-data-controls > summary::-webkit-details-marker { display: none; }
+.balance-widget-data-controls > summary:focus-visible { outline: 2px solid var(--balance-gold); outline-offset: 2px; }
+.balance-widget-data-chevron { margin-left: auto; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.balance-widget-data-controls[open] .balance-widget-data-chevron { transform: rotate(180deg); }
 
 .balance-widget-data-controls[open] > summary { margin-bottom: 6px; }
 

@@ -651,6 +651,14 @@ test.describe('mobile intake', () => {
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('review-rail')).toBeVisible();
     await expect(page.getByTestId('review-panel')).toHaveAttribute('data-mode', 'summary');
+    const briefWidth = await briefPanel.evaluate((panel) => ({
+      panel: panel.getBoundingClientRect().width,
+      parent: panel.parentElement?.getBoundingClientRect().width ?? 0
+    }));
+    expect(briefWidth.panel).toBeCloseTo(briefWidth.parent, 0);
+    await expect(page.getByRole('link', { name: 'Email the team' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Book a call' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Talk to the team without AI' })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Edit original wording' }).click();
     const scopeEditor = page.getByRole('textbox', { name: 'Original wording' });
@@ -678,14 +686,20 @@ test.describe('mobile intake', () => {
     await chatTab.click();
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
     await expect(input).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Email the team' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Book a call' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Talk to the team without AI' })).toBeVisible();
 
     await chatTab.focus();
     await chatTab.press('ArrowRight');
     await expect(briefTab).toBeFocused();
     await expect(briefTab).toHaveAttribute('aria-selected', 'true');
 
-    const human = page.getByRole('button', { name: 'Team', exact: true });
+    await expect(page.getByRole('button', { name: 'Talk to the team without AI', exact: true })).toHaveCount(0);
+    await chatTab.click();
+    const human = page.getByRole('button', { name: 'Talk to the team without AI', exact: true });
     await expect(human).toBeVisible();
+    await expect(human).toHaveText('Team');
     await expect(human).toHaveClass(/balance-widget-contact-action/);
     const humanBounds = await human.boundingBox();
     expect(humanBounds).not.toBeNull();

@@ -62,6 +62,10 @@ function uploadErrorDetails(code: unknown, status: number): { message: string; r
     case 'invalid_upload_mode':
     case 'upload_mode_mismatch':
       return { message: 'The upload request was invalid. Please select the file again.', retryable: false };
+    case 'invalid_form_data':
+      return { message: 'The file upload could not be read. Select the file once more.', retryable: false };
+    case 'files_required':
+      return { message: 'No file reached the upload service. Select the file once more.', retryable: false };
     default:
       if (status === 401 || status === 403) {
         return { message: 'Your secure session or consent could not be verified. Refresh before uploading again.', retryable: false };
@@ -269,7 +273,7 @@ export function AttachmentDropzone({
       }
 
       const newQueued: QueuedFile[] = fileArray.map((file) => ({ file, status: 'queued' as FileStatus }));
-      setQueuedFiles((prev) => [...prev, ...newQueued]);
+      setQueuedFiles(newQueued);
       setError(null);
 
       await uploadFiles(fileArray);
@@ -294,13 +298,13 @@ export function AttachmentDropzone({
             letterSpacing: '0.16em'
           }}
         >
-          Share files to help us understand your project
+          Add project files
         </div>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
           {!sessionId
             ? 'File sharing will be ready when your secure session starts. You can add a reference link now.'
             : privateStorageAvailable
-              ? 'Files stay private for up to 24 hours. Supported text is processed by an AI processing service for this draft and never sent to the Balance team. Use the human-only path for protected material.'
+              ? 'Private for 24 hours. Used only for this AI draft.'
               : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
       </div>
@@ -342,7 +346,8 @@ export function AttachmentDropzone({
           of server-extracted text; accepted images and CSV may yield no extracted text. Any extracted
           text used in AI mode is processed by an AI processing service. Files with no readable text remain
           stored privately but cannot inform the AI draft. Consent, filename checks, private storage, and
-          extraction do not prove a file is non-confidential. Use the human-only path for protected material.
+          extraction do not prove a file is non-confidential. Files and extracted text are never sent to
+          the Balance team through this AI path. Use the human-only path for protected material.
         </div>
       </details>
 
@@ -380,7 +385,7 @@ export function AttachmentDropzone({
         </span>
         <span id="attachment-private-note" style={{ fontSize: 10, color: brandTokens.colors.mutedText }}>
           {filesEnabled
-            ? 'Temporarily retained only to analyse this draft. Never sent to the team.'
+            ? 'Private for 24 hours.'
             : !sessionId ? 'Please wait before selecting a file.' : 'Add a reference link above instead.'}
         </span>
       </button>
@@ -397,9 +402,9 @@ export function AttachmentDropzone({
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
       />
 
-      {queuedFiles.length > 0 && (
+      {queuedFiles.at(-1) && (
         <div role="status" aria-live="polite" style={{ display: 'grid', gap: 4, fontSize: 11, color: brandTokens.colors.mutedText }}>
-          {queuedFiles.map((qf) => (
+          {[queuedFiles.at(-1)!].map((qf) => (
             <div key={qf.file.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: qf.status === 'failed' || qf.status === 'retryable' ? 'tomato' : brandTokens.colors.lightText }}>
                 {qf.file.name}
@@ -423,7 +428,7 @@ export function AttachmentDropzone({
         </div>
       )}
 
-      {error && <div role="alert" style={{ color: 'tomato', fontSize: 12 }}>{error}</div>}
+      {error && queuedFiles.at(-1)?.error !== error && <div role="alert" style={{ color: 'tomato', fontSize: 12 }}>{error}</div>}
     </div>
   );
 }

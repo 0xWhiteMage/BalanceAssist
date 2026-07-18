@@ -1536,15 +1536,6 @@ export function WidgetOverlay({
                   transferStatus={telegramBroadcastStatus === 'sent' ? 'delivered' : telegramBroadcastStatus === 'queued' ? 'queued' : 'saved'}
                   approvalInFlight={sessionDraft.approvalInFlight}
                   requiresReapproval={approval.crmRevision !== undefined && !briefApproved}
-                  onBookCatchUp={() => {
-                    if (!configuredCalendlyUrl) {
-                      void botSay('Scheduling is currently unavailable. Please ask the Balance team to arrange a time.');
-                      return;
-                    }
-                    setCalendlyUrl(configuredCalendlyUrl);
-                    setView('calendly');
-                  }}
-                  onTalkToHuman={handleTeamConnect}
                   onViewBrief={() => void showMemoryInventory()}
                   onClearBrief={() => void clearEditableDraft()}
                   onWithdrawTransfer={() => void withdrawTransferConsent()}

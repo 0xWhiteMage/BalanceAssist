@@ -23,33 +23,27 @@ async function readFileBuffer(file: File): Promise<ArrayBuffer> {
     : new Response(file).arrayBuffer();
 }
 
-function boundedBodyStream(body: ReadableStream<Uint8Array>, maxBytes: number) {
+async function readBoundedBody(body: ReadableStream<Uint8Array>, maxBytes: number) {
   const reader = body.getReader();
-  let bytesRead = 0;
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          controller.close();
-          return;
-        }
-        bytesRead += value.byteLength;
-        if (bytesRead > maxBytes) {
-          await reader.cancel();
-          controller.error(new MultipartBodyTooLargeError());
-          return;
-        }
-        controller.enqueue(value);
-      } catch (error) {
-        controller.error(error);
-      }
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new MultipartBodyTooLargeError();
     }
-  });
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 export async function OPTIONS(request: Request) {
@@ -92,15 +86,17 @@ export async function POST(request: Request) {
 
   let form: FormData;
   try {
-    const multipartRequest = request.body
-      ? new Request(request, { body: boundedBodyStream(request.body, maxMultipartBodyBytes), duplex: 'half' } as RequestInit)
-      : request;
-    form = await multipartRequest.formData();
+    const contentType = request.headers.get('content-type');
+    if (!request.body || !contentType?.toLowerCase().startsWith('multipart/form-data;')) {
+      return jsonWithCors({ ok: false, code: 'invalid_form_data' }, { status: 400 }, request);
+    }
+    const bytes = await readBoundedBody(request.body, maxMultipartBodyBytes);
+    form = await new Response(bytes, { headers: { 'content-type': contentType } }).formData();
   } catch (error) {
     if (error instanceof MultipartBodyTooLargeError) {
       return jsonWithCors({ ok: false, code: 'file_uploads_unavailable' }, { status: 413 }, request);
     }
-    return jsonWithCors({ ok: false, error: 'Invalid form data' }, { status: 400 }, request);
+    return jsonWithCors({ ok: false, code: 'invalid_form_data' }, { status: 400 }, request);
   }
 
   const modeValue = form.get('mode');
@@ -115,7 +111,7 @@ export async function POST(request: Request) {
     .filter((value): value is File => value instanceof File);
 
   if (files.length === 0) {
-    return jsonWithCors({ ok: false, error: 'Missing files' }, { status: 400 }, request);
+    return jsonWithCors({ ok: false, code: 'files_required' }, { status: 400 }, request);
   }
   const activePolicy = mode === 'analysis' ? PRIVATE_ANALYSIS_UPLOAD_POLICY : HUMAN_UPLOAD_POLICY;
   if (

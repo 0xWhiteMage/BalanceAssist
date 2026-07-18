@@ -319,7 +319,6 @@ test.describe('balance assist intake via persistent rail', () => {
     await page.goto('/preview');
 
     const input = await enterAiIntake(page);
-    await page.getByRole('button', { name: 'Maximize Balance Assist' }).click();
 
     const rail = page.getByTestId('review-rail');
     await expect(rail).toHaveCount(0);
@@ -329,13 +328,43 @@ test.describe('balance assist intake via persistent rail', () => {
     await input.fill(`${originalWording}. The objective is to introduce it to customers.`);
     await input.press('Enter');
 
-    await expect(rail).toBeVisible();
     await expect(page.getByRole('log').getByText('Who is this for?', { exact: true })).toHaveCount(1);
     await expect(page.getByRole('log').getByText(stages[0].recap, { exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Brief', exact: true }).click();
+    await expect(rail).toBeVisible();
     await expect(rail.getByText('Original wording', { exact: true })).toBeVisible();
     await expect(rail.getByText(originalWording, { exact: true })).toBeVisible();
     await expect(rail.getByText('AI-drafted summary', { exact: true })).toBeVisible();
     await expect(rail.getByText(aiSummary, { exact: true })).toBeVisible();
+    const compactBrief = await page.evaluate(() => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Balance Assist"]')!;
+      const main = dialog.querySelector<HTMLElement>('.balance-widget-main')!;
+      const brief = dialog.querySelector<HTMLElement>('[data-testid="review-rail"]')!;
+      return {
+        dialogWidth: dialog.getBoundingClientRect().width,
+        mainWidth: main.getBoundingClientRect().width,
+        briefWidth: brief.getBoundingClientRect().width
+      };
+    });
+    expect(compactBrief.dialogWidth).toBeLessThanOrEqual(400);
+    expect(compactBrief.briefWidth).toBeCloseTo(compactBrief.mainWidth, 0);
+    await expect(page.getByRole('link', { name: 'Email the team' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Book a call' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Talk to the team without AI' })).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Chat', exact: true }).click();
+    await assertDirectContactRoutes(page);
+    await page.getByRole('button', { name: 'Maximize Balance Assist' }).click();
+    const maximizedComposer = await page.evaluate(() => {
+      const composer = document.querySelector<HTMLElement>('.balance-widget-composer')!;
+      const inner = composer.querySelector<HTMLElement>('.balance-widget-composer-inner')!;
+      const composerStyle = getComputedStyle(composer);
+      return {
+        availableWidth: composer.clientWidth - Number.parseFloat(composerStyle.paddingLeft) - Number.parseFloat(composerStyle.paddingRight),
+        innerWidth: inner.getBoundingClientRect().width
+      };
+    });
+    expect(maximizedComposer.innerWidth).toBeCloseTo(maximizedComposer.availableWidth, 0);
     const desktopColumns = await page.evaluate(() => {
       const railBounds = document.querySelector<HTMLElement>('[data-testid="review-rail"]')!.getBoundingClientRect();
       const chatBounds = document.querySelector<HTMLElement>('#widget-chat-panel')!.getBoundingClientRect();

@@ -36,6 +36,18 @@ vi.mock('@/lib/privacy/confidential-intent', async (importOriginal) => {
   };
 });
 
+async function post(form: FormData) {
+  const { POST } = await import('@/app/api/telegram/upload/route');
+  return POST(new Request('http://localhost/api/telegram/upload', {
+    method: 'POST',
+    headers: {
+      'x-session-id': '11111111-2222-3333-4444-555555555555',
+      'x-upload-mode': 'analysis'
+    },
+    body: form
+  }));
+}
+
 describe('POST /api/telegram/upload analysis-only contract', () => {
   beforeEach(() => {
     process.env.SUPABASE_PRIVATE_UPLOAD_BUCKET = 'temporary-attachments';
@@ -62,14 +74,8 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const form = new FormData();
     form.set('mode', 'analysis');
     form.append('files', new File(['Draft-only analysis'], 'brief.txt', { type: 'text/plain' }));
-    const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 
-    const { POST } = await import('@/app/api/telegram/upload/route');
-    const response = await POST(new Request('http://localhost/api/telegram/upload', {
-      method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
-    }));
-    formDataSpy.mockRestore();
+    const response = await post(form);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true, analyses: [{ extractedText: 'Draft-only analysis' }] });
@@ -93,18 +99,12 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const form = new FormData();
     form.set('mode', 'analysis');
     form.append('files', new File(['do not process'], filename, { type: 'text/plain' }));
-    const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    const { POST } = await import('@/app/api/telegram/upload/route');
-    const response = await POST(new Request('http://localhost/api/telegram/upload', {
-      method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
-    }));
+    const response = await post(form);
     const body = await response.json();
-    formDataSpy.mockRestore();
 
     expect(response.status).toBe(422);
     expect(body).toEqual({ ok: false, code: 'confidential_file_not_allowed' });
@@ -125,14 +125,8 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     form.set('mode', 'analysis');
     form.append('files', new File(['safe'], 'ordinary-brief.txt', { type: 'text/plain' }));
     form.append('files', new File(['protected'], '.nda.txt', { type: 'text/plain' }));
-    const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 
-    const { POST } = await import('@/app/api/telegram/upload/route');
-    const response = await POST(new Request('http://localhost/api/telegram/upload', {
-      method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
-    }));
-    formDataSpy.mockRestore();
+    const response = await post(form);
 
     expect(response.status).toBe(422);
     expect(fromMock).not.toHaveBeenCalled();
@@ -152,14 +146,8 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const form = new FormData();
     form.set('mode', 'analysis');
     form.append('files', new File(['safe'], 'ordinary-brief.txt', { type: 'text/plain' }));
-    const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 
-    const { POST } = await import('@/app/api/telegram/upload/route');
-    const response = await POST(new Request('http://localhost/api/telegram/upload', {
-      method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
-    }));
-    formDataSpy.mockRestore();
+    const response = await post(form);
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ ok: false, code: 'confidential_file_not_allowed' });
@@ -171,14 +159,8 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const form = new FormData();
     form.set('mode', 'analysis');
     form.append('files', new File(['ordinary'], 'personal-project.txt', { type: 'text/plain' }));
-    const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
 
-    const { POST } = await import('@/app/api/telegram/upload/route');
-    const response = await POST(new Request('http://localhost/api/telegram/upload', {
-      method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
-    }));
-    formDataSpy.mockRestore();
+    const response = await post(form);
 
     expect(response.status).toBe(200);
     expect(classifyConfidentialFilenameMock).toHaveBeenCalledWith('personal-project.txt');
@@ -193,19 +175,13 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     const form = new FormData();
     form.set('mode', 'analysis');
     form.append('files', new File([confidentialText], 'ordinary-brief.txt', { type: 'text/plain' }));
-    const formDataSpy = vi.spyOn(Request.prototype, 'formData').mockResolvedValue(form);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const providerSpy = vi.spyOn(global, 'fetch');
 
-    const { POST } = await import('@/app/api/telegram/upload/route');
-    const response = await POST(new Request('http://localhost/api/telegram/upload', {
-      method: 'POST',
-      headers: { 'x-session-id': '11111111-2222-3333-4444-555555555555', 'x-upload-mode': 'analysis' }
-    }));
+    const response = await post(form);
     const body = await response.json();
-    formDataSpy.mockRestore();
 
     expect(response.status).toBe(422);
     expect(body).toEqual({ ok: false, code: 'confidential_file_not_allowed' });

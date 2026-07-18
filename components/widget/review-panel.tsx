@@ -41,8 +41,6 @@ export function ReviewPanel({
   onApprove,
   onContinueRefining,
   onChange,
-  onBookCatchUp,
-  onTalkToHuman,
   onViewBrief,
   onClearBrief,
   onWithdrawTransfer,
@@ -61,8 +59,6 @@ export function ReviewPanel({
   onApprove: () => void | Promise<void>;
   onContinueRefining: () => void;
   onChange?: (key: string, value: string) => Promise<BriefMutationOutcome>;
-  onBookCatchUp?: () => void;
-  onTalkToHuman?: () => void;
   onViewBrief?: () => void;
   onClearBrief?: () => void;
   onWithdrawTransfer?: () => void;
@@ -114,7 +110,11 @@ export function ReviewPanel({
 
       {(onViewBrief || onClearBrief || onWithdrawTransfer || onRequestDeletion) && (
         <details className="balance-widget-data-controls">
-          <summary>Brief &amp; data</summary>
+          <summary>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+            <span>Manage brief &amp; data</span>
+            <svg className="balance-widget-data-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 10l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </summary>
           <div className="balance-widget-data-actions" aria-label="Brief and data controls">
             {onViewBrief && <button type="button" className="balance-widget-inline-action" onClick={onViewBrief}>View brief</button>}
             {onClearBrief && <button type="button" className="balance-widget-inline-action" onClick={onClearBrief}>Clear brief</button>}
@@ -135,25 +135,6 @@ export function ReviewPanel({
         onAddReference={onAddReference}
         onRemoveReference={onRemoveReference}
       />
-
-      <div className="balance-widget-contact-actions" aria-label="Contact options">
-        <a href="mailto:hello@balancestudio.tv" className="balance-widget-contact-action">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-          Email
-        </a>
-        {onBookCatchUp && (
-          <button type="button" onClick={onBookCatchUp} className="balance-widget-contact-action">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 011 1v14H4V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            Schedule
-          </button>
-        )}
-        {onTalkToHuman && (
-          <button type="button" onClick={onTalkToHuman} className="balance-widget-contact-action">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-            Team
-          </button>
-        )}
-      </div>
 
       {!approved && (
         <div style={{ display: 'grid', gap: 6 }}>

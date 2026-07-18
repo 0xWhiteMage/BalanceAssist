@@ -170,17 +170,28 @@ jobs:
           if (deployment.projectId !== process.env.VERCEL_PROJECT_ID || deployment.readyState !== 'READY' || deployment.target !== 'production' || deploymentSha !== process.env.RELEASE_SHA) process.exit(1);
           NODE
           npx --no-install supabase link --project-ref "$EXPECTED_SUPABASE_PROJECT_REF" --yes
-          migration_state="$(npx --no-install supabase db query --linked --output-format json "SELECT filename FROM public.schema_migrations WHERE version = '060'" | node -e "let input=''; process.stdin.on('data', chunk => input += chunk).on('end', () => { const rows=JSON.parse(input).rows; if (!Array.isArray(rows)) process.exit(1); if (!rows.length) process.stdout.write('missing'); else if (rows.length === 1 && rows[0].filename === '060_consent_1_2_cutover.sql') process.stdout.write('exact'); else process.exit(1); });")"
+          migration_path="$(mktemp)"
+          trap 'rm -f "$migration_path"' EXIT
+          npx --no-install supabase db query --linked --output-format json "SELECT filename FROM public.schema_migrations WHERE version = '060'" > "$migration_path"
+          migration_state="$(node --input-type=module - "$migration_path" <<'NODE'
+          import { readSupabaseQueryRows } from './scripts/parse-supabase-query-json.mjs';
+          const rows = readSupabaseQueryRows(process.argv[2]);
+          if (!rows.length) process.stdout.write('missing');
+          else if (rows.length === 1 && rows[0].filename === '060_consent_1_2_cutover.sql') process.stdout.write('exact');
+          else process.exit(1);
+          NODE
+          )"
           if [ "$migration_state" = "missing" ]; then
             npx --no-install supabase db query --linked --file supabase/production-consent-1-2-cutover-060.sql
           else
             test "$migration_state" = "exact"
           fi
           verification_path="$(mktemp)"
-          trap 'rm -f "$verification_path"' EXIT
+          trap 'rm -f "$migration_path" "$verification_path"' EXIT
           npx --no-install supabase db query --linked --output-format json --file supabase/verify-consent-1-2-cutover-060.sql > "$verification_path"
           node --input-type=module - "$verification_path" <<'NODE'
           import fs from 'node:fs';
+          import { readSupabaseQueryRows } from './scripts/parse-supabase-query-json.mjs';
           const source = fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8').replace(/\r\n/g, '\n');
           function reviewedBody(functionName) {
             const signature = source.indexOf(`FUNCTION public.${functionName}`);
@@ -196,7 +207,7 @@ jobs:
             ['reserve_handoff_send', ['boolean', 'search_path=public, pg_temp']],
             ['delete_session_for_deletion_job', ['boolean', 'search_path=public, pg_temp']],
           ]);
-          const live = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).rows;
+          const live = readSupabaseQueryRows(process.argv[2]);
           if (!Array.isArray(live) || live.length !== expected.size) process.exit(1);
           for (const fn of live) {
             const policy = expected.get(fn.proname);
