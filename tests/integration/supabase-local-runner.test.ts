@@ -16,6 +16,7 @@ describe('local Supabase release runner', () => {
     expect(source).toContain("['scripts/apply-test-migrations.mjs']");
     expect(source).toContain("['status', '-o', 'env']");
     expect(source).toContain('JSON.parse(value)');
+    expect(source).toContain("createBucket(bucket, { public: false })");
     expect(source).toContain('NEXT_PUBLIC_SUPABASE_ANON_KEY: environment.ANON_KEY');
     expect(source).not.toContain('console.log(status');
   });
