@@ -152,7 +152,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     attachment.set('sessionId', sessionId);
     attachment.set('mode', 'analysis');
     attachment.set('file', new Blob(['private analysis'], { type: 'text/plain' }), 'private-analysis.txt');
-    await expect(fetch(`${appUrl}/api/telegram/upload`, {
+    const uploadResponse = await fetch(`${appUrl}/api/telegram/upload`, {
       method: 'POST',
       headers: {
         origin: appUrl,
@@ -161,7 +161,12 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
         'x-upload-mode': 'analysis'
       },
       body: attachment
-    })).resolves.toHaveProperty('status', 200);
+    });
+    const uploadBody = await uploadResponse.json();
+    expect({ status: uploadResponse.status, body: uploadBody }).toMatchObject({
+      status: 200,
+      body: { ok: true, status: 'stored' }
+    });
     const relayRequestId = crypto.randomUUID();
     const relay = await fetch(`${appUrl}/api/telegram/relay`, {
       method: 'POST', headers: { ...authorizedHeaders, 'x-request-id': relayRequestId },
