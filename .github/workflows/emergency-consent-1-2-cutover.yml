@@ -99,7 +99,7 @@ jobs:
 
   cutover:
     needs: [validate]
-    environment: production-consent-cutover
+    environment: production-trust-migrations
     runs-on: ubuntu-latest
     steps:
       - name: Checkout validated release commit
