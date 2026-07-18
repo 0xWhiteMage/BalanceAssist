@@ -254,6 +254,23 @@ BEGIN
   RETURN FOUND;
 END; $$;
 
+CREATE OR REPLACE FUNCTION public.delete_session_for_deletion_job(p_job_id uuid, p_lease_token uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE target_session_id uuid; owner uuid;
+BEGIN
+  SELECT session_id, cleanup_owner_id INTO target_session_id, owner FROM public.deletion_jobs
+  WHERE id = p_job_id AND state = 'processing' AND lease_token = p_lease_token AND lease_expires_at > now() FOR UPDATE;
+  IF target_session_id IS NULL THEN RETURN false; END IF;
+  PERFORM 1 FROM public.sessions WHERE id = target_session_id AND deletion_state = 'deleting' FOR UPDATE;
+  IF NOT FOUND OR EXISTS (SELECT 1 FROM public.uploaded_files WHERE session_id = target_session_id AND object_key IS NOT NULL)
+    OR EXISTS (SELECT 1 FROM public.private_attachment_cleanup WHERE cleanup_owner_id = owner AND status = 'pending_cleanup')
+    OR EXISTS (SELECT 1 FROM public.crm_leads WHERE source_session_id = target_session_id AND lifecycle_state <> 'deleted') THEN RETURN false; END IF;
+  PERFORM set_config('app.session_purge', 'on', true);
+  DELETE FROM public.sessions WHERE id = target_session_id;
+  RETURN true;
+END;
+$$;
+
 REVOKE ALL ON FUNCTION public.assert_session_processing_allowed(uuid), public.finalize_session_lead(uuid), public.relay_human_message(uuid, text, text), public.reserve_handoff_send(uuid, uuid) FROM PUBLIC, anon, authenticated;
 -- END 060 060_consent_1_2_cutover.sql
 

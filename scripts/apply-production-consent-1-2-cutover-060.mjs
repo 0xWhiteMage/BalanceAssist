@@ -7,9 +7,9 @@ import { getIncrementalMigrations } from './apply-test-migrations.mjs';
 const reviewedMigration = {
   version: '060',
   filename: '060_consent_1_2_cutover.sql',
-  sha256: '52911233c77d120d8405ba9a2e1f974900a4ef2bd67fb79a383aa0cea35c6107'
+  sha256: 'e8dfbc92400e0db57ad3cfa0a85a8c0a7f29eb558838ab434c72b214e580b6c3'
 };
-const reviewedArtifactSha256 = '3db37f994000678fcb11b34dbb65e6467a7009fc7ee1c4127bbc205ade34d0d3';
+const reviewedArtifactSha256 = 'f942ba0a2836399827a65f8e542838f23a2761361f882a759ef31a32a55ea30a';
 
 export const consent12CutoverMigrationVersion = reviewedMigration.version;
 
