@@ -501,4 +501,24 @@ describe('guardAgainstFabricatedBriefFields', () => {
     expect(guarded.timelineBand).toBe('1-2-months');
     expect(guarded.budgetBand).toBe('20k-50k');
   });
+
+  test('allows grounded additions to existing intended outputs', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, intendedOutputs: 'Hero film, social cutdowns, and stills' },
+      { ...createDefaultLeadDraft(), intendedOutputs: 'Hero film' },
+      'Please also add social cutdowns and stills'
+    );
+
+    expect(guarded.intendedOutputs).toBe('Hero film, social cutdowns, and stills');
+  });
+
+  test('rejects unsupported additions to existing intended outputs', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, intendedOutputs: 'Hero film and a television campaign' },
+      { ...createDefaultLeadDraft(), intendedOutputs: 'Hero film' },
+      'Keep the existing deliverable'
+    );
+
+    expect(guarded.intendedOutputs).toBe('Hero film');
+  });
 });

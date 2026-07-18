@@ -448,7 +448,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(createCalls).toBe(2);
   }, 10_000);
 
-  test('enables AI interaction without an artificial intro delay', async () => {
+  test('enables AI interaction while pacing the intro messages', async () => {
     global.fetch = makeFetchRecorder([
       ({ url, method }) => {
         if (url.includes('/api/sessions/inspect')) {
@@ -465,7 +465,10 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await startWithBalanceAssist();
 
     expect(await findChatInput()).toBeEnabled();
-    expect(screen.queryByRole('status', { name: 'Balance Assist is typing' })).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /balance assist/i })).toHaveTextContent(/What can I help you with today\?/i);
+      expect(screen.queryByRole('status', { name: 'Balance Assist is typing' })).toBeNull();
+    }, { timeout: 3_000 });
   });
 
   test('invalidates a pending AI restore on close and restarts cleanly on reopen', async () => {
@@ -556,8 +559,8 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     });
 
     expect(screen.queryByPlaceholderText(/message the team request|type a message/i)).toBeNull();
-    expect(screen.getByRole('link', { name: /email the team/i })).toBeVisible();
-    expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /email us/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /schedule a call/i })).toBeVisible();
     expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(false);
     expect(requestLog.some((entry) => entry.url.includes('/api/events'))).toBe(false);
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
@@ -662,7 +665,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
     }, { timeout: 7000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Message the team without AI' }));
     await waitFor(() => expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(true));
     fireEvent.click(screen.getByLabelText('Close Balance Assist'));
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
@@ -733,18 +736,18 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/what can i help you with today\?/i);
     }, { timeout: 7000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Message the team without AI' }));
     await waitFor(() => expect(consentCalls).toBe(1));
     fireEvent.click(screen.getByLabelText('Close Balance Assist'));
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Message the team without AI' }));
     await waitFor(() => expect(consentCalls).toBe(2));
 
     await act(async () => {
       staleConsent.resolve(new Response(JSON.stringify({ ok: true, consent: { humanContact: true } }), { status: 200 }));
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Message the team without AI' }));
     expect(consentCalls).toBe(2);
 
     await act(async () => {
@@ -769,8 +772,8 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
 
     await chooseHumanPath();
     const unavailable = await screen.findByText('The human-only relay could not start. You can still contact the team directly.');
-    const email = screen.getByRole('link', { name: /email the team/i });
-    const booking = screen.getByRole('link', { name: /book a call/i });
+    const email = screen.getByRole('link', { name: /email us/i });
+    const booking = screen.getByRole('link', { name: /schedule a call/i });
     expect(unavailable).toBeVisible();
     expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
     expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
@@ -791,8 +794,8 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     fireEvent.click(screen.getByLabelText('Close Balance Assist'));
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
     await new Promise((resolve) => setTimeout(resolve, 2_100));
-    expect(screen.getByRole('link', { name: /email the team/i })).toBeVisible();
-    expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /email us/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /schedule a call/i })).toBeVisible();
     expect(screen.getByText('The human-only relay could not start. You can still contact the team directly.')).toBeVisible();
     expect(requestLog.filter((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toHaveLength(1);
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);

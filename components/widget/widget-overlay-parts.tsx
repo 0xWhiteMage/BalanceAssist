@@ -248,75 +248,46 @@ export function HumanFooter({
         background: 'rgba(16, 16, 16, 0.4)'
       }}
     >
-      {!isTeamConnected ? (
-        <div className="balance-widget-contact-actions" aria-label="Contact options">
-          <a href="mailto:hello@balancestudio.tv" className="balance-widget-contact-action" aria-label="Email the team">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-            Email
-          </a>
-          {calendlyUrl && (
-            <a href={calendlyUrl} className="balance-widget-contact-action" aria-label="Book a call">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 011 1v14H4V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              Schedule
-            </a>
-          )}
-          <button type="button" className="balance-widget-contact-action" aria-label="Talk to the team without AI" onClick={onConnect}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-            Team
-          </button>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+      {isTeamConnected && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center', marginBottom: 6 }}>
           <div
             role="status"
             aria-live="polite"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '10px',
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color:
-                humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested'
-                    ? brandTokens.colors.warmGold
-                    : brandTokens.colors.mutedText
+              display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 650,
+              color: humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested'
+                ? brandTokens.colors.warmGold : brandTokens.colors.mutedText
             }}
           >
             {(humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested') && (
-              <span
-                style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: brandTokens.colors.warmGold,
-                  display: 'inline-block'
-                }}
-              />
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: brandTokens.colors.warmGold, display: 'inline-block' }} />
             )}
-            {humanStatus === 'requested'
-                ? 'Team contact requested'
-                : humanStatus === 'sending'
-                  ? 'Sending message'
-                : humanStatus === 'saved'
-                  ? 'Message saved'
-                : humanStatus === 'queued'
-                  ? 'Queued for the Balance team'
-                : humanStatus === 'delivered'
-                  ? 'Message delivered'
-                : humanStatus === 'unavailable'
-                  ? 'Message delivery unavailable'
-                  : 'Connected to team'}
+            {hasTeamReply
+              ? 'New reply from the Balance team'
+              : humanStatus === 'requested' ? 'Team contact requested'
+                : humanStatus === 'sending' ? 'Sending your message…'
+                  : humanStatus === 'saved' || humanStatus === 'queued' ? 'Message saved. Waiting to send to Balance.'
+                    : humanStatus === 'delivered' ? 'Message delivered to Balance.'
+                      : humanStatus === 'unavailable' ? 'Message delivery is unavailable.' : 'Ready to message the team.'}
           </div>
-          {hasTeamReply && (
-            <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4ade80', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />
-              Team response received
-            </div>
-          )}
         </div>
       )}
+      <nav className="balance-widget-contact-actions" aria-label="Contact Balance directly">
+          <a href="mailto:hello@balancestudio.tv" className="balance-widget-contact-action" aria-label="Email us">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+            Email Us
+          </a>
+          {calendlyUrl && (
+            <a href={calendlyUrl} className="balance-widget-contact-action" aria-label="Schedule a call">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 011 1v14H4V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              Schedule a Call
+            </a>
+          )}
+          <button type="button" className="balance-widget-contact-action" aria-label="Message the team without AI" onClick={onConnect}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+            Message the Team
+          </button>
+      </nav>
     </div>
   );
 }
@@ -337,10 +308,10 @@ export function HumanFallbacks({
       : 'Prefer another route? Contact the team directly.';
 
   return (
-    <div role={unavailable || deliveryUnavailable ? 'status' : undefined} style={{ display: 'grid', gap: 8, padding: 12, fontSize: 12, lineHeight: 1.5 }}>
-      <p style={{ margin: 0 }}>{copy}</p>
-      <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
-      {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
+    <div role={unavailable || deliveryUnavailable ? 'status' : undefined} className="balance-widget-fallback-line">
+      <span>{copy}</span>
+      <a href="mailto:hello@balancestudio.tv">Email us</a>
+      {calendlyUrl && <a href={calendlyUrl}>Schedule a call</a>}
     </div>
   );
 }

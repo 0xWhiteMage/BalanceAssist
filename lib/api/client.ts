@@ -203,7 +203,7 @@ export async function relayUserMessage(sessionId: string, text: string, requestI
       headers: { 'Content-Type': 'application/json', 'x-request-id': requestId },
       body: JSON.stringify({ sessionId, text }),
       keepalive: true
-    });
+    }, 30_000);
     if (!response.ok) return { persisted: false, queued: false, delivered: false };
     const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean };
     return {

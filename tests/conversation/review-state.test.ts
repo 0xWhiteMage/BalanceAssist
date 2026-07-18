@@ -158,6 +158,6 @@ test('missingReviewFields does not require contactCompany, timelineBand, or budg
 });
 
 test('uses viewport-correct review prompts', () => {
-  expect(getReviewPrompt(false)).toBe('Your core brief is ready. Review it in the brief panel.');
-  expect(getReviewPrompt(true)).toBe('Your core brief is ready. Review it in the Brief tab.');
+  expect(getReviewPrompt(false)).toBe('Your brief is ready to check before it is sent to Balance. Review the brief panel before sending.');
+  expect(getReviewPrompt(true)).toBe('Your brief is ready to check before it is sent to Balance. Open the Brief tab to review it.');
 });

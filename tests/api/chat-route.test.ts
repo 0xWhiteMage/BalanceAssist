@@ -113,7 +113,7 @@ describe('POST /api/chat', () => {
     global.fetch = originalFetch;
   });
 
-  function makeToolCallResponse(content: string, name: string, argumentsStr: string) {
+  function makeToolCallResponse(content: string | null, name: string, argumentsStr: string) {
     return {
       ok: true,
       status: 200,
@@ -269,10 +269,66 @@ describe('POST /api/chat', () => {
       canonicalDraft: { projectScope: 'A launch film that should Build awareness', projectObjective: 'Build awareness' },
       draftVersion: 4,
       currentStage: 'audience',
-      stageRecaps: ['So far: A launch film that should Build awareness; objective: Build awareness.'],
+      stageRecaps: ['Brief recap: A launch film that should Build awareness; objective: Build awareness.'],
       briefReady: false
     });
     expect(harness.sessionUpdates).toHaveLength(1);
+  });
+
+  test('persists a valid tool call with null content and supplies the canonical follow-up', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(null, 'record_brief_updates', JSON.stringify({
+      projectScope: 'A launch film'
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'A launch film' }] });
+
+    expect(res.status).toBe(200);
+    expect(data.draftUpdates.projectScope).toBe('A launch film');
+    expect(data.message).toBe('Thanks — I saved that. What should this project achieve?');
+  });
+
+  test('does not duplicate the canonical budget follow-up', async () => {
+    const savedAt = '2026-07-17T00:00:00.000Z';
+    const values = {
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults',
+      intendedOutputs: 'Hero film', timelineBand: '1-2-months'
+    };
+    const draft = Object.fromEntries(Object.entries(values).map(([field, value]) => [field, {
+      value, provenance: 'confirmed', updatedAt: savedAt
+    }]));
+    const harness = createChatSupabase({ id: 'test-session', draft, draft_version: 5 });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'Got it. What budget range are you working with?',
+      'record_brief_updates',
+      JSON.stringify(values)
+    )) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { data } = await postChat({ messages: [{ role: 'user', content: 'One to two months' }] });
+
+    expect(data.message.match(/What budget range are you working with\?/g)).toHaveLength(1);
+  });
+
+  test('confirms an inferred company from a business email only after affirmation', async () => {
+    const savedAt = '2026-07-17T00:00:00.000Z';
+    const draft = {
+      contactEmail: { value: 'sam@north-star.com', provenance: 'confirmed', updatedAt: savedAt }
+    };
+    const harness = createChatSupabase({ id: 'test-session', draft, draft_version: 1 });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Great.', 'record_brief_updates', '{}')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { data } = await postChat({ messages: [{ role: 'user', content: 'yes' }] });
+
+    expect(data.draftUpdates.contactCompany).toBe('North Star');
+    expect(data.canonicalDraft.contactCompany).toBe('North Star');
   });
 
   test('roundtrips the complete 4,000-character first scope while bounding generated summary text', async () => {
@@ -328,7 +384,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.stageRecaps).toEqual([
-      'So far: references: Skipped; contact email: hello@example.com.'
+      'Brief recap: references: Skipped; contact email: hello@example.com.'
     ]);
   });
 
@@ -1325,10 +1381,10 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Got it.');
+    expect(data.message).toBe('Got it. What should this project achieve?');
     expect(data.draftUpdates.contactName).toBe('Tool');
     expect(data.briefReady).toBe(true);
-    expect(data.reviewPrompt).toBe('Your core brief is ready. Review it in the brief panel.');
+    expect(data.reviewPrompt).toBe('Your brief is ready to check before it is sent to Balance. Review the brief panel before sending.');
     expect(data.missingFields).toEqual([]);
   });
 
@@ -1348,7 +1404,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Just chatting.');
+    expect(data.message).toBe('Just chatting. Tell me a bit about the project you want to create.');
     expect(data.draftUpdates).toEqual({});
     expect(data.briefReady).toBe(false);
     expect(data.reviewPrompt).toBeNull();
@@ -1592,7 +1648,7 @@ describe('POST /api/chat', () => {
     expect(data.truncated).toBe(true);
     expect(Array.isArray(data.messages)).toBe(true);
     expect((data.messages as string[])[0]).toBe('(continuing…)');
-    expect((data.messages as string[])[1]).toBe(partial);
+    expect((data.messages as string[])[1]).toBe(`${partial} Tell me a bit about the project you want to create.`);
     expect(warnSpy).toHaveBeenCalledWith(
       '[chat]',
       'response truncated: finish_reason=length',
@@ -1619,7 +1675,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('A few examples of our event work:');
+    expect(data.message).toBe('A few examples of our event work: Tell me a bit about the project you want to create.');
     expect(data.sharedWork).toBeDefined();
     expect(data.sharedWork.entries).toHaveLength(3);
     const slugs = data.sharedWork.entries.map((e: { slug: string }) => e.slug);
@@ -1769,7 +1825,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.message).toBeUndefined();
-    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend.']);
+    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend. Tell me a bit about the project you want to create.']);
   });
 
   test('splits a reply with --- separators into a messages[] array', async () => {
@@ -1784,7 +1840,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.message).toBeUndefined();
-    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend.']);
+    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend. Tell me a bit about the project you want to create.']);
   });
 
   test('keeps the single-message shape when there are no separators (backwards-compatible)', async () => {
@@ -1798,7 +1854,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Just one short reply.');
+    expect(data.message).toBe('Just one short reply. Tell me a bit about the project you want to create.');
     expect(data.messages).toBeUndefined();
   });
 
@@ -1817,7 +1873,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.messages).toEqual(['A few examples:', 'Want me to walk through the event pieces?']);
+    expect(data.messages).toEqual(['A few examples:', 'Tell me a bit about the project you want to create.']);
     expect(data.sharedWork).toBeDefined();
     expect(data.sharedWork.entries).toHaveLength(2);
     expect(data.briefReady).toBe(false);
@@ -1838,7 +1894,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.message).toBeUndefined();
-    expect(data.messages).toEqual(['First thought.', 'Second thought.', 'Third thought.']);
+    expect(data.messages).toEqual(['First thought.', 'Second thought.', 'Third thought. Tell me a bit about the project you want to create.']);
     expect(data.truncated).toBe(false);
   });
 
@@ -1869,7 +1925,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('partial');
+    expect(data.message).toBe('partial Tell me a bit about the project you want to create.');
     expect(data.messages).toBeUndefined();
     expect(data.truncated).toBe(false);
   });
@@ -1908,7 +1964,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Just one paragraph.');
+    expect(data.message).toBe('Just one paragraph. Tell me a bit about the project you want to create.');
     expect(data.messages).toBeUndefined();
   });
 

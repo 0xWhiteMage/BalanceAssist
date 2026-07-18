@@ -3,7 +3,7 @@ import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
 import { formatIntakeStageRecap, getCompletedIntakeStageCount, getCurrentIntakeStage, INTAKE_STAGES } from '@/lib/conversation/intake-stage';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
-import { getLocalResponse, getFallbackResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
+import { getLocalResponse, getFallbackResponse, getNextMissingFieldPrompt, inferCompanyCandidate } from '@/lib/conversation/local-responses';
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
@@ -644,6 +644,15 @@ export async function POST(request: Request) {
     }
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
+    const priorValues = { ...createDefaultLeadDraft(), ...llmContext.priorDraft } as LeadDraft;
+    const companyCandidate = inferCompanyCandidate(priorValues);
+    if (!priorValues.contactCompany?.trim() && companyCandidate) {
+      if (/^(?:yes|correct|that(?:'s| is) right|please do|use that)[.!]?$/i.test(lastUserMessage.trim())) {
+        draftUpdates.contactCompany = companyCandidate;
+      } else if (/^(?:no|skip|prefer not to say|not applicable)[.!]?$/i.test(lastUserMessage.trim())) {
+        draftUpdates.contactCompany = 'Not provided';
+      }
+    }
     let persisted: Awaited<ReturnType<typeof persistAuthenticatedDraftState>>;
     try {
       persisted = await persistAuthenticatedDraftState(draftState, draftUpdates);
@@ -673,13 +682,17 @@ export async function POST(request: Request) {
     const savedValues = toLeadDraftState(progress.canonicalDraft);
     const previousCompletedStageCount = getCompletedIntakeStageCount(llmContext.priorDraft);
     const currentCompletedStageCount = getCompletedIntakeStageCount(savedValues);
-    const stageRecaps = INTAKE_STAGES
+    const completedRecaps = INTAKE_STAGES
       .slice(previousCompletedStageCount, currentCompletedStageCount)
       .flatMap((stage) => {
         const recap = formatIntakeStageRecap(stage.id, savedValues);
         return recap ? [recap] : [];
       });
+    const stageRecaps = completedRecaps.length > 0
+      ? [`Brief recap: ${completedRecaps.map((recap) => recap.replace(/^So far:\s*/, '').replace(/\.$/, '')).join('; ')}.`]
+      : [];
     const missingFields = missingReviewFields(savedValues);
+    replyText = ensureRequiredFollowUp(replyText, getNextMissingFieldPrompt({ ...createDefaultLeadDraft(), ...savedValues } as LeadDraft));
 
     void logLlmEvent(sessionId, category, Object.keys(draftUpdates).length > 0, requestId);
 
@@ -719,6 +732,14 @@ export async function POST(request: Request) {
       message: `AI is temporarily unavailable, so I did not save that answer. Please retry it, or talk to the Balance team. ${fallbackQuestion}`
     }, undefined, request);
   }
+}
+
+function ensureRequiredFollowUp(text: string, question: string): string {
+  const cleaned = text.trim();
+  if (cleaned.endsWith(question)) return cleaned;
+  const withoutTrailingQuestion = cleaned.replace(/[^.!?\n]*\?\s*$/, '');
+  const prefix = withoutTrailingQuestion || 'Thanks — I saved that.';
+  return `${prefix}${prefix.endsWith('\n') ? '' : ' '}${question}`;
 }
 
 function splitReplyIntoMessages(text: string): string[] {

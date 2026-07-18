@@ -369,6 +369,7 @@ export function WidgetOverlay({
         isDisclaimer?: boolean;
         isSystem?: boolean;
         isValid?: () => boolean;
+        delayMs?: number;
       }
     ): Promise<void> => {
       const aiProcessingGeneration = aiProcessingGenerationRef.current;
@@ -383,6 +384,9 @@ export function WidgetOverlay({
       botSayGenerationRef.current = botSayGeneration;
       if (!isCurrent()) return;
       setIsTyping(true);
+      if (options?.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+      }
       if (!isCurrent()) {
         if (botSayGenerationRef.current === botSayGeneration) setIsTyping(false);
         return;
@@ -426,6 +430,7 @@ export function WidgetOverlay({
         await botSay(texts[i], {
           isDisclaimer: stepId === 'intro' && i === 1,
           inlineCards: isLast ? step.inlineCards : undefined,
+          delayMs: i === 0 ? 0 : 520,
           isValid
         });
         if (!isCurrent()) return;
@@ -680,6 +685,7 @@ export function WidgetOverlay({
         const chunk = replyChunks[i];
         await botSay(chunk, {
           ...(isFirst && sharedWork ? { sharedWork } : {}),
+          delayMs: (data.outcome === 'draft_persisted' && data.stageRecaps.length > 0) || i > 0 ? 360 : 0,
           isValid: isCurrent
         });
         if (!isCurrent()) return;
@@ -1649,17 +1655,15 @@ export function WidgetOverlay({
               data-testid="approve-confirmation"
               className="balance-widget-approved-actions"
             >
-              <strong role="status" aria-live="polite">
+              <strong role="status" aria-live="polite" className="balance-widget-approved-status">
                 {telegramBroadcastStatus === 'sent'
-                  ? 'Delivered to the Balance team'
+                  ? 'Brief sent to Balance.'
                   : telegramBroadcastStatus === 'queued'
-                    ? 'Queued for the Balance team'
-                    : 'Brief saved'}
+                    ? 'Brief saved. Waiting to send to Balance.'
+                    : 'Brief saved.'}
               </strong>
               <button
-                type="button"
-                className="balance-widget-action"
-                aria-label="Book a catch-up call"
+                type="button" className="balance-widget-action balance-widget-approved-action" aria-label="Schedule a call"
                 onClick={() => {
                   if (!configuredCalendlyUrl) {
                     void botSay('Scheduling is currently unavailable. Please ask the Balance team to arrange a time.');
@@ -1669,21 +1673,23 @@ export function WidgetOverlay({
                   setView('calendly');
                 }}
               >
-                Book a catch-up
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 011 1v14H4V6a1 1 0 011-1z" /></svg>
+                Schedule a Call
               </button>
-              <button type="button" className="balance-widget-action" onClick={() => void handleTeamConnect()}>
-                Talk to a human
+              <button type="button" className="balance-widget-action balance-widget-approved-action" aria-label="Message the team without AI" onClick={() => void handleTeamConnect()}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" /></svg>
+                Message the Team
               </button>
               <button
-                type="button"
-                className="balance-widget-action"
+                type="button" className="balance-widget-action balance-widget-approved-action" aria-label="Edit brief"
                 onClick={() => {
                   setRailMode('summary');
                   sessionDraft.reopenApproval();
                   if (useBriefTabs) setTabMode('brief');
                 }}
               >
-                Refine brief
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4" /></svg>
+                Edit Brief
               </button>
               {sessionId && !deletionFrozen && (
                 <TrustFeedback
@@ -1868,7 +1874,6 @@ export function WidgetOverlay({
               </div>
 
               {!deletionFrozen && <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} calendlyUrl={configuredCalendlyUrl} onConnect={handleTeamConnect} />}
-              {humanRequested && !deletionFrozen && <HumanFallbacks calendlyUrl={configuredCalendlyUrl} deliveryUnavailable={humanStatus === 'unavailable'} />}
             </>
           )}
         </div>

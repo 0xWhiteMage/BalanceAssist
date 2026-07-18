@@ -31,9 +31,9 @@ async function assertNoHorizontalOverflow(locator: Locator, label: string) {
 }
 
 async function assertDirectContactRoutes(page: Page) {
-  await assertMinimumTarget(page.getByRole('button', { name: 'Talk to the team without AI', exact: true }));
-  await expect(page.getByRole('link', { name: 'Email the team', exact: true })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-  await expect(page.getByRole('link', { name: 'Book a call', exact: true })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+  await assertMinimumTarget(page.getByRole('button', { name: 'Message the team without AI', exact: true }));
+  await expect(page.getByRole('link', { name: 'Email us', exact: true })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+  await expect(page.getByRole('link', { name: 'Schedule a call', exact: true })).toHaveAttribute('href', 'https://calendly.com/balance/test');
 }
 
 function versionedDraft(draft: Record<string, string>, provenance: Record<string, string>) {
@@ -262,8 +262,10 @@ test.describe('mobile intake', () => {
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
     await assertDirectContactRoutes(page);
     await expect(page.getByRole('button', { name: 'Not sure yet', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('log').getByText(stages[1].message, { exact: true })).toBeVisible();
     await input.fill('Not sure yet');
     await input.press('Enter');
+    await expect(page.getByRole('log').getByText(stages[2].message, { exact: true })).toBeVisible();
     await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
     await assertDirectContactRoutes(page);
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
@@ -273,7 +275,7 @@ test.describe('mobile intake', () => {
     await input.press('Enter');
 
     const reviewDirection = page.getByRole('status', { name: 'Brief ready' });
-    await expect(reviewDirection).toHaveText('Your core brief is ready. Review it in the Brief tab.');
+    await expect(reviewDirection).toHaveText('Your brief is ready to check before it is sent to Balance. Open the Brief tab to review it.');
     await expect(reviewDirection).not.toContainText(/\b(left|right|panel|rail)\b/i);
     await briefTab.click();
     await expect(briefPanel).toBeVisible();
@@ -368,19 +370,19 @@ test.describe('mobile intake', () => {
     await retry.click();
 
     const approvalConfirmation = page.getByTestId('approve-confirmation');
-    await expect(approvalConfirmation).toContainText('Queued for the Balance team');
-    await assertMinimumTarget(approvalConfirmation.getByRole('button', { name: 'Talk to a human' }));
+    await expect(approvalConfirmation).toContainText('Brief saved. Waiting to send to Balance.');
+    await assertMinimumTarget(approvalConfirmation.getByRole('button', { name: 'Message the team without AI' }));
     await assertNoHorizontalOverflow(page.locator('html'), 'queued document');
     await assertNoHorizontalOverflow(page.locator('#widget-chat-panel'), 'queued Chat panel');
     await expect(page.locator('#widget-brief-panel')).toHaveCount(0);
     await assertNoHorizontalOverflow(approvalConfirmation, 'queued approval');
     await assertNoHorizontalOverflow(approvalConfirmation.locator('button, a'), 'queued approval actions');
-    const clearYes = page.getByRole('button', { name: 'Yes', exact: true });
-    const clearNo = page.getByRole('button', { name: 'Not quite', exact: true });
+    const clearYes = page.getByRole('button', { name: 'Yes, clear', exact: true });
+    const clearNo = page.getByRole('button', { name: 'Needs work', exact: true });
     await assertMinimumTarget(clearYes);
     await assertMinimumTarget(clearNo);
     await clearNo.click();
-    await expect(page.getByText('Thanks for the feedback.')).toBeVisible();
+    await expect(page.getByText('Feedback saved. Thank you.')).toBeVisible();
     await expect.poll(() => eventPayloads.filter(({ eventName }) => eventName === 'trust_feedback')).toEqual([{
       eventName: 'trust_feedback',
       properties: { dimension: 'clarity_helpfulness', response: 'not_quite' }
@@ -620,7 +622,7 @@ test.describe('mobile intake', () => {
           currentStage: 'references-contact',
           stageRecaps: [],
           briefReady: true,
-          reviewPrompt: 'Your core brief is ready. Review it in the Brief tab.',
+          reviewPrompt: 'Your brief is ready to check before it is sent to Balance. Open the Brief tab to review it.',
           missingFields: []
         })
       });
@@ -632,11 +634,11 @@ test.describe('mobile intake', () => {
     await input.fill('30s animation for social media');
     await input.press('Enter');
 
-    await expect(page.getByText(/Your core brief is ready/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Your brief is ready to check/i)).toBeVisible({ timeout: 5000 });
 
     const readyStatus = page.getByRole('status', { name: 'Brief ready' });
-    await expect(readyStatus).toHaveText('Your core brief is ready. Review it in the Brief tab.');
-    await expect(page.getByRole('log')).not.toContainText('Your core brief is ready');
+    await expect(readyStatus).toHaveText('Your brief is ready to check before it is sent to Balance. Open the Brief tab to review it.');
+    await expect(page.getByRole('log')).not.toContainText('Your brief is ready to check');
 
     const tablist = page.getByRole('tablist', { name: /widget sections/i });
     await expect(tablist).toBeVisible();
@@ -656,9 +658,9 @@ test.describe('mobile intake', () => {
       parent: panel.parentElement?.getBoundingClientRect().width ?? 0
     }));
     expect(briefWidth.panel).toBeCloseTo(briefWidth.parent, 0);
-    await expect(page.getByRole('link', { name: 'Email the team' })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: 'Book a call' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Talk to the team without AI' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Email us' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Schedule a call' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Message the team without AI' })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Edit original wording' }).click();
     const scopeEditor = page.getByRole('textbox', { name: 'Original wording' });
@@ -680,15 +682,15 @@ test.describe('mobile intake', () => {
     await expect(referenceLink).toBeVisible();
     await page.getByRole('button', { name: 'Remove https://vimeo.com/123' }).click();
     await expect(referenceLink).toHaveCount(0);
-    expect(canonicalRefreshes).toBe(2);
+    await expect.poll(() => canonicalRefreshes).toBe(2);
     expect(producerTransferRequests).toEqual([]);
 
     await chatTab.click();
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
     await expect(input).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Email the team' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Book a call' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Talk to the team without AI' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Email us' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Schedule a call' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Message the team without AI' })).toBeVisible();
 
     await chatTab.focus();
     await chatTab.press('ArrowRight');
@@ -697,9 +699,9 @@ test.describe('mobile intake', () => {
 
     await expect(page.getByRole('button', { name: 'Talk to the team without AI', exact: true })).toHaveCount(0);
     await chatTab.click();
-    const human = page.getByRole('button', { name: 'Talk to the team without AI', exact: true });
+    const human = page.getByRole('button', { name: 'Message the team without AI', exact: true });
     await expect(human).toBeVisible();
-    await expect(human).toHaveText('Team');
+    await expect(human).toHaveText('Message the Team');
     await expect(human).toHaveClass(/balance-widget-contact-action/);
     const humanBounds = await human.boundingBox();
     expect(humanBounds).not.toBeNull();

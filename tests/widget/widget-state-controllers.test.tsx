@@ -1339,6 +1339,7 @@ describe('relay API client', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.useRealTimers();
   });
 
   test('never reports delivered from the relay POST response', async () => {
@@ -1354,6 +1355,20 @@ describe('relay API client', () => {
       queued: true,
       delivered: false
     });
+  });
+
+  test('allows 30 seconds before aborting a slow relay request', async () => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    })) as unknown as typeof fetch;
+
+    const result = relayUserMessage('session-1', 'Hello', 'request-1');
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(result).resolves.toEqual({ persisted: false, queued: false, delivered: false });
   });
 
   test('returns only a valid outgoing poll status', async () => {

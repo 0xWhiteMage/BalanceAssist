@@ -11,9 +11,9 @@ async function enterAiIntake(page: Page) {
 }
 
 async function assertDirectContactRoutes(page: Page) {
-  await expect(page.getByRole('button', { name: 'Talk to the team without AI' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Email the team' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-  await expect(page.getByRole('link', { name: 'Book a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+  await expect(page.getByRole('button', { name: 'Message the team without AI' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Email us' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+  await expect(page.getByRole('link', { name: 'Schedule a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
 }
 
 function versionedDraft(draft: Record<string, string>, provenance: Record<string, string>) {
@@ -422,7 +422,7 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(page.getByRole('button', { name: 'Retry sending brief' })).toBeVisible();
     await expect(input).toBeVisible();
     await page.getByRole('button', { name: 'Retry sending brief' }).click();
-    await expect(page.getByTestId('approve-confirmation')).toContainText('Queued for the Balance team');
+    await expect(page.getByTestId('approve-confirmation')).toContainText('Brief saved. Waiting to send to Balance.');
     await expect(page.getByTestId('approve-confirmation')).not.toContainText(/delivered|reviewed/i);
     expect(requestOrder.slice(0, 4)).toEqual([
       { kind: 'consent', payload: expectedConsent },
@@ -432,7 +432,7 @@ test.describe('balance assist intake via persistent rail', () => {
     ]);
 
     await expect(page.getByTestId('review-panel')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Refine brief' }).click();
+    await page.getByRole('button', { name: 'Edit brief' }).click();
     const samePanel = page.getByTestId('review-panel');
     await expect(samePanel).toBeVisible();
     await samePanel.getByRole('button', { name: 'Edit project objective' }).click();
@@ -442,7 +442,7 @@ test.describe('balance assist intake via persistent rail', () => {
     const reapproveButton = page.getByRole('button', { name: 'Send updated brief to Balance' });
     await expect(reapproveButton).toBeVisible();
     await reapproveButton.click();
-    await expect(page.getByTestId('approve-confirmation')).toContainText('Queued for the Balance team');
+    await expect(page.getByTestId('approve-confirmation')).toContainText('Brief saved. Waiting to send to Balance.');
     expect(requestOrder.slice(-2)).toEqual([
       { kind: 'consent', payload: expectedConsent },
       { kind: 'finalize', attempt: 3 }

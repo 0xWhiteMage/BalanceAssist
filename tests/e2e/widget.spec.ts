@@ -80,8 +80,8 @@ test('human recovery persists on mobile when session creation fails', async ({ p
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
 
   const notice = page.getByText('The human-only relay could not start. You can still contact the team directly.');
-  const email = page.getByRole('link', { name: 'Email the team', exact: true });
-  const booking = page.getByRole('link', { name: 'Book a call', exact: true });
+  const email = page.getByRole('link', { name: 'Email us', exact: true });
+  const booking = page.getByRole('link', { name: 'Schedule a call', exact: true });
   await expect(notice).toBeVisible();
   await expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
   await expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');

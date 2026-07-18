@@ -30,16 +30,16 @@ test('rejects an original project scope beyond 4,000 characters instead of trunc
   expect(sanitizeDraftUpdates({ projectScope: 'a'.repeat(4_001) })).toEqual({});
 });
 
-test('retains explicit 200-character caps for shorter and generated fields', () => {
+test('retains explicit caps for shorter and generated fields', () => {
   const result = sanitizeDraftUpdates({
     projectObjective: 'b'.repeat(500),
     audience: 'c'.repeat(500),
-    intendedOutputs: 'd'.repeat(500),
+    intendedOutputs: 'd'.repeat(1_500),
     scopePolished: 'e'.repeat(500)
   });
   expect(result.projectObjective?.length).toBe(200);
   expect(result.audience?.length).toBe(200);
-  expect(result.intendedOutputs?.length).toBe(200);
+  expect(result.intendedOutputs?.length).toBe(1_000);
   expect(result.scopePolished?.length).toBe(200);
 });
 

@@ -17,4 +17,12 @@ describe('parseProviderResponse', () => {
       finishReason: undefined
     });
   });
+
+  test('preserves tool calls when the provider returns null content', () => {
+    const toolCall = { function: { name: 'record_brief_updates', arguments: '{"projectScope":"Launch film"}' } };
+
+    expect(parseProviderResponse({
+      choices: [{ message: { content: null, tool_calls: [toolCall] }, finish_reason: 'tool_calls' }]
+    })).toEqual({ rawContent: null, toolCalls: [toolCall], finishReason: 'tool_calls' });
+  });
 });

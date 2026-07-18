@@ -157,7 +157,13 @@ export function guardAgainstFabricatedBriefFields(
     const nextValue = typeof cleaned[field] === 'string' ? cleaned[field].trim() : '';
     const priorValue = priorDraft[field]?.trim() ?? '';
     if (priorValue && nextValue && nextValue !== priorValue && !textContains(userMessage, nextValue)) {
-      cleaned[field] = priorValue;
+      const additiveOutputs = field === 'intendedOutputs' && nextValue.toLowerCase().includes(priorValue.toLowerCase()) && (() => {
+        const priorTokens = new Set(priorValue.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+        const addedTokens = (nextValue.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((token) => token.length > 2 && !priorTokens.has(token));
+        const userTokens = new Set(userMessage.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+        return addedTokens.length > 0 && addedTokens.every((token) => userTokens.has(token));
+      })();
+      if (!additiveOutputs) cleaned[field] = priorValue;
     }
   }
 
