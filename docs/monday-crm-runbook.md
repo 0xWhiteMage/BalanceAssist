@@ -34,10 +34,15 @@ backfills historical `1.1` grants.
 
 ## Migration Map
 
-The protected CRM migration set is exactly `044` CRM aggregate, `047` atomic
+The original protected CRM migration set is exactly `044` CRM aggregate, `047` atomic
 approval, `048` sync state machine, `049` lifecycle, `052` scheduler health, and
 `053` bounded reconciliation. Legacy migrations `045`, `046`, `050`, and `051`
 are not CRM migrations and the CRM runner never selects or applies them.
+
+OAuth migration `062` and local-media migration `063` use the separate hash-pinned
+`production-integration-migrations` workflow and reviewed
+`supabase/production-integrations-062-063.sql` artifact. That workflow requires
+reviewed baseline `061`; never apply either migration from a workstation.
 
 Run the protected workflow from `main` with an immutable commit SHA and the
 `production-crm-migrations` environment approval. It validates LF-normalized
@@ -80,14 +85,37 @@ are independently nullable. Do not fabricate missing contact data.
 
 ## Authentication Gate
 
-The initial single-board release uses a dedicated service-user personal token
-only after a dated security exception is recorded. Before enabling either lane,
-record the approval reference in `MONDAY_AUTH_APPROVAL_REF` and attach evidence
-of the account/user/board scope, rotation owner, overlap procedure, and a tested
-revocation drill.
+The integration now uses OAuth 2.1 authorization code flow with S256 PKCE. Migration
+`062` stores one-use hashed authorization attempts and one encrypted connection;
+apply it only through the reviewed migration process. Tokens and PKCE verifiers use
+AES-256-GCM envelopes with contextual AAD and a separate
+`MONDAY_TOKEN_ENCRYPTION_KEY` containing canonical base64 for exactly 32 random
+bytes. `MONDAY_APP_SIGNING_SECRET` is unrelated and must not be reused.
 
-The approval reference is currently pending. OAuth 2.1 is required instead if
-the exception is not approved.
+Configure `MONDAY_OAUTH_CLIENT_ID`, `MONDAY_OAUTH_CLIENT_SECRET`, and the exact
+registered `MONDAY_OAUTH_REDIRECT_URI`. With `SETUP_TOKEN` bearer authentication,
+POST `/api/internal/monday-oauth/start`, then open its returned `authorizeUrl`.
+Monday redirects to `/api/internal/monday-oauth/callback`; the callback consumes
+state once, verifies scopes, an account admin, account `3603500`, and edit access
+to board `18421762586`, then stores
+only encrypted rotating tokens. Both responses are `no-store`.
+
+Monday access and refresh tokens have an absolute six-month lifetime from the
+original authorization. Schedule reauthorization no later than five months after
+`monday_oauth_connection.installed_at`; repeat the start flow and confirm a newer
+`installed_at` before the old authorization expires.
+
+To disconnect or respond to credential compromise, keep both CRM lanes disabled
+and send authenticated `DELETE /api/internal/monday-oauth/connection` using the
+`SETUP_TOKEN` bearer value. The endpoint leases the connection, revokes both
+provider tokens, and only then removes the encrypted local connection. A `503`
+means revocation was not fully confirmed: leave the lanes disabled and retry.
+Record the date and result as revocation evidence without recording tokens or
+provider response bodies.
+
+The approval reference is still pending. Before enabling either lane, record the
+dated approval in `MONDAY_AUTH_APPROVAL_REF` with scope, rotation, and revocation
+evidence. OAuth installation alone does not authorize projection writes.
 
 This is an unresolved external release gate: the integration must remain
 fail-closed until a dated approval identifier is recorded here and matches

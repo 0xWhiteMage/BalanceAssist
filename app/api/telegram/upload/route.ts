@@ -3,7 +3,7 @@ import { requireSession } from '@/lib/api/require-session';
 import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supabase/server';
 import { deletePrivateUpload, PrivateStorageError, privateStorageAvailable, privateUploadBucketFromEnv, storePrivateUpload, type PrivateStorageClient } from '@/lib/uploads/private-storage';
 import { classifyConfidentialFilename, classifyConfidentialIntent } from '@/lib/privacy/confidential-intent';
-import { extractTextResultFromBuffer, type TextExtractionResult } from '@/lib/uploads/extract-text';
+import { extractTextResultFromBufferAsync, type TextExtractionResult } from '@/lib/uploads/extract-text';
 import { PRIVATE_ANALYSIS_UPLOAD_POLICY, validateFile, validateFileBatch } from '@/lib/uploads/quarantine';
 import {
   HUMAN_UPLOAD_POLICY,
@@ -177,7 +177,7 @@ export async function POST(request: Request) {
       for (const { file, buffer } of candidates) {
         const validation = validateFile(file, buffer);
         if (!validation.ok) throw new Error('file_validation_failed');
-        const extraction = extractTextResultFromBuffer(Buffer.from(buffer), validation.mime);
+        const extraction = await extractTextResultFromBufferAsync(Buffer.from(buffer), validation.mime);
         preflight.push({
           buffer,
           verifiedMime: validation.mime,

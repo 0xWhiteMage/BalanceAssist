@@ -16,3 +16,5 @@ tsconfig.tsbuildinfo
 .env*
 !.env.example
 supabase/.temp/
+__pycache__/
+*.pyc

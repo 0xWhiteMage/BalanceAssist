@@ -103,13 +103,15 @@ export function AttachmentDropzone({
   onFileAnalyzed,
   sessionId,
   consent,
-  messageContext = ''
+  messageContext = '',
+  referenceLinks = []
 }: {
   onAddLink: (url: string) => Promise<ReferenceMutationOutcome>;
   onFileAnalyzed?: (fileName: string, extractedText: string) => Promise<void> | void;
   sessionId?: string | null;
   consent?: AttachmentConsent | null;
   messageContext?: string;
+  referenceLinks?: ReadonlyArray<ReferenceLink>;
 }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -356,7 +358,8 @@ export function AttachmentDropzone({
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       <div style={{ display: 'grid', gap: 3 }}>
-        <div
+        <h2
+          id="attachment-dialog-title"
           style={{
             fontSize: 10,
             fontWeight: 600,
@@ -365,8 +368,8 @@ export function AttachmentDropzone({
             letterSpacing: '0.16em'
           }}
         >
-          Add project files
-        </div>
+          Add project references
+        </h2>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
           {!sessionId
             ? 'File sharing will be ready when your secure session starts. You can add a reference link now.'
@@ -375,6 +378,15 @@ export function AttachmentDropzone({
               : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
       </div>
+
+      {referenceLinks.length > 0 && (
+        <section aria-labelledby="saved-references-title" className="balance-attachment-saved-links">
+          <h3 id="saved-references-title">Saved references</h3>
+          {referenceLinks.map((link) => (
+            <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
+          ))}
+        </section>
+      )}
 
       <form onSubmit={handleUrlSubmit} className="balance-widget-reference-form">
         <label htmlFor="attachment-reference-url" style={{ width: '100%', fontSize: 11, color: brandTokens.colors.lightText }}>
@@ -480,7 +492,7 @@ export function AttachmentDropzone({
                 {qf.status === 'queued' && 'Queued'}
                 {qf.status === 'validating' && 'Validating...'}
                 {qf.status === 'stored' && 'Stored privately'}
-                {qf.status === 'stored-no-text' && 'Stored privately; this file contains no extractable text'}
+                {qf.status === 'stored-no-text' && 'Stored privately; no readable text layer was found'}
                 {qf.status === 'unsupported' && 'Stored privately; image text analysis is not supported'}
                 {qf.status === 'analysis-failed' && qf.error}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}

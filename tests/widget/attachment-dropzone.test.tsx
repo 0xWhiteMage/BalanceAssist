@@ -178,7 +178,7 @@ test('requires an HTTPS URL before invoking the canonical mutation', async () =>
 test('renders the uppercase section header and short subhead describing the upload affordance', () => {
   render(<AttachmentDropzone onAddLink={vi.fn()} sessionId="sess-unavailable-copy" />);
   expect(
-    screen.getByText(/add project files/i)
+    screen.getByRole('heading', { name: /add project references/i })
   ).toBeInTheDocument();
   expect(
     screen.getByText(/file sharing is temporarily unavailable.*reference link/i)
@@ -212,6 +212,25 @@ test('enables file selection only after the server verifies private storage', as
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
   expect(screen.getByText(/private for 24 hours.*used only for this AI draft/i)).toBeInTheDocument();
   expect(screen.getByTestId('private-analysis-upload-disclosure')).toHaveTextContent(/never sent to the Balance team/i);
+});
+
+test('places the visible header before saved references and the reference form', () => {
+  render(
+    <AttachmentDropzone
+      onAddLink={vi.fn()}
+      sessionId={null}
+      referenceLinks={[{ id: 'reference-1', kind: 'other', url: 'https://example.com/reference' }]}
+    />
+  );
+
+  const heading = screen.getByRole('heading', { name: 'Add project references' });
+  const savedHeading = screen.getByRole('heading', { name: 'Saved references' });
+  const savedLink = screen.getByRole('link', { name: 'https://example.com/reference' });
+  const input = screen.getByRole('textbox', { name: 'Reference link' });
+
+  expect(heading.compareDocumentPosition(savedHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(savedHeading.compareDocumentPosition(savedLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(savedLink.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 test('keeps file selection disabled until a secure session ID exists', async () => {
@@ -386,7 +405,7 @@ test('awaits file analyses sequentially and reports stored files with no readabl
   releaseFirst?.();
   await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledTimes(2));
   expect(onFileAnalyzed).toHaveBeenLastCalledWith('second.txt', 'Second analysis');
-  expect(await screen.findByText(/this file contains no extractable text/i)).toBeInTheDocument();
+  expect(await screen.findByText(/no readable text layer was found/i)).toBeInTheDocument();
   expect(input.value).toBe('');
 });
 
@@ -417,7 +436,7 @@ test('maps storage errors, retains the file, and retries without another selecti
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(input.value).toBe('');
   fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }));
-  await waitFor(() => expect(screen.getByText(/stored privately; this file contains no extractable text/i)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/stored privately; no readable text layer was found/i)).toBeInTheDocument());
   expect(uploadAttempts).toBe(2);
 });
 
@@ -475,9 +494,9 @@ test('tracks duplicate filenames independently and reports every queued file', a
     new File(['second'], 'duplicate.txt', { type: 'text/plain' })
   ] } });
 
-  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/this file contains no extractable text/i));
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/no readable text layer was found/i));
   expect(screen.getAllByText('duplicate.txt')).toHaveLength(2);
-  expect(screen.getByRole('status')).toHaveTextContent('Stored privately; this file contains no extractable text');
+  expect(screen.getByRole('status')).toHaveTextContent('Stored privately; no readable text layer was found');
 });
 
 test('reuses a recent private storage availability probe across popover remounts for the same session', async () => {

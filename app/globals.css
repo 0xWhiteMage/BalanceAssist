@@ -716,7 +716,12 @@ a {
   line-height: 1.4;
 }
 
-.balance-widget-data-actions,
+.balance-widget-data-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
 .balance-widget-contact-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -750,6 +755,16 @@ a {
 
 .balance-widget-data-controls[open] > summary { margin-bottom: 6px; }
 
+.balance-widget-sharing-controls { min-width: 0; }
+.balance-widget-sharing-controls > summary { min-height: 44px; display: flex; align-items: center; padding: 7px 10px; border: 1px solid var(--balance-border-subtle); border-radius: 8px; color: var(--balance-muted); font: 650 10px/1.2 var(--balance-ui); cursor: pointer; list-style: none; }
+.balance-widget-sharing-controls > summary::-webkit-details-marker { display: none; }
+.balance-widget-sharing-controls > summary::after { content: '+'; margin-left: auto; color: var(--balance-gold); font-size: 14px; }
+.balance-widget-sharing-controls[open] > summary::after { content: '\2212'; }
+.balance-widget-sharing-actions { display: grid; gap: 6px; padding-top: 6px; }
+.balance-widget-data-confirmation { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 9px; border: 1px solid rgba(241, 168, 168, 0.45); color: var(--balance-muted); font-size: 10px; line-height: 1.45; }
+.balance-widget-data-confirmation > span { grid-column: 1 / -1; }
+.balance-widget-data-status { padding: 8px 9px; border-left: 2px solid var(--balance-gold); background: rgba(219, 181, 128, 0.06); color: var(--balance-muted); font-size: 10px; line-height: 1.45; white-space: pre-wrap; }
+
 .balance-widget-inline-action,
 .balance-widget-contact-action {
   min-height: 36px;
@@ -769,6 +784,11 @@ a {
 
 .balance-widget-contact-action { min-height: 44px; min-width: 0; padding-inline: 7px; text-align: center; line-height: 1.2; }
 .balance-widget-inline-action-danger { color: #f1a8a8; }
+.balance-widget-inline-action:disabled { opacity: 0.5; cursor: wait; }
+
+.balance-attachment-saved-links { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--balance-border-subtle); background: rgba(255, 255, 255, 0.025); }
+.balance-attachment-saved-links h3 { margin: 0; color: var(--balance-gold); font: 700 9px/1 var(--balance-condensed); letter-spacing: 0.14em; text-transform: uppercase; }
+.balance-attachment-saved-links a { color: var(--balance-gold-light); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 
 .balance-widget-reference-manager {
   display: grid;

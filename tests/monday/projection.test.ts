@@ -121,7 +121,7 @@ describe('Monday payload projection', () => {
 
     expect(payload.columnValues).toMatchObject({
       [schema.columns.contact_email.id]: { email: 'ada@example.com', text: 'Ada Example' },
-      [schema.columns.project_scope.id]: { text: 'Finish a campaign.' },
+      [schema.columns.project_scope.id]: { text: 'Project scope: Finish a campaign.' },
       [schema.columns.qualification_status.id]: { index: 1 },
       [schema.columns.recommended_next_step.id]: { index: 7 },
       [schema.columns.service.id]: { index: 109 },
@@ -133,15 +133,37 @@ describe('Monday payload projection', () => {
     );
   });
 
-  test('limits project scope to 2,000 characters', () => {
-    const projectScope = 'x'.repeat(2_000);
+  test('accepts a 4,000-character scope and limits the projected details to 2,000 characters', () => {
+    const projectScope = 'x'.repeat(4_000);
     const payload = buildMondayCreatePayload({ ...approvedSnapshotFixture, projectScope });
 
-    expect(payload.columnValues[schema.columns.project_scope.id]).toEqual({ text: projectScope });
+    expect(payload.columnValues[schema.columns.project_scope.id]).toEqual({ text: `Project scope: ${projectScope}`.slice(0, 2_000) });
     expect(approvedCrmSnapshotSchema.safeParse({
       ...approvedSnapshotFixture,
       projectScope: `${projectScope}x`,
     }).success).toBe(false);
+  });
+
+  test('projects approved brief detail fields into the Monday project scope', () => {
+    const payload = buildMondayUpdatePayload({
+      ...approvedSnapshotFixture,
+      projectObjective: 'Build launch awareness',
+      audience: 'Regional brand teams',
+      intendedOutputs: 'Hero film and cut-downs',
+      scopePolished: 'A concise campaign brief',
+      referencesStatus: 'References added',
+    });
+
+    expect(payload[schema.columns.project_scope.id]).toEqual({
+      text: [
+        'Project scope: Finish a campaign.',
+        'Objective: Build launch awareness',
+        'Audience: Regional brand teams',
+        'Outputs: Hero film and cut-downs',
+        'Brief summary: A concise campaign brief',
+        'References: References added',
+      ].join('\n\n'),
+    });
   });
 
   test('fails closed when an emitted enum has no numeric label ID', () => {

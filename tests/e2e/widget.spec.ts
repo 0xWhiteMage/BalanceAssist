@@ -219,13 +219,13 @@ test('restores focus after closing its nested reference dialog without force cli
   await attachment.focus();
   await attachment.press('Enter');
 
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
   await attachment.focus();
   await expect(attachment).not.toBeFocused();
   await expect(attachment.click({ timeout: 500 })).rejects.toThrow(/intercepts pointer events/);
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeHidden();
   await expect(attachment).toBeFocused();
 });
 
@@ -256,7 +256,7 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const attachment = page.getByRole('button', { name: 'Attach references' });
   await attachment.focus();
   await attachment.press('Enter');
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
 
   const privateUpload = page.getByRole('button', { name: /store file privately/i });
   await expect(privateUpload).toBeEnabled();
@@ -266,5 +266,5 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const chooser = await chooserPromise;
   await chooser.setFiles(path.join(__dirname, 'fixtures', 'private-upload.txt'));
 
-  await expect(page.getByText(/Stored privately; this file contains no extractable text/i)).toBeVisible();
+  await expect(page.getByText(/Stored privately; no readable text layer was found/i)).toBeVisible();
 });

@@ -168,7 +168,32 @@ describe('ReviewPanel', () => {
     );
     expect(screen.queryByRole('link', { name: /email the team/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /talk to the team/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('Manage brief & data'));
-    expect(screen.getByRole('button', { name: 'Request deletion' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Privacy & project data'));
+    fireEvent.click(screen.getByText('Sharing consent & deletion'));
+    expect(screen.getByRole('button', { name: 'Request project deletion' })).toBeInTheDocument();
+  });
+
+  test('keeps consent and deletion distinct with inline feedback and confirmation', async () => {
+    const onWithdrawTransfer = vi.fn().mockResolvedValue('Sharing consent withdrawn.');
+    const onRequestDeletion = vi.fn().mockResolvedValue('Deletion requested.');
+    render(
+      <ReviewPanel
+        {...baseProps}
+        draft={readyDraft}
+        onWithdrawTransfer={onWithdrawTransfer}
+        onRequestDeletion={onRequestDeletion}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Privacy & project data'));
+    fireEvent.click(screen.getByText('Sharing consent & deletion'));
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw sharing consent' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Sharing consent withdrawn.'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Request project deletion' }));
+    expect(onRequestDeletion).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion request' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Deletion requested.'));
+    expect(onRequestDeletion).toHaveBeenCalledOnce();
   });
 });

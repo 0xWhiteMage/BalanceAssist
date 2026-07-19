@@ -1,6 +1,16 @@
 import { describe, expect, test, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 
+const { resolveMondayAccessToken, refreshMondayAccessToken } = vi.hoisted(() => ({
+  resolveMondayAccessToken: vi.fn(async () => 'test-access-token'),
+  refreshMondayAccessToken: vi.fn(async () => 'refreshed-access-token'),
+}));
+
+vi.mock('../../lib/monday/oauth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/monday/oauth')>();
+  return { ...actual, resolveMondayAccessToken, refreshMondayAccessToken };
+});
+
 import schema from '../../config/monday-crm-schema.json';
 import {
   MondayClientError,
@@ -17,12 +27,14 @@ import {
 import { getMondayConfig } from '../../lib/monday/config';
 
 const env = {
-  MONDAY_API_TOKEN: 'test-token',
+  MONDAY_OAUTH_CLIENT_ID: 'client-id',
+  MONDAY_OAUTH_CLIENT_SECRET: 'client-secret',
+  MONDAY_OAUTH_REDIRECT_URI: 'https://example.com/api/internal/monday-oauth/callback',
   MONDAY_BOARD_ID: schema.boardId,
   MONDAY_API_VERSION: '2026-07',
   MONDAY_UPSERT_ENABLED: 'false',
   MONDAY_CLEANUP_ENABLED: 'false',
-  MONDAY_AUTH_MODE: 'service_token',
+  MONDAY_AUTH_MODE: 'oauth_2_1',
   MONDAY_AUTH_APPROVAL_REF: '',
 };
 
@@ -43,9 +55,11 @@ function fetchReturning(body: unknown, status = 200, headers: Record<string, str
 }
 
 describe('Monday configuration', () => {
-  test('fails closed if enabled lanes lack approved service-token evidence', () => {
+  test('fails closed if enabled lanes lack approved OAuth evidence', () => {
     expect(() => getMondayConfig({ ...env, MONDAY_UPSERT_ENABLED: 'true' })).toThrow('approval');
+    expect(() => getMondayConfig({ ...env, MONDAY_UPSERT_ENABLED: 'true', MONDAY_AUTH_MODE: 'service_token' }, 'approval')).toThrow('OAuth 2.1');
     expect(() => getMondayConfig({ ...env, MONDAY_CLEANUP_ENABLED: 'yes' })).toThrow('exactly');
+    expect(getMondayConfig(env)).not.toHaveProperty('token');
   });
 
   test('checks in the live label text for every projected status ID', () => {
@@ -77,13 +91,14 @@ describe('Monday configuration', () => {
 });
 
 describe('Monday GraphQL client', () => {
-  test('uses raw Authorization, API 2026-07, and a ten-second timeout', async () => {
+  test('acquires OAuth tokens asynchronously and uses raw Authorization, API 2026-07, and a ten-second timeout', async () => {
     const fetchMock = fetchReturning({ data: { items_page_by_column_values: { items: [] } } });
 
     await findItemsByCrmRecordId('crm-1', fetchMock, env);
 
     const options = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(options.headers).toMatchObject({ Authorization: 'test-token', 'API-Version': '2026-07' });
+    expect(resolveMondayAccessToken).toHaveBeenCalledWith({ environment: env });
+    expect(options.headers).toMatchObject({ Authorization: 'test-access-token', 'API-Version': '2026-07' });
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -102,6 +117,16 @@ describe('Monday GraphQL client', () => {
     await vi.advanceTimersByTimeAsync(1);
     await expect(pending).rejects.toMatchObject({ code: 'monday_temporary_failure' });
     vi.useRealTimers();
+  });
+
+  test('forces one token refresh and retries once after a 401', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ data: {} }, 401))
+      .mockResolvedValueOnce(response({ data: { items_page_by_column_values: { items: [] } } }));
+
+    await expect(findItemsByCrmRecordId('crm-1', fetchMock, env)).resolves.toMatchObject({ items: [] });
+    expect(refreshMondayAccessToken).toHaveBeenCalledWith({ environment: env });
+    expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toMatchObject({ Authorization: 'refreshed-access-token' });
   });
 
   test('uses the root-level modern column filter lookup limited to two results', async () => {
@@ -237,10 +262,10 @@ describe('Monday GraphQL client', () => {
 
   test('does not expose tokens or payload values in failures', async () => {
     try {
-      await createMondayItem('private email@example.com', { secret: 'test-token' }, 'key-1', fetchReturning({ errors: [{ message: 'private email@example.com test-token' }] }), env);
+      await createMondayItem('private email@example.com', { secret: 'test-access-token' }, 'key-1', fetchReturning({ errors: [{ message: 'private email@example.com test-access-token' }] }), env);
     } catch (error) {
       expect(error).toBeInstanceOf(MondayClientError);
-      expect((error as Error).message).not.toContain('test-token');
+      expect((error as Error).message).not.toContain('test-access-token');
       expect((error as Error).message).not.toContain('email@example.com');
     }
   });
