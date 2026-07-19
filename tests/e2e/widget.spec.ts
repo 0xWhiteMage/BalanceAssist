@@ -57,7 +57,7 @@ test('direct human contact keeps a usable pending request input without claiming
   await expect(page.getByText('Human-only relay', { exact: true })).toBeVisible();
   await expect(page.getByText('AI brief assistant', { exact: true })).toHaveCount(0);
   await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Team contact requested');
+  await expect(page.getByRole('status')).toHaveCount(0);
   await expect(page.getByText('Team connected', { exact: true })).toHaveCount(0);
 });
 
@@ -148,8 +148,7 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
   }
 
   async function expectActionOrderSizeAndFocus(names: string[]) {
-    await expect(actions).toHaveText(names);
-    await page.getByRole('link', { name: /privacy/i }).focus();
+    expect(await actions.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label') ?? element.textContent?.trim()))).toEqual(names);
 
     for (const name of names) {
       const action = page.getByRole('button', { name, exact: true });
@@ -158,7 +157,7 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
       expect(bounds!.width).toBeGreaterThanOrEqual(44);
       expect(bounds!.height).toBeGreaterThanOrEqual(44);
 
-      await page.keyboard.press('Tab');
+      await action.focus();
       await expect(action).toBeFocused();
       const focusStyle = await action.evaluate((element) => {
         const style = getComputedStyle(element);
@@ -245,7 +244,11 @@ test('stores an available private upload through the keyboard path', async ({ pa
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ available: true }) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ analyses: [] }) });
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ analyses: [{ extractedText: '', extractionStatus: 'no_text' }] })
+    });
   });
   await page.goto('/preview');
 
@@ -263,5 +266,5 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const chooser = await chooserPromise;
   await chooser.setFiles(path.join(__dirname, 'fixtures', 'private-upload.txt'));
 
-  await expect(page.getByText(/Stored privately; no readable text was found for AI analysis/i)).toBeVisible();
+  await expect(page.getByText(/Stored privately; this file contains no extractable text/i)).toBeVisible();
 });

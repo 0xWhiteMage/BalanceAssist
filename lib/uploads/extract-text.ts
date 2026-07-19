@@ -194,8 +194,7 @@ function extractFromPdf(buffer: Buffer): string {
   if (operators.length > 0) {
     return operators.join(' ');
   }
-  // Last-resort fallback: keep printable ASCII runs.
-  return combined.replace(/[^\x20-\x7E]+/g, ' ');
+  return '';
 }
 
 function normalizeWhitespace(value: string): string {
@@ -209,10 +208,21 @@ function normalizeWhitespace(value: string): string {
 
 export function extractTextFromBuffer(buffer: Buffer, verifiedMime: string): string {
   let text = '';
-  if (verifiedMime === 'text/plain') {
+  if (verifiedMime === 'text/plain' || verifiedMime === 'text/csv') {
     text = buffer.toString('utf8');
   } else if (verifiedMime === 'application/pdf') {
     text = extractFromPdf(buffer);
   }
   return normalizeWhitespace(text).slice(0, PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters);
+}
+
+export type TextExtractionResult =
+  | { status: 'extracted'; text: string }
+  | { status: 'no_text'; text: '' }
+  | { status: 'unsupported'; text: '' };
+
+export function extractTextResultFromBuffer(buffer: Buffer, verifiedMime: string): TextExtractionResult {
+  if (verifiedMime.startsWith('image/')) return { status: 'unsupported', text: '' };
+  const text = extractTextFromBuffer(buffer, verifiedMime);
+  return text ? { status: 'extracted', text } : { status: 'no_text', text: '' };
 }

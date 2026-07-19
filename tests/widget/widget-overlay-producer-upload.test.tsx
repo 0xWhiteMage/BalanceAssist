@@ -95,9 +95,9 @@ describe('producer-requested human uploads', () => {
     expect(screen.queryByRole('button', { name: 'Upload requested files' })).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'Talk to the team without AI' }));
 
-    const uploadButton = await screen.findByRole('button', { name: 'Upload requested files' });
+    const uploadButton = await screen.findByRole('button', { name: 'Upload files' });
     expect(uploadButton).toBeVisible();
-    expect(uploadButton).toHaveClass('balance-widget-action', 'balance-widget-icon-action');
+    expect(uploadButton).toHaveClass('balance-widget-action', 'balance-request-primary');
     uploadButton.focus();
     expect(uploadButton).toHaveFocus();
 

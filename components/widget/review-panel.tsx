@@ -169,7 +169,7 @@ export function ReviewPanel({
           </button>
           {ready && (
             <div id="producer-transfer-note" style={{ fontSize: 10, color: brandTokens.colors.mutedText, lineHeight: 1.5, textAlign: 'center' }}>
-              Sends this brief and its reference links to Balance through Telegram and may create a Monday.com record. Those copies have separate retention.
+              Sends this brief and its reference links to Balance. Approved copies may be retained in the services Balance uses to respond and manage enquiries.
             </div>
           )}
           {approvalInFlight && (

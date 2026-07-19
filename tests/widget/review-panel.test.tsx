@@ -82,10 +82,12 @@ describe('ReviewPanel', () => {
     expect(onApprove).toHaveBeenCalledOnce();
   });
 
-  test('discloses transfer destinations at the send boundary', () => {
+  test('discloses transfer handling at the send boundary without platform names', () => {
     render(<ReviewPanel {...baseProps} draft={readyDraft} mode="summary" />);
 
-    expect(screen.getByRole('button', { name: 'Send brief to Balance' })).toHaveAccessibleDescription(/Telegram.*Monday\.com.*separate retention/i);
+    const button = screen.getByRole('button', { name: 'Send brief to Balance' });
+    expect(button).toHaveAccessibleDescription(/services Balance uses to respond and manage enquiries/i);
+    expect(button).not.toHaveAccessibleDescription(/Telegram|Monday\.com/i);
   });
 
   test('keeps editor labels persistent and gives inline actions shared mobile-safe classes', () => {

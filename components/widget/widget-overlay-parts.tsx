@@ -6,7 +6,6 @@ import {
   serviceOptions
 } from '@/lib/onboarding/service-options';
 import type { BudgetBandId, ServiceOptionId, TimelineBandId } from '@/lib/onboarding/types';
-import { HUMAN_UPLOAD_GUIDANCE } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 import { CONFIDENTIAL_INTAKE_RESPONSE } from '@/lib/privacy/confidential-intent';
 
@@ -83,65 +82,46 @@ export function BotAvatarSmall() {
   );
 }
 
-export function FileRequestBanner({ note }: { note: string | null }) {
+export function FileRequestBanner({
+  note,
+  onUpload,
+  onShowPolicy
+}: {
+  note: string | null;
+  onUpload: () => void;
+  onShowPolicy: () => void;
+}) {
   return (
-    <div
-      style={{
-        border: `1px solid ${brandTokens.colors.border}`,
-        background: 'rgba(219, 181, 128, 0.06)',
-        borderRadius: '10px',
-        padding: '10px 12px',
-        fontSize: '12px',
-        lineHeight: 1.6,
-        color: brandTokens.colors.lightText,
-        maxWidth: '280px'
-      }}
-    >
-      <div style={{ fontSize: '10px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em', marginBottom: '4px' }}>
-        Files requested by team
+    <section className="balance-request-card" aria-label="Files requested by the Balance team">
+      <div className="balance-request-card-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 15v4h14v-4" /></svg>
       </div>
-      <div style={{ marginBottom: '6px' }}>
-        {note ?? 'The team asked for files for this project.'}
+      <div className="balance-request-card-copy">
+        <strong>Project files requested</strong>
+        <span>{note ?? 'Add the files the team needs to review.'}</span>
       </div>
-      <div style={{ fontSize: '11px', color: brandTokens.colors.mutedText }}>
-        Use the upload control below to send the requested files for human review.
+      <div className="balance-request-card-actions">
+        <button type="button" className="balance-widget-action balance-request-primary" onClick={onUpload}>Upload files</button>
+        <button type="button" className="balance-widget-action balance-request-secondary" onClick={onShowPolicy}>File guidelines</button>
       </div>
-      <div style={{ marginTop: '6px', fontSize: '10px', color: brandTokens.colors.mutedText }}>
-        {HUMAN_UPLOAD_GUIDANCE}
-      </div>
-    </div>
+    </section>
   );
 }
 
-export function FileRequestInputHint() {
+export function SchedulingPrompt({ onSchedule, available = true }: { onSchedule: () => void; available?: boolean }) {
   return (
-    <div
-      style={{
-        padding: '6px 14px',
-        background: 'rgba(219, 181, 128, 0.08)',
-        borderTop: `1px solid ${brandTokens.colors.subtleBorder}`,
-        fontSize: '10px',
-        fontWeight: 600,
-        color: brandTokens.colors.warmGold,
-        textTransform: 'uppercase',
-        letterSpacing: '0.12em',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        flexShrink: 0
-      }}
-    >
-      <span
-        style={{
-          width: '6px',
-          height: '6px',
-          borderRadius: '50%',
-          background: brandTokens.colors.warmGold,
-          display: 'inline-block'
-        }}
-      />
-      Human file upload requested
-    </div>
+    <section className="balance-request-card" aria-label="Schedule a call with Balance">
+      <div className="balance-request-card-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M6 3v3M18 3v3M4 8h16M5 5h14v15H5z" /></svg>
+      </div>
+      <div className="balance-request-card-copy">
+        <strong>Book a project call</strong>
+        <span>{available ? 'Choose a time that works for you.' : 'Scheduling is temporarily unavailable.'}</span>
+      </div>
+      <div className="balance-request-card-actions">
+        <button type="button" className="balance-widget-action balance-request-primary" disabled={!available} onClick={onSchedule}>Schedule a call</button>
+      </div>
+    </section>
   );
 }
 
@@ -157,35 +137,14 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
   ];
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 120,
-        background: 'rgba(0,0,0,0.68)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px'
-      }}
-    >
+    <div className="balance-upload-policy-backdrop">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="upload-policy-title"
         tabIndex={-1}
-        style={{
-          width: '100%',
-          maxWidth: '340px',
-          maxHeight: '80vh',
-          overflowY: 'auto',
-          borderRadius: '14px',
-          border: `1px solid ${brandTokens.colors.border}`,
-          background: brandTokens.gradients.panel,
-          color: brandTokens.colors.lightText,
-          padding: '18px'
-        }}
+        className="balance-upload-policy-dialog"
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
           <div>
@@ -203,9 +162,7 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <p style={{ marginTop: '12px', fontSize: '12px', lineHeight: 1.6, color: brandTokens.colors.mutedText }}>
-          {HUMAN_UPLOAD_GUIDANCE}
-        </p>
+        <p style={{ marginTop: '12px', fontSize: '12px', lineHeight: 1.6, color: brandTokens.colors.mutedText }}>Up to 5 files and 50 MB total. Executable and script files are blocked.</p>
 
         <div style={{ marginTop: '14px', display: 'grid', gap: '10px' }}>
           {groups.map(([label, list]) => (
@@ -227,9 +184,6 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
 }
 
 export function HumanFooter({
-  isTeamConnected,
-  hasTeamReply = false,
-  humanStatus,
   calendlyUrl = null,
   onConnect
 }: {
@@ -248,30 +202,6 @@ export function HumanFooter({
         background: 'rgba(16, 16, 16, 0.4)'
       }}
     >
-      {isTeamConnected && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center', marginBottom: 6 }}>
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 650,
-              color: humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested'
-                ? brandTokens.colors.warmGold : brandTokens.colors.mutedText
-            }}
-          >
-            {(humanStatus === 'queued' || humanStatus === 'saved' || humanStatus === 'sending' || humanStatus === 'requested') && (
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: brandTokens.colors.warmGold, display: 'inline-block' }} />
-            )}
-            {hasTeamReply
-              ? 'New reply from the Balance team'
-              : humanStatus === 'requested' ? 'Team contact requested'
-                : humanStatus === 'sending' ? 'Sending your message…'
-                  : humanStatus === 'saved' || humanStatus === 'queued' ? 'Message saved. Waiting to send to Balance.'
-                    : humanStatus === 'delivered' ? 'Message delivered to Balance.'
-                      : humanStatus === 'unavailable' ? 'Message delivery is unavailable.' : 'Ready to message the team.'}
-          </div>
-        </div>
-      )}
       <nav className="balance-widget-contact-actions" aria-label="Contact Balance directly">
           <a href="mailto:hello@balancestudio.tv" className="balance-widget-contact-action" aria-label="Email us">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
@@ -813,13 +743,18 @@ function BriefRowEditor({
     if (saving) return;
     setSaving(true);
     setError(null);
-    const outcome = await onCommit(value);
-    setSaving(false);
-    if (!outcome || outcome.status === 'saved') {
-      onSaved();
-      return;
+    try {
+      const outcome = await onCommit(value);
+      if (outcome.status === 'saved') {
+        onSaved();
+        return;
+      }
+      setError(outcome.message);
+    } catch {
+      setError('The change could not be saved. Please try again.');
+    } finally {
+      setSaving(false);
     }
-    setError(outcome.message);
   }
 
   const containerStyle: React.CSSProperties = compact
@@ -874,7 +809,7 @@ function BriefRowEditor({
           style={editorStyle}
         />
       )}
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="balance-brief-editor-actions">
         <button
           type="button"
           className="balance-widget-action"
@@ -884,9 +819,10 @@ function BriefRowEditor({
             event.stopPropagation();
             void save();
           }}
-          style={{ minWidth: 44, minHeight: 44, borderRadius: 6, border: 'none', background: brandTokens.colors.warmGold, color: brandTokens.colors.baseBlack, cursor: 'pointer', fontWeight: 700 }}
+          title="Save change"
         >
-          {saving ? 'Saving...' : 'Save'}
+          <span className="balance-sr-only">{saving ? 'Saving' : 'Save'}</span>
+          {saving ? <span aria-hidden="true">...</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6" /></svg>}
         </button>
         <button
           type="button"
@@ -897,9 +833,10 @@ function BriefRowEditor({
             onCancel();
           }}
           aria-label={`Cancel editing ${row.label.toLowerCase()}`}
-          style={{ minWidth: 44, minHeight: 44, borderRadius: 6, border: `1px solid ${brandTokens.colors.border}`, background: 'transparent', color: brandTokens.colors.lightText, cursor: 'pointer' }}
+          title="Cancel editing"
         >
-          Cancel
+          <span className="balance-sr-only">Cancel</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </div>
       {error && (

@@ -274,7 +274,7 @@ describe('POST /api/telegram/upload private storage', () => {
     const response = await post(formWith(file));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, status: 'stored', analyses: [{ mimeType: 'application/pdf', extractedText: 'Launch film scope' }] });
+    await expect(response.json()).resolves.toEqual({ ok: true, status: 'stored', analyses: [{ mimeType: 'application/pdf', extractedText: 'Launch film scope', extractionStatus: 'extracted' }] });
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({
       bucket: 'temporary-attachments',
       verifiedMime: 'application/pdf',
@@ -447,7 +447,7 @@ describe('POST /api/telegram/upload private storage', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       status: 'stored',
-      analyses: [{ mimeType: 'text/plain', extractedText: 'ordinary project scope' }]
+      analyses: [{ mimeType: 'text/plain', extractedText: 'ordinary project scope', extractionStatus: 'extracted' }]
     });
     expect(storePrivateUploadMock).toHaveBeenCalledWith(expect.objectContaining({ extractedText: 'ordinary project scope' }));
   });

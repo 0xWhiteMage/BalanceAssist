@@ -8,9 +8,9 @@ import {
   BotAvatarSmall,
   ConfidentialDiversionRecovery,
   FileRequestBanner,
-  FileRequestInputHint,
   HumanFallbacks,
   HumanFooter,
+  SchedulingPrompt,
   UploadPolicyModal,
   WidgetOverlayHeader
 } from '@/components/widget/widget-overlay-parts';
@@ -37,7 +37,6 @@ import { getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
 import { detectProjectIntent } from '@/lib/conversation/project-intent';
 
 const CHAT_UNAVAILABLE_MESSAGE = 'AI chat is temporarily unavailable. Please use Talk to a human if you need help now.';
-const OPTIONAL_ANSWER_ACTIONS = ['Skip', 'Prefer not to share'] as const;
 const DELETION_RECEIPT_STORAGE_KEY = 'balance-assist-deletion-receipt';
 
 function isReviewNavigationOnly(text: string) {
@@ -137,7 +136,6 @@ export function WidgetOverlay({
   const [isMaximized, setIsMaximized] = useState(false);
   const [view, setView] = useState<'chat' | 'calendly'>('chat');
   const [calendlyUrl, setCalendlyUrl] = useState<string | null>(null);
-  const [scheduleRequestDismissed, setScheduleRequestDismissed] = useState(false);
   const configuredCalendlyUrl = calendlyUrlOverride?.trim() || null;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -155,7 +153,7 @@ export function WidgetOverlay({
   const [confidentialRecoveryOpen, setConfidentialRecoveryOpen] = useState(false);
   const teamRelay = useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage });
   const {
-    isTeamConnected, requested: humanRequested, status: humanStatus, waitingForReply: teamWaitingForReply,
+    isTeamConnected, requested: humanRequested, status: humanStatus,
     fileRequestOpen: humanFileRequestOpen, fileRequestNote: humanFileRequestNote,
     scheduleRequestOpen: humanScheduleRequestOpen
   } = teamRelay;
@@ -286,17 +284,6 @@ export function WidgetOverlay({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
-
-  useEffect(() => {
-    if (isTeamConnected && humanScheduleRequestOpen && !scheduleRequestDismissed && configuredCalendlyUrl && view === 'chat') {
-      setCalendlyUrl(configuredCalendlyUrl);
-      setView('calendly');
-    }
-  }, [configuredCalendlyUrl, isTeamConnected, humanScheduleRequestOpen, scheduleRequestDismissed, view]);
-
-  useEffect(() => {
-    if (!humanScheduleRequestOpen) setScheduleRequestDismissed(false);
-  }, [humanScheduleRequestOpen]);
 
   useEffect(() => {
     if (!noticeConsent || !entryPath) return;
@@ -430,7 +417,7 @@ export function WidgetOverlay({
         await botSay(texts[i], {
           isDisclaimer: stepId === 'intro' && i === 1,
           inlineCards: isLast ? step.inlineCards : undefined,
-          delayMs: i === 0 ? 0 : 520,
+          delayMs: i === 0 ? 0 : 140,
           isValid
         });
         if (!isCurrent()) return;
@@ -458,6 +445,8 @@ export function WidgetOverlay({
     if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) return;
     aiBootstrapInFlightGenerationRef.current = bootstrapGeneration;
     cancelRef.current = false;
+    setHasStarted(true);
+    setIsTyping(true);
     const bootstrapIsCurrent = () =>
       bootstrapGeneration === bootstrapGenerationRef.current &&
       aiProcessingGeneration === aiProcessingGenerationRef.current &&
@@ -467,11 +456,13 @@ export function WidgetOverlay({
       const activeSessionId = await loadOrCreateSession(bootstrapIsCurrent);
       if (!bootstrapIsCurrent()) return;
       if (!activeSessionId) {
+        setHasStarted(false);
+        setIsTyping(false);
         setEntryPath(null);
         return;
       }
 
-      setHasStarted(true);
+      setIsTyping(false);
       const restoredDraft = getDraftSnapshot();
       if (detectProjectIntent(restoredDraft)) {
         const restoredStep = getNextConversationStep(restoredDraft);
@@ -485,6 +476,7 @@ export function WidgetOverlay({
       }
       if (bootstrapIsCurrent()) aiBootstrapCompletedRef.current = true;
     } finally {
+      if (bootstrapIsCurrent() && !aiBootstrapCompletedRef.current) setIsTyping(false);
       if (aiBootstrapInFlightGenerationRef.current === bootstrapGeneration) {
         aiBootstrapInFlightGenerationRef.current = null;
       }
@@ -1306,21 +1298,14 @@ export function WidgetOverlay({
     setNoticeConsent({ consentVersion: 'human-relay-1.2', consentedAt: new Date().toISOString() });
   }
 
-  const canInteract = !confidentialRecoveryOpen && !isSessionExpired && (hasStarted || humanRequested);
-  const showNoticeGate = entryPath === null;
+  const canInteract = !confidentialRecoveryOpen && !isSessionExpired && (entryPath === 'ai' ? hasStarted && Boolean(sessionId) : humanRequested);
+  const showNoticeGate = entryPath === null && !deletionFrozen;
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
   const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
   const briefReady = entryPath === 'ai' && !isTeamConnected && isBriefReadyForApproval(draft);
   const showContextBrief = entryPath === 'ai' && !isTeamConnected && hasProjectIntent && !briefApproved;
   const useBriefTabs = showContextBrief && (isMobile || !isMaximized);
-  const optionalAnswerActions =
-    currentStep === 'audience' || currentStep === 'outputs' || currentStep === 'references'
-      ? [OPTIONAL_ANSWER_ACTIONS[0]]
-        : currentStep === 'budget'
-          ? [OPTIONAL_ANSWER_ACTIONS[1]]
-            : [];
-
   return (
     <div
       className="balance-widget-root"
@@ -1342,11 +1327,9 @@ export function WidgetOverlay({
             <CalendlyEmbed
               url={calendlyUrl}
               onBack={() => {
-                setScheduleRequestDismissed(true);
                 setView('chat');
               }}
               onScheduled={async () => {
-                setScheduleRequestDismissed(true);
                 setView('chat');
                 const message: ChatMessage = {
                   id: nextId(),
@@ -1640,9 +1623,23 @@ export function WidgetOverlay({
                       </div>
                     )}
 
-                    {!isTyping && isTeamConnected && teamWaitingForReply && <div role="status">Waiting for a Balance team reply</div>}
-
-                    {!isTyping && isTeamConnected && humanFileRequestOpen && <FileRequestBanner note={humanFileRequestNote} />}
+                    {!isTyping && isTeamConnected && humanFileRequestOpen && (
+                      <FileRequestBanner
+                        note={humanFileRequestNote}
+                        onUpload={() => requestedFileInputRef.current?.click()}
+                        onShowPolicy={() => setShowUploadPolicy(true)}
+                      />
+                    )}
+                    {!isTyping && isTeamConnected && humanScheduleRequestOpen && (
+                      <SchedulingPrompt
+                        available={Boolean(configuredCalendlyUrl)}
+                        onSchedule={() => {
+                          if (!configuredCalendlyUrl) return;
+                          setCalendlyUrl(configuredCalendlyUrl);
+                          setView('calendly');
+                        }}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -1700,55 +1697,12 @@ export function WidgetOverlay({
             </div>
           )}
 
-          {!isTeamConnected && canInteract && optionalAnswerActions.length > 0 && (!useBriefTabs || tabMode === 'chat') && (
-            <div className="balance-widget-quick-actions">
-              {optionalAnswerActions.map((action) => (
-                <button
-                  key={action}
-                  type="button"
-                  disabled={isTyping}
-                  onClick={() => { void processFlowAnswer(action, action); }}
-                  className="balance-widget-action"
-                >
-                  {action}
-                </button>
-              ))}
-            </div>
-          )}
-
           {/* Input Bar */}
           {canInteract && (!useBriefTabs || tabMode === 'chat') && (
             <>
-              {isTeamConnected && humanFileRequestOpen && <FileRequestInputHint />}
-              {showAttachmentButton && !deletionFrozen && (
-                <div
-                  style={{
-                    padding: '6px 12px 0',
-                    background: 'rgba(16, 16, 16, 0.4)',
-                    textAlign: 'right',
-                    flexShrink: 0
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setShowUploadPolicy(true)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: brandTokens.colors.mutedText,
-                      fontSize: '11px',
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                      textUnderlineOffset: '2px'
-                    }}
-                  >
-                    Accepted file types
-                  </button>
-                </div>
-              )}
               <div className="balance-widget-composer">
                 <div className="balance-widget-composer-inner">
-                <label htmlFor="balance-widget-message-input" className="balance-widget-input-label">
+                <label htmlFor="balance-widget-message-input" className="balance-sr-only">
                   {humanRequested ? 'Message the Balance team' : 'Message Balance Assist'}
                 </label>
                 {entryPath === 'ai' && !isTeamConnected && !deletionFrozen && (
@@ -1772,20 +1726,7 @@ export function WidgetOverlay({
                         aria-modal="true"
                         aria-label="Add private references"
                         tabIndex={-1}
-                        style={{
-                          position: 'absolute',
-                          left: 12,
-                          right: 12,
-                          bottom: 'calc(100% + 6px)',
-                          padding: 12,
-                          borderRadius: 12,
-                          border: `1px solid ${brandTokens.colors.border}`,
-                          background: brandTokens.gradients.panel,
-                          boxShadow: '0 -10px 30px rgba(0,0,0,0.45)',
-                          zIndex: 100,
-                          maxHeight: 'min(420px, calc(100dvh - 180px))',
-                          overflowY: 'auto'
-                        }}
+                        className="balance-attachment-popover"
                       >
                         <button
                           type="button"
@@ -1810,29 +1751,21 @@ export function WidgetOverlay({
                             ))}
                           </div>
                         )}
-                        <AttachmentDropzone
-                          onAddLink={addPrivateReference}
-                          onFileAnalyzed={handleFileAnalyzed}
-                          sessionId={sessionId}
-                          consent={entryPath === 'ai' && noticeConsent ? { aiAnalysis: true, producerShare: false, consentedAt: noticeConsent.consentedAt } : null}
-                          messageContext={inputValue}
-                        />
+                        <div className="balance-attachment-content">
+                          <AttachmentDropzone
+                            onAddLink={addPrivateReference}
+                            onFileAnalyzed={handleFileAnalyzed}
+                            sessionId={sessionId}
+                            consent={entryPath === 'ai' && noticeConsent ? { aiAnalysis: true, producerShare: false, consentedAt: noticeConsent.consentedAt } : null}
+                            messageContext={inputValue}
+                          />
+                        </div>
                       </div>
                     )}
                   </>
                 )}
                 {showAttachmentButton && !deletionFrozen && (
                   <>
-                    <button
-                      type="button"
-                      aria-label="Upload requested files"
-                      onClick={() => requestedFileInputRef.current?.click()}
-                      className="balance-widget-action balance-widget-icon-action"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke={brandTokens.colors.warmGold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
                     <input
                       ref={requestedFileInputRef}
                       type="file"

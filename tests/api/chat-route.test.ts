@@ -1404,7 +1404,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Just chatting. Tell me a bit about the project you want to create.');
+    expect(data.message).toBe('Just chatting.');
     expect(data.draftUpdates).toEqual({});
     expect(data.briefReady).toBe(false);
     expect(data.reviewPrompt).toBeNull();
@@ -1431,7 +1431,7 @@ describe('POST /api/chat', () => {
     expect(data.reviewPrompt).toBeNull();
   });
 
-  test('ignores tool call that fails safeParse (bad contactEmail) (no toolArguments)', async () => {
+  test('drops a malformed tool field while preserving valid grounded fields', async () => {
     global.fetch = vi.fn(async () => makeToolCallResponse(
       'Trying something.',
       'record_brief_updates',
@@ -1452,12 +1452,16 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', content: '30s animation, Video production, timeline 1-2-months, budget 20k-50k' }],
       context: { step: 'intro', draft: '{}' }
     });
 
     expect(res.status).toBe(200);
-    expect(data.draftUpdates).toEqual({});
+    expect(data.draftUpdates).toMatchObject({
+      service: 'production', projectType: 'Video', projectScope: '30s animation, Video production, timeline 1-2-months, budget 20k-50k',
+      timelineBand: '1-2-months', budgetBand: '20k-50k'
+    });
+    expect(data.draftUpdates.contactEmail).toBeUndefined();
     expect(data.briefReady).toBe(false);
     expect(data.reviewPrompt).toBeNull();
   });
@@ -1648,7 +1652,7 @@ describe('POST /api/chat', () => {
     expect(data.truncated).toBe(true);
     expect(Array.isArray(data.messages)).toBe(true);
     expect((data.messages as string[])[0]).toBe('(continuing…)');
-    expect((data.messages as string[])[1]).toBe(`${partial} Tell me a bit about the project you want to create.`);
+    expect((data.messages as string[])[1]).toBe(partial);
     expect(warnSpy).toHaveBeenCalledWith(
       '[chat]',
       'response truncated: finish_reason=length',
@@ -1675,7 +1679,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('A few examples of our event work: Tell me a bit about the project you want to create.');
+    expect(data.message).toBe('A few examples of our event work:');
     expect(data.sharedWork).toBeDefined();
     expect(data.sharedWork.entries).toHaveLength(3);
     const slugs = data.sharedWork.entries.map((e: { slug: string }) => e.slug);
@@ -1825,7 +1829,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.message).toBeUndefined();
-    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend. Tell me a bit about the project you want to create.']);
+    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend.']);
   });
 
   test('splits a reply with --- separators into a messages[] array', async () => {
@@ -1840,7 +1844,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.message).toBeUndefined();
-    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend. Tell me a bit about the project you want to create.']);
+    expect(data.messages).toEqual(['Hello.', 'There.', 'Friend.']);
   });
 
   test('keeps the single-message shape when there are no separators (backwards-compatible)', async () => {
@@ -1854,7 +1858,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Just one short reply. Tell me a bit about the project you want to create.');
+    expect(data.message).toBe('Just one short reply.');
     expect(data.messages).toBeUndefined();
   });
 
@@ -1873,7 +1877,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.messages).toEqual(['A few examples:', 'Tell me a bit about the project you want to create.']);
+    expect(data.messages).toEqual(['A few examples:', 'Want me to walk through the event pieces?']);
     expect(data.sharedWork).toBeDefined();
     expect(data.sharedWork.entries).toHaveLength(2);
     expect(data.briefReady).toBe(false);
@@ -1894,7 +1898,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.message).toBeUndefined();
-    expect(data.messages).toEqual(['First thought.', 'Second thought.', 'Third thought. Tell me a bit about the project you want to create.']);
+    expect(data.messages).toEqual(['First thought.', 'Second thought.', 'Third thought.']);
     expect(data.truncated).toBe(false);
   });
 
@@ -1925,7 +1929,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('partial Tell me a bit about the project you want to create.');
+    expect(data.message).toBe('partial');
     expect(data.messages).toBeUndefined();
     expect(data.truncated).toBe(false);
   });
@@ -1964,7 +1968,7 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Just one paragraph. Tell me a bit about the project you want to create.');
+    expect(data.message).toBe('Just one paragraph.');
     expect(data.messages).toBeUndefined();
   });
 

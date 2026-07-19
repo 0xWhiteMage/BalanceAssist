@@ -106,6 +106,9 @@ test('includes the Calendly iframe in keyboard order with an accessible return a
 
   await page.goto('/preview');
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
+  const scheduling = page.getByRole('region', { name: 'Schedule a call with Balance' });
+  await expect(scheduling).toBeVisible({ timeout: 10_000 });
+  await scheduling.getByRole('button', { name: 'Schedule a call' }).click();
 
   const calendar = page.getByRole('dialog', { name: 'Book a Discovery Call' });
   await expect(calendar).toBeVisible({ timeout: 10_000 });

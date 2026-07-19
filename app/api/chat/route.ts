@@ -222,7 +222,10 @@ async function callOpenAICompatible(
               },
               options?.userMessage ?? ''
             );
-            toolArguments = guarded;
+            toolArguments = {
+              ...(toolArguments ?? {}),
+              ...Object.fromEntries(Object.entries(guarded).filter(([, value]) => value !== undefined))
+            };
           } else {
             logger.warn('record_brief_updates tool arguments failed schema validation', {
               sessionId: options?.sessionId,
@@ -645,6 +648,12 @@ export async function POST(request: Request) {
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
     const priorValues = { ...createDefaultLeadDraft(), ...llmContext.priorDraft } as LeadDraft;
+    for (const [field, value] of Object.entries(draftUpdates)) {
+      if (priorValues[field as keyof LeadDraft] === value) delete draftUpdates[field as keyof typeof draftUpdates];
+    }
+    if (Object.keys(draftUpdates).length === 0 && !sharedWork) {
+      Object.assign(draftUpdates, inferDirectIntakeUpdates(priorValues, lastUserMessage));
+    }
     const companyCandidate = inferCompanyCandidate(priorValues);
     if (!priorValues.contactCompany?.trim() && companyCandidate) {
       if (/^(?:yes|correct|that(?:'s| is) right|please do|use that)[.!]?$/i.test(lastUserMessage.trim())) {
@@ -692,7 +701,15 @@ export async function POST(request: Request) {
       ? [`Brief recap: ${completedRecaps.map((recap) => recap.replace(/^So far:\s*/, '').replace(/\.$/, '')).join('; ')}.`]
       : [];
     const missingFields = missingReviewFields(savedValues);
-    replyText = ensureRequiredFollowUp(replyText, getNextMissingFieldPrompt({ ...createDefaultLeadDraft(), ...savedValues } as LeadDraft));
+    const shouldContinueIntake = !sharedWork && (
+      Object.keys(draftUpdates).length > 0 ||
+      (hasProjectNeed(priorValues) && /^(?:ok|okay|yes|yep|sure|go on|keep going|continue|next)[.!]?$/i.test(lastUserMessage.trim()))
+    );
+    if (shouldContinueIntake) {
+      replyText = ensureRequiredFollowUp(replyText, getNextMissingFieldPrompt({ ...createDefaultLeadDraft(), ...savedValues } as LeadDraft));
+    } else if (!replyText.trim() && sharedWork) {
+      replyText = 'Here are the references I found.';
+    }
 
     void logLlmEvent(sessionId, category, Object.keys(draftUpdates).length > 0, requestId);
 
@@ -740,6 +757,32 @@ function ensureRequiredFollowUp(text: string, question: string): string {
   const withoutTrailingQuestion = cleaned.replace(/[^.!?\n]*\?\s*$/, '');
   const prefix = withoutTrailingQuestion || 'Thanks — I saved that.';
   return `${prefix}${prefix.endsWith('\n') ? '' : ' '}${question}`;
+}
+
+function hasProjectNeed(draft: LeadDraft): boolean {
+  return Boolean(draft.projectScope.trim() || draft.projectType?.trim() || draft.service.trim());
+}
+
+function inferDirectIntakeUpdates(draft: LeadDraft, userMessage: string): Partial<LeadDraft> {
+  const value = userMessage.trim();
+  if (!value || value.length > 1_000) return {};
+  if (/^(?:ok|okay|yes|yep|sure|go on|keep going|continue)[.!]?$/i.test(value)) return {};
+  const redirects = /^(?:skip|move on|next(?: question| topic)?|let'?s move on|can we (?:move on|talk about something else)|not relevant)[.!]?$/i;
+  if (redirects.test(value)) {
+    if (!draft.projectObjective.trim()) return { projectObjective: 'Skip' };
+    if (!draft.audience.trim()) return { audience: 'Skip' };
+    if (!draft.intendedOutputs.trim()) return { intendedOutputs: 'Skip' };
+    if (!draft.timelineBand.trim()) return { timelineBand: 'Not sure yet' };
+    if (!draft.budgetBand.trim()) return { budgetBand: 'Prefer not to share' };
+    if (!draft.referencesStatus.trim()) return { referencesStatus: 'skipped' };
+    return {};
+  }
+  if (value.includes('?') || /\b(?:already|mentioned|recommend|reference|example|portfolio|show me|tell me about)\b/i.test(value)) return {};
+  if (!hasProjectNeed(draft) || value.length > 200) return {};
+  if (!draft.projectObjective.trim()) return { projectObjective: value };
+  if (!draft.audience.trim()) return { audience: value };
+  if (!draft.intendedOutputs.trim()) return { intendedOutputs: value };
+  return {};
 }
 
 function splitReplyIntoMessages(text: string): string[] {

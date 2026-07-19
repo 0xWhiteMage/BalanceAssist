@@ -991,8 +991,7 @@ describe('thesis-aligned optional intake actions', () => {
     fireEvent.change(input, { target: { value: 'We need a launch film' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
-    const skip = await screen.findByRole('button', { name: 'Skip' }, { timeout: 7000 });
-    await waitFor(() => expect(skip).not.toBeDisabled(), { timeout: 7000 });
+    await screen.findByText(/Would you like to add any references/i, {}, { timeout: 7000 });
     fireEvent.change(input, { target: { value: 'https://vimeo.com/123' } });
     const send = screen.getByRole('button', { name: 'Send message' });
     await waitFor(() => expect(send).not.toBeDisabled(), { timeout: 7000 });
@@ -1059,9 +1058,11 @@ describe('thesis-aligned optional intake actions', () => {
     fireEvent.change(input, { target: { value: 'We need a launch film' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
-    const skip = await screen.findByRole('button', { name: 'Skip' }, { timeout: 7000 });
-    await waitFor(() => expect(skip).not.toBeDisabled(), { timeout: 7000 });
-    fireEvent.click(skip);
+    await screen.findByText(/Would you like to add any references/i, {}, { timeout: 7000 });
+    fireEvent.change(input, { target: { value: 'Skip' } });
+    const send = screen.getByRole('button', { name: 'Send message' });
+    await waitFor(() => expect(send).not.toBeDisabled(), { timeout: 7000 });
+    fireEvent.click(send);
 
     await waitFor(() => expect(draftWrites).toHaveLength(1), { timeout: 7000 });
     expect(draftWrites[0].fields).toEqual([

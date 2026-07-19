@@ -1118,9 +1118,9 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
 
     await waitFor(() => {
       expect(requestLog.some((entry) => entry.url.includes('/api/projects/delete-session-id/delete') && entry.method === 'POST')).toBe(true);
-      expect(screen.getByRole('dialog', { name: /balance assist/i }).textContent).toMatch(/recorded your deletion request/i);
       expect(screen.getByTestId('deletion-status').textContent).toMatch(/processing|requested/i);
-      expect(screen.getByPlaceholderText('This session is frozen')).toBeDisabled();
+      expect(screen.queryByRole('textbox')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Build a brief with AI' })).toBeNull();
     });
   }, 10000);
 

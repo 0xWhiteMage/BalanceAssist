@@ -234,7 +234,7 @@ test.describe('mobile intake', () => {
     await input.fill(`${originalWording}. The objective is to introduce it to customers.`);
     await input.press('Enter');
     await expect(page.getByRole('log').getByText(stages[0].recap, { exact: true })).toBeVisible();
-    await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
+    await expect(page.getByRole('button', { name: 'Skip', exact: true })).toHaveCount(0);
     await assertDirectContactRoutes(page);
 
     const tablist = page.getByRole('tablist', { name: 'Widget sections' });
@@ -259,16 +259,18 @@ test.describe('mobile intake', () => {
     await expect(chatTab).toBeFocused();
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
 
-    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await input.fill('Skip');
+    await input.press('Enter');
     await assertDirectContactRoutes(page);
     await expect(page.getByRole('button', { name: 'Not sure yet', exact: true })).toHaveCount(0);
     await expect(page.getByRole('log').getByText(stages[1].message, { exact: true })).toBeVisible();
     await input.fill('Not sure yet');
     await input.press('Enter');
     await expect(page.getByRole('log').getByText(stages[2].message, { exact: true })).toBeVisible();
-    await assertMinimumTarget(page.getByRole('button', { name: 'Skip', exact: true }));
+    await expect(page.getByRole('button', { name: 'Skip', exact: true })).toHaveCount(0);
     await assertDirectContactRoutes(page);
-    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await input.fill('Skip');
+    await input.press('Enter');
     await expect(page.getByRole('log').getByText('Almost there. How should I address you?', { exact: true })).toBeVisible();
     await assertDirectContactRoutes(page);
     await input.fill('Jayden from Acme, jayden@example.com');
@@ -452,7 +454,7 @@ test.describe('mobile intake', () => {
     await page.goto('/preview');
     await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
 
-    const upload = page.getByRole('button', { name: 'Upload requested files' });
+    const upload = page.getByRole('button', { name: 'Upload files' });
     await expect(upload).toBeVisible({ timeout: 5_000 });
     const bounds = await upload.boundingBox();
     expect(bounds).not.toBeNull();

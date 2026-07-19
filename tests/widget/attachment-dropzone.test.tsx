@@ -36,8 +36,8 @@ test('discloses the exact AI formats, proxy-safe limits, extraction behavior, an
   expect(disclosure).toHaveTextContent(/up to 5 files/i);
   expect(disclosure).toHaveTextContent(/4 MB each/i);
   expect(disclosure).toHaveTextContent(/4 MB total/i);
-  expect(disclosure).toHaveTextContent(/TXT and PDF.*up to 4,000 characters/i);
-  expect(disclosure).toHaveTextContent(/images and CSV may yield no extracted text/i);
+  expect(disclosure).toHaveTextContent(/TXT, CSV, and text-based PDF files.*up to 4,000 characters/i);
+  expect(disclosure).toHaveTextContent(/Image text analysis is not supported.*scanned PDFs need a text layer/i);
   expect(disclosure).toHaveTextContent(/extracted text.*AI processing service/i);
   expect(disclosure).toHaveTextContent(/no readable text.*cannot inform the AI draft/i);
   expect(disclosure).not.toHaveTextContent(/DeepSeek/i);
@@ -97,7 +97,7 @@ test('allows a benign filename containing a near-match', async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
     if (String(input).includes('/consent')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
-    return new Response(JSON.stringify({ ok: true, analyses: [{ extractedText: 'ordinary text' }] }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, analyses: [{ extractedText: 'ordinary text', extractionStatus: 'extracted' }] }), { status: 200 });
   });
   global.fetch = fetchMock as unknown as typeof fetch;
   const { container } = render(
@@ -291,7 +291,7 @@ test('forwards only the server-derived analysis payload to the draft callback', 
       if (!init?.method) {
         return new Response(JSON.stringify({ available: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
-      return new Response(JSON.stringify({ ok: true, status: 'stored', analyses: [{ mimeType: 'text/plain', extractedText: 'Server-verified brief text' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ ok: true, status: 'stored', analyses: [{ mimeType: 'text/plain', extractedText: 'Server-verified brief text', extractionStatus: 'extracted' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     return new Response('{}', { status: 404 });
   }) as unknown as typeof fetch;
@@ -325,7 +325,7 @@ test('ignores an upload response after the active session changes', async () => 
   await waitFor(() => expect(vi.mocked(global.fetch).mock.calls.some(([, init]) => init?.method === 'POST' && init.body instanceof FormData)).toBe(true));
 
   rerender(<AttachmentDropzone {...props} sessionId="sess-new" />);
-  resolveUpload(new Response(JSON.stringify({ analyses: [{ extractedText: 'Stale analysis' }] }), { status: 200 }));
+  resolveUpload(new Response(JSON.stringify({ analyses: [{ extractedText: 'Stale analysis', extractionStatus: 'extracted' }] }), { status: 200 }));
 
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
   expect(onFileAnalyzed).not.toHaveBeenCalled();
@@ -364,9 +364,9 @@ test('awaits file analyses sequentially and reports stored files with no readabl
     if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
     return new Response(JSON.stringify({
       analyses: [
-        { extractedText: 'First analysis' },
-        { extractedText: 'Second analysis' },
-        { extractedText: '' }
+        { extractedText: 'First analysis', extractionStatus: 'extracted' },
+        { extractedText: 'Second analysis', extractionStatus: 'extracted' },
+        { extractedText: '', extractionStatus: 'no_text' }
       ]
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as unknown as typeof fetch;
@@ -386,7 +386,7 @@ test('awaits file analyses sequentially and reports stored files with no readabl
   releaseFirst?.();
   await waitFor(() => expect(onFileAnalyzed).toHaveBeenCalledTimes(2));
   expect(onFileAnalyzed).toHaveBeenLastCalledWith('second.txt', 'Second analysis');
-  expect(await screen.findByText(/no readable text was found for AI analysis/i)).toBeInTheDocument();
+  expect(await screen.findByText(/this file contains no extractable text/i)).toBeInTheDocument();
   expect(input.value).toBe('');
 });
 
@@ -402,7 +402,7 @@ test('maps storage errors, retains the file, and retries without another selecti
         headers: { 'Content-Type': 'application/json' }
       });
     }
-    return new Response(JSON.stringify({ ok: true, analyses: [{ extractedText: '' }] }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, analyses: [{ extractedText: '', extractionStatus: 'no_text' }] }), { status: 200 });
   }) as unknown as typeof fetch;
   const { container } = render(
     <AttachmentDropzone onAddLink={vi.fn()} sessionId="sess-retry" consent={analysisConsent} />
@@ -417,7 +417,7 @@ test('maps storage errors, retains the file, and retries without another selecti
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(input.value).toBe('');
   fireEvent.click(screen.getByRole('button', { name: 'Retry upload' }));
-  await waitFor(() => expect(screen.getByText(/stored privately; no readable text/i)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/stored privately; this file contains no extractable text/i)).toBeInTheDocument());
   expect(uploadAttempts).toBe(2);
 });
 
@@ -457,13 +457,13 @@ test('does not offer a blind retry when the upload outcome is network-ambiguous'
   expect(screen.queryByRole('button', { name: 'Retry upload' })).not.toBeInTheDocument();
 });
 
-test('tracks duplicate filenames independently while showing only the latest upload log', async () => {
+test('tracks duplicate filenames independently and reports every queued file', async () => {
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes('/consent')) return new Response('{}', { status: 200 });
     if (!init?.method) return new Response(JSON.stringify({ available: true }), { status: 200 });
     return new Response(JSON.stringify({ analyses: [
-      { extractedText: 'Readable first file' },
-      { extractedText: '' }
+      { extractedText: 'Readable first file', extractionStatus: 'extracted' },
+      { extractedText: '', extractionStatus: 'no_text' }
     ] }), { status: 200 });
   }) as unknown as typeof fetch;
   const { container } = render(
@@ -475,9 +475,9 @@ test('tracks duplicate filenames independently while showing only the latest upl
     new File(['second'], 'duplicate.txt', { type: 'text/plain' })
   ] } });
 
-  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/no readable text was found/i));
-  expect(screen.getAllByText('duplicate.txt')).toHaveLength(1);
-  expect(screen.getByRole('status')).toHaveTextContent('Stored privately; no readable text was found');
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/this file contains no extractable text/i));
+  expect(screen.getAllByText('duplicate.txt')).toHaveLength(2);
+  expect(screen.getByRole('status')).toHaveTextContent('Stored privately; this file contains no extractable text');
 });
 
 test('reuses a recent private storage availability probe across popover remounts for the same session', async () => {

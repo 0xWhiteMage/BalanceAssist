@@ -18,7 +18,7 @@ import {
 export type ReferenceLink = { id?: string; sessionId?: string; kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
 type ReferenceMutationOutcome = { status: 'saved' } | { status: 'failed'; message: string };
 
-type FileStatus = 'queued' | 'validating' | 'stored' | 'stored-no-text' | 'analysis-failed' | 'failed' | 'retryable';
+type FileStatus = 'queued' | 'validating' | 'stored' | 'stored-no-text' | 'unsupported' | 'analysis-failed' | 'failed' | 'retryable';
 
 type QueuedFile = {
   id: string;
@@ -243,14 +243,31 @@ export function AttachmentDropzone({
         for (const item of queued) updateFileStatus(item.id, details.retryable ? 'retryable' : 'failed', details.message);
         return;
       }
-      const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
+      const body = await res.json() as { analyses?: Array<{ extractedText?: unknown; extractionStatus?: unknown }> };
       if (!isCurrent()) return;
       setError(null);
+      if (!Array.isArray(body.analyses) || body.analyses.length !== queued.length) {
+        const analysisError = 'Stored privately, but the analysis result could not be confirmed.';
+        for (const item of queued) updateFileStatus(item.id, 'analysis-failed', analysisError);
+        setError(analysisError);
+        return;
+      }
       for (const [index, item] of queued.entries()) {
         const file = item.file;
-        const extractedText = body.analyses?.[index]?.extractedText;
-        if (typeof extractedText !== 'string' || !extractedText.trim()) {
+        const analysis = body.analyses[index];
+        const extractedText = analysis.extractedText;
+        if (analysis.extractionStatus === 'unsupported') {
+          updateFileStatus(item.id, 'unsupported');
+          continue;
+        }
+        if (analysis.extractionStatus === 'no_text' && extractedText === '') {
           updateFileStatus(item.id, 'stored-no-text');
+          continue;
+        }
+        if (analysis.extractionStatus !== 'extracted' || typeof extractedText !== 'string' || !extractedText.trim()) {
+          const analysisError = 'Stored privately, but text extraction failed.';
+          updateFileStatus(item.id, 'analysis-failed', analysisError);
+          setError(analysisError);
           continue;
         }
         try {
@@ -391,9 +408,9 @@ export function AttachmentDropzone({
           Use non-confidential files only. Accepted: {acceptedFormats}; up to{' '}
           {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFiles} files, {maxFileSizeMb} MB each, and{' '}
           {maxTotalSizeMb} MB total. Files are validated and stored privately for the temporary
-          retention period. TXT and PDF may yield up to{' '}
+          retention period. TXT, CSV, and text-based PDF files may yield up to{' '}
           {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters.toLocaleString('en-US')} characters
-          of server-extracted text; accepted images and CSV may yield no extracted text. Any extracted
+          of server-extracted text. Image text analysis is not supported, and scanned PDFs need a text layer. Any extracted
           text used in AI mode is processed by an AI processing service. Files with no readable text remain
           stored privately but cannot inform the AI draft. Consent, filename checks, private storage, and
           extraction do not prove a file is non-confidential. Files and extracted text are never sent to
@@ -452,9 +469,9 @@ export function AttachmentDropzone({
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
       />
 
-      {queuedFiles.at(-1) && (
+      {queuedFiles.length > 0 && (
         <div role="status" aria-live="polite" style={{ display: 'grid', gap: 4, fontSize: 11, color: brandTokens.colors.mutedText }}>
-          {[queuedFiles.at(-1)!].map((qf) => (
+          {queuedFiles.map((qf) => (
             <div key={qf.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: qf.status === 'failed' || qf.status === 'retryable' ? 'tomato' : brandTokens.colors.lightText }}>
                 {qf.file.name}
@@ -463,7 +480,8 @@ export function AttachmentDropzone({
                 {qf.status === 'queued' && 'Queued'}
                 {qf.status === 'validating' && 'Validating...'}
                 {qf.status === 'stored' && 'Stored privately'}
-                {qf.status === 'stored-no-text' && 'Stored privately; no readable text was found for AI analysis'}
+                {qf.status === 'stored-no-text' && 'Stored privately; this file contains no extractable text'}
+                {qf.status === 'unsupported' && 'Stored privately; image text analysis is not supported'}
                 {qf.status === 'analysis-failed' && qf.error}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}
                 {qf.status === 'retryable' && qf.error}

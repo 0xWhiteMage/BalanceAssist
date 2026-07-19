@@ -386,7 +386,8 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(rail.getByText(correctedWording, { exact: true })).toBeVisible();
     await expect(rail.getByText(originalWording, { exact: true })).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await input.fill('Skip');
+    await input.press('Enter');
     await expect(page.getByRole('log').getByText(stages[1].message, { exact: true })).toBeVisible();
     await expect(page.getByRole('log').getByText(stages[1].recap, { exact: true })).toBeVisible();
     await expect(rail.getByText('Not sure yet', { exact: true })).toBeVisible();
@@ -402,7 +403,8 @@ test.describe('balance assist intake via persistent rail', () => {
     await expect(rail.getByText('Prefer not to share', { exact: true })).toBeVisible();
     await assertDirectContactRoutes(page);
 
-    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await input.fill('Skip');
+    await input.press('Enter');
     await expect(page.getByRole('log').getByText('Almost there. How should I address you?', { exact: true })).toBeVisible();
     await input.fill('Jayden from Acme, jayden@example.com');
     await input.press('Enter');
