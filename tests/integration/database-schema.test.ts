@@ -283,7 +283,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                   '058_unsent_crm_deletion.sql',
                   '059_consent_1_2_compatibility.sql',
                    '060_consent_1_2_cutover.sql',
-                   '061_api_security_retention_and_upload_quota.sql'
+                   '061_api_security_retention_and_upload_quota.sql',
+                   '062_monday_oauth_2_1.sql',
+                   '063_local_media_processing.sql'
     ]);
   });
 
@@ -1275,7 +1277,9 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                    '058:058_unsent_crm_deletion.sql',
                    '059:059_consent_1_2_compatibility.sql',
                     '060:060_consent_1_2_cutover.sql',
-                    '061:061_api_security_retention_and_upload_quota.sql'
+                     '061:061_api_security_retention_and_upload_quota.sql',
+                     '062:062_monday_oauth_2_1.sql',
+                     '063:063_local_media_processing.sql'
     ]);
   });
 
