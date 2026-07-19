@@ -147,7 +147,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     await waitFor(() => expect(requests.filter((url) => url.includes('/api/chat'))).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: /message the team without ai/i }));
-    const humanInput = await screen.findByPlaceholderText(/message the team request/i);
+    const humanInput = await screen.findByPlaceholderText(/write a message to the balance team/i);
     expect(humanInput).toBeEnabled();
     fireEvent.change(humanInput, { target: { value: 'Please send this to the team' } });
     fireEvent.keyDown(humanInput, { key: 'Enter' });
@@ -193,7 +193,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     await screen.findByRole('status', { name: /balance assist is typing/i });
 
     fireEvent.click(screen.getByRole('button', { name: /message the team without ai/i }));
-    await screen.findByPlaceholderText(/message the team request/i);
+    await screen.findByPlaceholderText(/write a message to the balance team/i);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     });
@@ -234,7 +234,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     await screen.findByText('Updating the brief.');
 
     fireEvent.click(screen.getByRole('button', { name: /message the team without ai/i }));
-    await screen.findByPlaceholderText(/message the team request/i);
+    await screen.findByPlaceholderText(/write a message to the balance team/i);
     expect(requests.some((url) => url.includes('/api/projects/mock-session/draft'))).toBe(false);
   }, 15_000);
 
@@ -292,14 +292,14 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     expect(chatRequests()).toHaveLength(1);
     expect(consentRequests()).toHaveLength(0);
     expect(relayRequests()).toHaveLength(0);
-    expect(screen.queryByPlaceholderText(/message the team request/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/write a message to the balance team/i)).toBeNull();
     expect(screen.getByRole('link', { name: /email the team/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
     expect(screen.getByRole('link', { name: /book a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/recovery');
     expect(screen.getByRole('button', { name: /leave/i })).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Talk to the team without AI' }));
 
-    const humanInput = await screen.findByPlaceholderText(/message the team request/i, {}, { timeout: 5000 });
+    const humanInput = await screen.findByPlaceholderText(/write a message to the balance team/i, {}, { timeout: 5000 });
     expect(consentRequests()).toHaveLength(1);
     expect(relayRequests()).toHaveLength(0);
 
@@ -323,7 +323,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Talk to the team without AI' }));
 
-    const input = await screen.findByPlaceholderText(/message the team request/i);
+    const input = await screen.findByPlaceholderText(/write a message to the balance team/i);
     expect(screen.queryByText(/^team connected$/i)).toBeNull();
     fireEvent.change(input, { target: { value: 'Please call me' } });
     expect(input).toHaveValue('Please call me');

@@ -1302,7 +1302,7 @@ export function WidgetOverlay({
   const showNoticeGate = entryPath === null && !deletionFrozen;
   const showStartChoices = false;
   const showHumanFallback = entryPath === 'human' && !humanRequested;
-  const showAttachmentButton = entryPath === 'human' && isTeamConnected && humanFileRequestOpen;
+  const showAttachmentButton = isTeamConnected && humanFileRequestOpen;
   const briefReady = entryPath === 'ai' && !isTeamConnected && isBriefReadyForApproval(draft);
   const showContextBrief = entryPath === 'ai' && !isTeamConnected && hasProjectIntent && !briefApproved;
   const useBriefTabs = showContextBrief && (isMobile || !isMaximized);
@@ -1660,24 +1660,6 @@ export function WidgetOverlay({
                     : 'Brief saved.'}
               </strong>
               <button
-                type="button" className="balance-widget-action balance-widget-approved-action" aria-label="Schedule a call"
-                onClick={() => {
-                  if (!configuredCalendlyUrl) {
-                    void botSay('Scheduling is currently unavailable. Please ask the Balance team to arrange a time.');
-                    return;
-                  }
-                  setCalendlyUrl(configuredCalendlyUrl);
-                  setView('calendly');
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 011 1v14H4V6a1 1 0 011-1z" /></svg>
-                Schedule a Call
-              </button>
-              <button type="button" className="balance-widget-action balance-widget-approved-action" aria-label="Message the team without AI" onClick={() => void handleTeamConnect()}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" /></svg>
-                Message the Team
-              </button>
-              <button
                 type="button" className="balance-widget-action balance-widget-approved-action" aria-label="Edit brief"
                 onClick={() => {
                   setRailMode('summary');
@@ -1695,6 +1677,18 @@ export function WidgetOverlay({
                 />
               )}
             </div>
+          )}
+
+          {showAttachmentButton && !deletionFrozen && (
+            <input
+              ref={requestedFileInputRef}
+              type="file"
+              multiple
+              accept={UPLOAD_ACCEPT_ATTRIBUTE}
+              aria-label="Choose requested files"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
           )}
 
           {/* Input Bar */}
@@ -1764,19 +1758,6 @@ export function WidgetOverlay({
                     )}
                   </>
                 )}
-                {showAttachmentButton && !deletionFrozen && (
-                  <>
-                    <input
-                      ref={requestedFileInputRef}
-                      type="file"
-                      multiple
-                      accept={UPLOAD_ACCEPT_ATTRIBUTE}
-                      aria-label="Choose requested files"
-                      onChange={handleFileSelect}
-                      style={{ display: 'none' }}
-                    />
-                  </>
-                )}
                 <textarea
                   ref={composerInputRef}
                   id="balance-widget-message-input"
@@ -1790,7 +1771,7 @@ export function WidgetOverlay({
                   }}
                   onKeyDown={handleKeyDown}
                   disabled={humanStatus === 'sending' || deletionFrozen}
-                  placeholder={deletionFrozen ? 'This session is frozen' : humanRequested ? 'Message the team request...' : 'Type your message...'}
+                  placeholder={deletionFrozen ? 'This session is frozen' : humanRequested ? 'Write a message to the Balance team...' : 'Type your message...'}
                   className="balance-widget-input"
                 />
                 <button

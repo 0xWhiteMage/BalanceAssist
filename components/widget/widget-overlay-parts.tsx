@@ -758,7 +758,7 @@ function BriefRowEditor({
   }
 
   const containerStyle: React.CSSProperties = compact
-    ? { marginLeft: 20, display: 'grid', gap: 6 }
+    ? { width: '100%', minWidth: 0, paddingLeft: 20, display: 'grid', gap: 6 }
     : { display: 'grid', gap: 6, width: '100%' };
 
   const editorStyle: React.CSSProperties = {

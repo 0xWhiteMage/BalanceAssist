@@ -58,11 +58,17 @@ afterEach(() => {
 });
 
 describe('producer-requested human uploads', () => {
-  test('does not expose the producer upload control in AI mode', async () => {
+  test('keeps the requested-file input available when the team connection starts from AI mode', async () => {
     render(<WidgetOverlay autoOpen={true} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
 
-    expect(screen.queryByRole('button', { name: 'Upload requested files' })).toBeNull();
+    const uploadButton = await screen.findByRole('button', { name: 'Upload files' });
+    const fileInput = screen.getByLabelText('Choose requested files');
+    const inputClick = vi.spyOn(fileInput, 'click');
+
+    fireEvent.click(uploadButton);
+
+    expect(inputClick).toHaveBeenCalledOnce();
   });
 
   test('shows a keyboard-reachable human-only control and uploads with explicit producer consent', async () => {

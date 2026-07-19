@@ -558,7 +558,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    expect(screen.queryByPlaceholderText(/message the team request|type a message/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/write a message to the balance team|type a message/i)).toBeNull();
     expect(screen.getByRole('link', { name: /email us/i })).toBeVisible();
     expect(screen.getByRole('link', { name: /schedule a call/i })).toBeVisible();
     expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(false);
@@ -593,7 +593,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     });
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
 
-    expect(screen.queryByPlaceholderText(/message the team request|type a message/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/write a message to the balance team|type a message/i)).toBeNull();
     expect(requestLog.some((entry) => entry.url.includes('/api/events') && (entry.body as { eventName?: string })?.eventName === 'human_handoff')).toBe(false);
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   });
@@ -674,7 +674,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     });
 
     expect(screen.getAllByText('We could not save your permission to send a message to the Balance team. Please try again or use the contact options below.')).toHaveLength(1);
-    expect(screen.queryByPlaceholderText(/message the team request/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/write a message to the balance team/i)).toBeNull();
     expect(requestLog.some((entry) => /\/api\/(telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
   }, 10_000);
 
@@ -755,7 +755,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(requestLog.filter((entry) => entry.url.includes('/api/events') && (entry.body as { eventName?: string })?.eventName === 'human_handoff')).toHaveLength(1);
-    expect(screen.getAllByPlaceholderText(/message the team request/i)).toHaveLength(1);
+    expect(screen.getAllByPlaceholderText(/write a message to the balance team/i)).toHaveLength(1);
   }, 10_000);
 
   test('keeps human recovery persistent when human session creation fails', async () => {
@@ -777,7 +777,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     expect(unavailable).toBeVisible();
     expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
     expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
-    expect(screen.queryByPlaceholderText(/message the team request|type a message/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/write a message to the balance team|type a message/i)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Build a brief with AI' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Talk to the team without AI' })).toBeNull();
 

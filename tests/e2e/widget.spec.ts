@@ -56,7 +56,7 @@ test('direct human contact keeps a usable pending request input without claiming
   await expect(page.getByText('Balance Studio Relay', { exact: true })).toBeVisible();
   await expect(page.getByText('Human-only relay', { exact: true })).toBeVisible();
   await expect(page.getByText('AI brief assistant', { exact: true })).toHaveCount(0);
-  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+  await expect(page.getByPlaceholder('Write a message to the Balance team...')).toBeVisible();
   await expect(page.getByRole('status')).toHaveCount(0);
   await expect(page.getByText('Team connected', { exact: true })).toHaveCount(0);
 });
@@ -85,7 +85,7 @@ test('human recovery persists on mobile when session creation fails', async ({ p
   await expect(notice).toBeVisible();
   await expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
   await expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
-  await expect(page.getByPlaceholder(/message the team request|type a message/i)).toHaveCount(0);
+  await expect(page.getByPlaceholder(/write a message to the balance team|type a message/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Build a brief with AI' })).toHaveCount(0);
 
   await email.focus();
@@ -190,11 +190,11 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Enter');
-  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+  await expect(page.getByPlaceholder('Write a message to the Balance team...')).toBeVisible();
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Space');
-  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+  await expect(page.getByPlaceholder('Write a message to the Balance team...')).toBeVisible();
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Leave', exact: true }).press('Space');

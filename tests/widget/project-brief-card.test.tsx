@@ -76,6 +76,17 @@ describe('ProjectBriefCard', () => {
     await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Original wording' })).not.toBeInTheDocument());
   });
 
+  test('keeps compact editor controls inside the brief row width', () => {
+    render(<ProjectBriefCard draft={readyDraft} compact onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit contact name' }));
+
+    const editor = screen.getByRole('textbox', { name: 'Contact name' });
+    const editorContainer = editor.parentElement;
+
+    expect(editorContainer).toHaveStyle({ width: '100%', minWidth: '0', paddingLeft: '20px' });
+    expect(editorContainer).not.toHaveStyle({ marginLeft: '20px' });
+  });
+
   test('groups core and optional fields and uses only native 44px edit controls', () => {
     render(<ProjectBriefCard draft={readyDraft} provenance={{ projectScope: 'user-stated' }} compact onChange={vi.fn()} />);
     const core = screen.getByRole('group', { name: 'Core details' });

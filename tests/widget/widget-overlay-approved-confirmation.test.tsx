@@ -305,12 +305,14 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     await waitFor(() => {
       const confirmation = document.querySelector('[data-testid="approve-confirmation"]');
       expect(confirmation).not.toBeNull();
-      expect(screen.getByRole('button', { name: /schedule a call/i })).toBeInTheDocument();
+      expect(within(confirmation as HTMLElement).getByRole('button', { name: /edit brief/i })).toBeInTheDocument();
+      expect(within(confirmation as HTMLElement).queryByRole('button', { name: /schedule a call/i })).toBeNull();
+      expect(within(confirmation as HTMLElement).queryByRole('button', { name: /message the team/i })).toBeNull();
       expect(screen.getByText('Brief saved. Waiting to send to Balance.')).toBeInTheDocument();
-      expect(screen.getByText('Was this brief clear and useful?')).toBeInTheDocument();
+      expect(screen.getByText('Optional feedback')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Yes, clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it helped' }));
     await waitFor(() => expect(logEventMock).toHaveBeenCalledWith({
       sessionId: 'mock-session-id',
       eventName: 'trust_feedback',
@@ -534,7 +536,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     expect(finalizeLeadMock).not.toHaveBeenCalled();
   }, 10000);
 
-  test('after Calendly completes without verified server confirmation, the widget stays truthful about team notification', async () => {
+  test('keeps scheduling available outside the simplified saved-brief row', async () => {
     mockWidgetFetch();
 
     render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/15-minute-call" />);
@@ -556,22 +558,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     })) as HTMLButtonElement;
     fireEvent.click(approveButton);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /schedule a call/i })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /schedule a call/i }));
-
-    await waitFor(() => {
-      const embed = document.querySelector('[data-testid="mock-calendly-embed"]');
-      expect(embed).not.toBeNull();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /complete booking/i }));
-
-    await waitFor(() => {
-      expect(document.body.textContent).toMatch(/still verifying that the balance team received it/i);
-    });
-    expect(document.body.textContent).not.toMatch(/notified automatically/i);
+    const confirmation = await screen.findByTestId('approve-confirmation');
+    expect(within(confirmation).getByRole('button', { name: /edit brief/i })).toBeInTheDocument();
+    expect(within(confirmation).queryByRole('button', { name: /schedule a call/i })).toBeNull();
+    expect(screen.getByRole('link', { name: /schedule a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/15-minute-call');
   }, 10000);
 });

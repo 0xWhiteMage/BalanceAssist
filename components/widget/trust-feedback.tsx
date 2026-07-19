@@ -32,14 +32,15 @@ export function TrustFeedback({
   }
 
   return (
-    <section aria-labelledby="trust-feedback-question" className="balance-widget-feedback">
+    <section aria-labelledby="trust-feedback-title" className="balance-widget-feedback">
       <div>
-        <p id="trust-feedback-question">Was this brief clear and useful?</p>
-        <p>We record only your answer, not your messages.</p>
+        <p className="balance-widget-feedback-kicker">Optional feedback</p>
+        <p id="trust-feedback-title">Did Balance Assist create a clear, useful brief?</p>
+        <p>We use this one answer to improve the experience. Your messages are not included.</p>
       </div>
       <div className="balance-widget-feedback-actions">
-        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('yes')}>Yes, clear</button>
-        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('not_quite')}>Needs work</button>
+        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('yes')}>Yes, it helped</button>
+        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('not_quite')}>Needs improvement</button>
       </div>
       {pending && <div role="status">Saving feedback…</div>}
       {error && <div role="alert">Feedback could not be saved. Try again.</div>}

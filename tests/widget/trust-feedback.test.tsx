@@ -7,13 +7,14 @@ describe('TrustFeedback', () => {
     const onSubmit = vi.fn().mockResolvedValue(true);
     const { rerender } = render(<TrustFeedback submitted={false} onSubmit={onSubmit} />);
 
-    expect(screen.getByText('Was this brief clear and useful?')).toBeVisible();
-    expect(screen.getByText('We record only your answer, not your messages.')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Yes, clear' })).toHaveClass('balance-widget-action');
-    expect(screen.getByRole('button', { name: 'Needs work' })).toHaveClass('balance-widget-action');
+    expect(screen.getByText('Optional feedback')).toBeVisible();
+    expect(screen.getByText('Did Balance Assist create a clear, useful brief?')).toBeVisible();
+    expect(screen.getByText('We use this one answer to improve the experience. Your messages are not included.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Yes, it helped' })).toHaveClass('balance-widget-action');
+    expect(screen.getByRole('button', { name: 'Needs improvement' })).toHaveClass('balance-widget-action');
     expect(screen.queryByRole('textbox')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Needs work' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Needs improvement' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('not_quite'));
     rerender(<TrustFeedback submitted onSubmit={onSubmit} />);
     expect(screen.getByRole('status')).toHaveTextContent('Feedback saved. Thank you.');
@@ -24,11 +25,11 @@ describe('TrustFeedback', () => {
     const onSubmit = vi.fn(() => new Promise<boolean>((done) => { resolve = done; }));
     render(<TrustFeedback submitted={false} onSubmit={onSubmit} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Yes, clear' }));
-    expect(screen.getByRole('button', { name: 'Yes, clear' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Needs work' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it helped' }));
+    expect(screen.getByRole('button', { name: 'Yes, it helped' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Needs improvement' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('Saving feedback');
-    fireEvent.click(screen.getByRole('button', { name: 'Yes, clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it helped' }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     await act(async () => resolve?.(true));
   });
@@ -37,9 +38,9 @@ describe('TrustFeedback', () => {
     const onSubmit = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     render(<TrustFeedback submitted={false} onSubmit={onSubmit} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Yes, clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it helped' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Feedback could not be saved. Try again.');
-    fireEvent.click(screen.getByRole('button', { name: 'Yes, clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it helped' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
   });
 });

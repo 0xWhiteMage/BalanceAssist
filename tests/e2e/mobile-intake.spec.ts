@@ -373,14 +373,16 @@ test.describe('mobile intake', () => {
 
     const approvalConfirmation = page.getByTestId('approve-confirmation');
     await expect(approvalConfirmation).toContainText('Brief saved. Waiting to send to Balance.');
-    await assertMinimumTarget(approvalConfirmation.getByRole('button', { name: 'Message the team without AI' }));
+    await assertMinimumTarget(approvalConfirmation.getByRole('button', { name: 'Edit brief' }));
+    await expect(approvalConfirmation.getByRole('button', { name: 'Schedule a call' })).toHaveCount(0);
+    await expect(approvalConfirmation.getByRole('button', { name: 'Message the team without AI' })).toHaveCount(0);
     await assertNoHorizontalOverflow(page.locator('html'), 'queued document');
     await assertNoHorizontalOverflow(page.locator('#widget-chat-panel'), 'queued Chat panel');
     await expect(page.locator('#widget-brief-panel')).toHaveCount(0);
     await assertNoHorizontalOverflow(approvalConfirmation, 'queued approval');
     await assertNoHorizontalOverflow(approvalConfirmation.locator('button, a'), 'queued approval actions');
-    const clearYes = page.getByRole('button', { name: 'Yes, clear', exact: true });
-    const clearNo = page.getByRole('button', { name: 'Needs work', exact: true });
+    const clearYes = page.getByRole('button', { name: 'Yes, it helped', exact: true });
+    const clearNo = page.getByRole('button', { name: 'Needs improvement', exact: true });
     await assertMinimumTarget(clearYes);
     await assertMinimumTarget(clearNo);
     await clearNo.click();
