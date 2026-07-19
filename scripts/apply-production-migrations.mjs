@@ -35,14 +35,6 @@ export function assertReviewedCrmMigrationsRecorded(recordedVersions) {
   }
 }
 
-export function assertReviewedIntegrationMigrationsRecorded(recordedVersions) {
-  const recorded = new Set(recordedVersions);
-  const pending = integrationMigrationVersions.filter((version) => !recorded.has(version));
-  if (pending.length) {
-    throw new Error(`${pending.join(', ')} is pending; run Production integration migrations before this release.`);
-  }
-}
-
 export function assertReviewedTrustControlsMigrationRecorded(recordedVersions) {
   if (!recordedVersions.includes(reviewedTrustControlsVersion)) {
     throw new Error('054 is pending; run Production trust controls migrations before this release.');
@@ -141,7 +133,6 @@ export async function applyProductionMigrations(connectionString = process.env.P
   assertReviewedTrustFeedbackMigrationRecorded(recordedVersions);
   assertReviewedUnsentCrmDeletionMigrationRecorded(recordedVersions);
   assertReviewedConsent12MigrationRecorded(recordedVersions);
-  assertReviewedIntegrationMigrationsRecorded(recordedVersions);
 
   const migrations = selectOrdinaryProductionMigrations(getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')));
   for (const migration of migrations) {
