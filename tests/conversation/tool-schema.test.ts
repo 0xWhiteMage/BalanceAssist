@@ -70,7 +70,7 @@ test('consentToShare is NOT part of the LLM-controlled tool schema', () => {
   expect(shape).not.toHaveProperty('consentToShare');
 });
 
-test('rejects consentToShare from LLM tool call', () => {
+test('strips consentToShare from an LLM tool call', () => {
   const result = recordBriefUpdatesSchema.safeParse({
     service: 'production',
     projectType: 'Video',
@@ -87,12 +87,14 @@ test('rejects consentToShare from LLM tool call', () => {
     contactEmail: 'tool@example.com',
     consentToShare: true
   });
-  expect(result.success).toBe(false);
+  expect(result.success).toBe(true);
+  if (result.success) expect(result.data).not.toHaveProperty('consentToShare');
 });
 
-test('rejects unknown keys', () => {
+test('strips unknown keys', () => {
   const result = recordBriefUpdatesSchema.safeParse({ evil: 'x', projectScope: 'hi' });
-  expect(result.success).toBe(false);
+  expect(result.success).toBe(true);
+  if (result.success) expect(result.data).toEqual({ projectScope: 'hi' });
 });
 
 test('accepts all known fields with empty strings', () => {
@@ -110,19 +112,8 @@ test('accepts all known fields with empty strings', () => {
   expect(result.success).toBe(true);
   if (result.success) {
     expect(result.data).toEqual({
-      service: '',
-      projectType: '',
-      projectScope: '30s animation',
-      projectObjective: '',
-      audience: '',
-      intendedOutputs: '',
-      referencesStatus: '',
-      scopePolished: '',
-      timelineBand: '',
-      budgetBand: '',
-      contactName: '',
-      contactCompany: '',
-      contactEmail: ''
+      service: '', projectType: '', projectScope: '30s animation', scopePolished: '',
+      timelineBand: '', budgetBand: '', contactName: '', contactCompany: '', contactEmail: ''
     });
   }
 });
@@ -135,12 +126,14 @@ test('happy path: parsed data matches default-everywhere object', () => {
   }
 });
 
-test('tool schema preserves a 4,000-character original scope and rejects 4,001 characters', () => {
+test('tool schema preserves a 4,000-character scope and drops an overlong field', () => {
   const exactScope = 's'.repeat(4_000);
   const parsed = recordBriefUpdatesSchema.safeParse({ ...positiveFixture, projectScope: exactScope });
   expect(parsed.success).toBe(true);
   if (parsed.success) expect(parsed.data.projectScope).toBe(exactScope);
-  expect(recordBriefUpdatesSchema.safeParse({ ...positiveFixture, projectScope: `${exactScope}x` }).success).toBe(false);
+  const overlong = recordBriefUpdatesSchema.safeParse({ ...positiveFixture, projectScope: `${exactScope}x` });
+  expect(overlong.success).toBe(true);
+  if (overlong.success) expect(overlong.data.projectScope).toBeUndefined();
 
   expect(validateJsonSchema({ ...positiveFixture, projectScope: exactScope })).toBe(true);
   expect(validateJsonSchema({ ...positiveFixture, projectScope: `${exactScope}x` })).toBe(false);
@@ -156,17 +149,19 @@ test('contactEmail: undefined is accepted', () => {
   expect(result.success).toBe(true);
 });
 
-test('contactEmail: malformed string is rejected', () => {
+test('contactEmail: malformed string is dropped without rejecting other fields', () => {
   const result = recordBriefUpdatesSchema.safeParse({ contactEmail: 'not-an-email' });
-  expect(result.success).toBe(false);
+  expect(result.success).toBe(true);
+  if (result.success) expect(result.data.contactEmail).toBeUndefined();
 });
 
-test('strict mode rejects extra keys', () => {
+test('runtime parsing strips extra keys', () => {
   const result = recordBriefUpdatesSchema.safeParse({
     projectScope: 'hi',
     extraKey: 'nope'
   });
-  expect(result.success).toBe(false);
+  expect(result.success).toBe(true);
+  if (result.success) expect(result.data).toEqual({ projectScope: 'hi' });
 });
 
 test('JSON schema rejects payloads with extra keys', () => {
@@ -187,14 +182,9 @@ test('JSON schema accepts the positive fixture', () => {
   expect(valid).toBe(true);
 });
 
-test('JSON schema top-level required lists every key', () => {
+test('JSON schema permits sparse changed-field payloads', () => {
   const required = (recordBriefUpdatesJsonSchema as { required?: string[] }).required ?? [];
-  const properties = Object.keys(
-    (recordBriefUpdatesJsonSchema as { properties: Record<string, unknown> }).properties
-  );
-  for (const key of properties) {
-    expect(required).toContain(key);
-  }
+  expect(required).toEqual([]);
 });
 
 test('JSON schema declares contactEmail with format email', () => {
@@ -223,10 +213,11 @@ test('Zod and JSON schema agree on positive fixture', () => {
   expect(zodOk).toBe(jsonOk);
 });
 
-test('Zod and JSON schema agree on negative fixture', () => {
+test('runtime parsing drops an invalid field that the provider JSON schema rejects', () => {
   const zodOk = recordBriefUpdatesSchema.safeParse(negativeFixture).success;
   const jsonOk = validateJsonSchema(negativeFixture);
-  expect(zodOk).toBe(jsonOk);
+  expect(zodOk).toBe(true);
+  expect(jsonOk).toBe(false);
 });
 
 describe('shareWorkSchema', () => {
@@ -500,5 +491,25 @@ describe('guardAgainstFabricatedBriefFields', () => {
     expect(guarded.projectScope).toBe('30s animation');
     expect(guarded.timelineBand).toBe('1-2-months');
     expect(guarded.budgetBand).toBe('20k-50k');
+  });
+
+  test('allows grounded additions to existing intended outputs', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, intendedOutputs: 'Hero film, social cutdowns, and stills' },
+      { ...createDefaultLeadDraft(), intendedOutputs: 'Hero film' },
+      'Please also add social cutdowns and stills'
+    );
+
+    expect(guarded.intendedOutputs).toBe('Hero film, social cutdowns, and stills');
+  });
+
+  test('rejects unsupported additions to existing intended outputs', () => {
+    const guarded = guardAgainstFabricatedBriefFields(
+      { ...positiveFixture, intendedOutputs: 'Hero film and a television campaign' },
+      { ...createDefaultLeadDraft(), intendedOutputs: 'Hero film' },
+      'Keep the existing deliverable'
+    );
+
+    expect(guarded.intendedOutputs).toBe('Hero film');
   });
 });

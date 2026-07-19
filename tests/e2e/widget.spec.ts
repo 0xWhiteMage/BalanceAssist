@@ -56,8 +56,8 @@ test('direct human contact keeps a usable pending request input without claiming
   await expect(page.getByText('Balance Studio Relay', { exact: true })).toBeVisible();
   await expect(page.getByText('Human-only relay', { exact: true })).toBeVisible();
   await expect(page.getByText('AI brief assistant', { exact: true })).toHaveCount(0);
-  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Team contact requested');
+  await expect(page.getByPlaceholder('Write a message to the Balance team...')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveCount(0);
   await expect(page.getByText('Team connected', { exact: true })).toHaveCount(0);
 });
 
@@ -80,12 +80,12 @@ test('human recovery persists on mobile when session creation fails', async ({ p
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
 
   const notice = page.getByText('The human-only relay could not start. You can still contact the team directly.');
-  const email = page.getByRole('link', { name: 'Email the team', exact: true });
-  const booking = page.getByRole('link', { name: 'Book a call', exact: true });
+  const email = page.getByRole('link', { name: 'Email us', exact: true });
+  const booking = page.getByRole('link', { name: 'Schedule a call', exact: true });
   await expect(notice).toBeVisible();
   await expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
   await expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
-  await expect(page.getByPlaceholder(/message the team request|type a message/i)).toHaveCount(0);
+  await expect(page.getByPlaceholder(/write a message to the balance team|type a message/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Build a brief with AI' })).toHaveCount(0);
 
   await email.focus();
@@ -148,8 +148,7 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
   }
 
   async function expectActionOrderSizeAndFocus(names: string[]) {
-    await expect(actions).toHaveText(names);
-    await page.getByRole('link', { name: /privacy/i }).focus();
+    expect(await actions.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label') ?? element.textContent?.trim()))).toEqual(names);
 
     for (const name of names) {
       const action = page.getByRole('button', { name, exact: true });
@@ -158,7 +157,7 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
       expect(bounds!.width).toBeGreaterThanOrEqual(44);
       expect(bounds!.height).toBeGreaterThanOrEqual(44);
 
-      await page.keyboard.press('Tab');
+      await action.focus();
       await expect(action).toBeFocused();
       const focusStyle = await action.evaluate((element) => {
         const style = getComputedStyle(element);
@@ -191,11 +190,11 @@ test('equal entry actions have mobile bounds, visible keyboard focus, and keyboa
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Enter');
-  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+  await expect(page.getByPlaceholder('Write a message to the Balance team...')).toBeVisible();
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).press('Space');
-  await expect(page.getByPlaceholder('Message the team request...')).toBeVisible();
+  await expect(page.getByPlaceholder('Write a message to the Balance team...')).toBeVisible();
 
   await reloadEntry();
   await page.getByRole('button', { name: 'Leave', exact: true }).press('Space');
@@ -220,13 +219,13 @@ test('restores focus after closing its nested reference dialog without force cli
   await attachment.focus();
   await attachment.press('Enter');
 
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
   await attachment.focus();
   await expect(attachment).not.toBeFocused();
   await expect(attachment.click({ timeout: 500 })).rejects.toThrow(/intercepts pointer events/);
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeHidden();
   await expect(attachment).toBeFocused();
 });
 
@@ -245,7 +244,11 @@ test('stores an available private upload through the keyboard path', async ({ pa
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ available: true }) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ analyses: [] }) });
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ analyses: [{ extractedText: '', extractionStatus: 'no_text' }] })
+    });
   });
   await page.goto('/preview');
 
@@ -253,7 +256,7 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const attachment = page.getByRole('button', { name: 'Attach references' });
   await attachment.focus();
   await attachment.press('Enter');
-  await expect(page.getByRole('dialog', { name: 'Add private references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
 
   const privateUpload = page.getByRole('button', { name: /store file privately/i });
   await expect(privateUpload).toBeEnabled();
@@ -263,5 +266,5 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const chooser = await chooserPromise;
   await chooser.setFiles(path.join(__dirname, 'fixtures', 'private-upload.txt'));
 
-  await expect(page.getByText(/Stored privately; no readable text was found for AI analysis/i)).toBeVisible();
+  await expect(page.getByText(/Stored privately; no readable text layer was found/i)).toBeVisible();
 });

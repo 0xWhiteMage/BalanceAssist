@@ -58,6 +58,44 @@ describe('chatRequest client', () => {
     expect(result!.briefReady).toBe(true);
   });
 
+  test('uses the shared wire parser for fields actually emitted by the chat route', async () => {
+    const { parseChatResponse } = await import('@/lib/api/client');
+    const payload = {
+      outcome: 'draft_persisted' as const,
+      message: 'Saved.',
+      draftUpdates: { service: 'production' },
+      canonicalDraft: { service: 'production' },
+      draftVersion: 1,
+      currentStage: 'project' as const,
+      stageRecaps: [],
+      briefReady: false,
+      sharedWork: {
+        entries: [{
+          title: 'Project', url: '/work/project', description: 'A project', image_url: '/project.jpg',
+          category: 'reference' as const, slug: 'project'
+        }]
+      }
+    };
+
+    expect(parseChatResponse(200, payload)).toMatchObject({
+      outcome: 'draft_persisted',
+      draftUpdates: { service: 'production' },
+      sharedWork: payload.sharedWork
+    });
+    expect(parseChatResponse(200, {
+      ...payload,
+      draftUpdates: { consentToShare: true }
+    })).toBeNull();
+    expect(parseChatResponse(200, {
+      ...payload,
+      sharedWork: { entries: [{ ...payload.sharedWork.entries[0], clients: 'Client', year: 2026 }] }
+    })).toMatchObject({ sharedWork: { entries: [expect.objectContaining({ clients: 'Client', year: 2026 })] } });
+    expect(parseChatResponse(200, {
+      ...payload,
+      sharedWork: { entries: [{ ...payload.sharedWork.entries[0], year: '2026' }] }
+    })).toBeNull();
+  });
+
   test('returns validated canonical saved progress', async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({
       outcome: 'draft_persisted',

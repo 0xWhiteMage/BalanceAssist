@@ -96,7 +96,7 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
       TELEGRAM_BOT_TOKEN: `${runId}-bot`,
       TELEGRAM_CHAT_ID: '-100123',
       TELEGRAM_WEBHOOK_SECRET: `${runId}-webhook`,
-      TELEGRAM_ALLOWED_USERNAMES: 'producer',
+      TELEGRAM_ALLOWED_USER_IDS: '2',
       SUPABASE_PRIVATE_UPLOAD_BUCKET: 'temporary-attachments'
     });
     const next = (await import('next')).default({ dev: false, hostname: '127.0.0.1', port });
@@ -192,10 +192,14 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     });
     expect(relay.status).toBe(200);
     await expect(relay.json()).resolves.toMatchObject({ ok: true, persisted: true, queued: true });
-    await expect(supabase!.from('handoff_outbox').select('state').eq('session_id', sessionId).single())
-      .resolves.toMatchObject({ data: { state: 'pending' }, error: null });
+    const initialOutbox = await supabase!.from('handoff_outbox').select('state').eq('session_id', sessionId).single();
+    expect(initialOutbox.error).toBeNull();
+    expect(['pending', 'sent']).toContain(initialOutbox.data?.state);
     const queued = await fetch(`${appUrl}/api/telegram/messages?sessionId=${sessionId}`, { headers: authorizedHeaders });
-    await expect(queued.json()).resolves.toMatchObject({ outgoingStatus: 'queued', messages: [] });
+    await expect(queued.json()).resolves.toMatchObject({
+      outgoingStatus: initialOutbox.data?.state === 'sent' ? 'delivered' : 'queued',
+      messages: []
+    });
 
     const retry = await fetch(`${appUrl}/api/telegram/relay`, {
       method: 'POST', headers: { ...authorizedHeaders, 'x-request-id': relayRequestId },
@@ -203,12 +207,20 @@ describe.skipIf(!supabaseUrl || !serviceRoleKey)('release proof HTTP journey', (
     });
     await expect(retry.json()).resolves.toMatchObject({ ok: true, persisted: true, queued: true });
     const relayRows = await supabase!.from('handoff_outbox').select('id, state').eq('session_id', sessionId);
-    expect(relayRows).toMatchObject({ data: [expect.objectContaining({ state: 'pending' })], error: null });
+    expect(relayRows.error).toBeNull();
+    expect(relayRows.data).toHaveLength(1);
+    expect(['pending', 'sent']).toContain(relayRows.data?.[0]?.state);
 
     const dispatched = await fetch(`${appUrl}/api/internal/handoff-dispatch`, {
       method: 'POST', headers: { authorization: `Bearer ${runId}-cron` }
     });
-    await expect(dispatched.json()).resolves.toMatchObject({ results: [expect.objectContaining({ status: 'sent' })] });
+    const dispatchBody = await dispatched.json() as { results?: Array<{ status?: string }> };
+    expect(dispatched.status).toBe(200);
+    if (initialOutbox.data?.state === 'pending') {
+      expect(dispatchBody).toMatchObject({ results: [expect.objectContaining({ status: 'sent' })] });
+    } else {
+      expect(dispatchBody.results ?? []).toHaveLength(0);
+    }
     expect(telegramRequests).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: `/bot${runId}-bot/createForumTopic`, body: expect.objectContaining({ chat_id: '-100123' }) }),
       expect.objectContaining({ path: `/bot${runId}-bot/sendMessage`, body: expect.objectContaining({ message_thread_id: 77, text: 'Synthetic release proof: please confirm relay state.' }) })

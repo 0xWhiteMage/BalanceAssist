@@ -49,6 +49,7 @@ describe('handoff dispatch workflow', () => {
       run: expect.stringContaining('"${PRODUCTION_URL}/api/internal/handoff-dispatch"')
     });
     expect(step?.run).toContain('"${PRODUCTION_URL}/api/internal/scheduler-heartbeat"');
+    expect(step?.run).toContain('test "$PRODUCTION_URL" = "https://balance-assist.vercel.app"');
     expect(step?.run).toContain("--data '{\"worker\":\"handoff-dispatch\"}'");
     expect(step?.run).not.toContain('secrets.');
     expect(step?.env?.CRON_SECRET).toBe('${{ secrets.CRON_SECRET }}');
@@ -85,7 +86,7 @@ describe('handoff dispatch workflow', () => {
     expect(workflow.on?.workflow_dispatch).toEqual(null);
     expect(workflow.permissions).toEqual({});
     expect(workflow.concurrency).toEqual({ group: 'scheduler-health', 'cancel-in-progress': false });
-    expect(step?.run).toContain('test -n "$PRODUCTION_URL"');
+    expect(step?.run).toContain('test "$PRODUCTION_URL" = "https://balance-assist.vercel.app"');
     expect(step?.run).toContain('test -n "$CRON_SECRET"');
     expect(step?.run).toContain('/api/internal/scheduler-health');
     expect(step?.run).not.toContain('|| true');

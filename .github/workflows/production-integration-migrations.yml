@@ -1,0 +1,60 @@
+name: Production integration migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable commit SHA containing reviewed integration migrations
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-integration-migrations
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - id: validate
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-integration-migrations.yml@refs/heads/main"
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet release
+          cd release
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "$RELEASE_REF^{commit}"
+          git merge-base --is-ancestor "$RELEASE_REF" origin/main
+          echo "sha=$(git rev-parse "$RELEASE_REF^{commit}")" >> "$GITHUB_OUTPUT"
+
+  migrate:
+    needs: validate
+    environment: production-integration-migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          node scripts/apply-production-integration-migrations.mjs --dry-run
+          npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes
+          npx --no-install supabase db query --linked --file supabase/production-integrations-062-063.sql

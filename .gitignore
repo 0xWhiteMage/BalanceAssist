@@ -9,8 +9,12 @@ coverage/
 .DS_Store
 tsconfig.tsbuildinfo
 .worktrees/
+.scratch/
+.artifacts/
 
 .vercel/
 .env*
 !.env.example
 supabase/.temp/
+__pycache__/
+*.pyc

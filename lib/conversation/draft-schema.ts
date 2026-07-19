@@ -30,6 +30,7 @@ const SERVICES = [
 const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const MAX_TEXT_LENGTH = 200;
+const MAX_OUTPUTS_LENGTH = 1000;
 
 function normalizeService(value: string) {
   if (SERVICES.includes(value)) {
@@ -90,6 +91,10 @@ export function sanitizeDraftUpdates(input: Record<string, unknown> | null | und
     }
     if (key === 'projectScope') {
       if (trimmed.length <= MAX_PROJECT_SCOPE_CHARACTERS) result[key] = trimmed;
+      continue;
+    }
+    if (key === 'intendedOutputs') {
+      result[key] = trimmed.slice(0, MAX_OUTPUTS_LENGTH);
       continue;
     }
     result[key] = trimmed.slice(0, MAX_TEXT_LENGTH);

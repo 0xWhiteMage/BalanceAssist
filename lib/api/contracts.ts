@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { conversationSteps } from '@/lib/conversation/flow';
+import type { ConversationStepId } from '@/lib/conversation/types';
 
 export const MAX_CHAT_BODY_BYTES = 50_000;
 export const MAX_CHAT_MESSAGES = 20;
@@ -28,11 +30,9 @@ export const trustFeedbackPropertiesSchema = z.object({
   response: trustFeedbackResponseSchema
 }).strict();
 
-const conversationStepSchema = z.enum([
-  'intro', 'scope', 'objective', 'service', 'audience', 'outputs', 'timeline', 'budget',
-  'references', 'contact-name', 'contact-email', 'consent', 'offer-upload', 'upload',
-  'handoff', 'free-chat'
-]);
+const conversationStepSchema = z.enum(
+  Object.keys(conversationSteps) as [ConversationStepId, ...ConversationStepId[]]
+);
 const sessionIdSchema = z.string().min(1).max(128);
 const noPropertyEventNames = [
   'widget_closed', 'human_handoff', 'memory_inspected',
@@ -69,12 +69,14 @@ const chatReplyFields = {
   message: z.string().min(1).optional(),
   messages: z.array(z.string().min(1)).min(1).optional()
 };
-const chatSharedWorkSchema = z.object({
-  entries: z.array(z.object({
+export const chatSharedWorkEntrySchema = z.object({
     title: z.string(), url: z.string(), description: z.string().optional(), image_url: z.string().optional(),
-    category: z.string().optional(), slug: z.string()
-  }))
-});
+    category: z.enum(['reference', 'mood', 'pitch']).optional(), slug: z.string(),
+    clients: z.string().optional(), year: z.number().nullable().optional()
+  }).strict();
+const chatSharedWorkSchema = z.object({
+  entries: z.array(chatSharedWorkEntrySchema)
+}).strict();
 const canonicalChatFields = {
   canonicalDraft: z.record(z.string()),
   canonicalProvenance: z.record(z.enum(['user-stated', 'inferred', 'confirmed', 'cleared'])).optional(),
@@ -142,3 +144,6 @@ export const chatRequestPayloadSchema = z.object({
       context.addIssue({ code: z.ZodIssueCode.too_big, maximum: MAX_CHAT_TOTAL_CHARACTERS, type: 'string', inclusive: true, message: 'Total message content is too large' });
     }
   });
+
+export type ChatResponsePayload = z.infer<typeof chatResponsePayloadSchema>;
+export type ChatSharedWorkEntry = z.infer<typeof chatSharedWorkEntrySchema>;

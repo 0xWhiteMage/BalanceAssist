@@ -5,28 +5,29 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 import { MAX_PROJECT_SCOPE_CHARACTERS } from '@/lib/api/contracts';
 
 const TEXT_FIELD_DESCRIPTION =
-  "Use '' (empty string) when the field is unknown; do NOT omit the key. User-selected 'Not sure yet', 'Skip', and 'Prefer not to share' are canonical non-empty answers.";
+  "Include this key only when the user changed the field. Preserve explicit non-answers such as 'Not sure yet', 'Skip', and 'Prefer not to share'.";
 
 export const recordBriefUpdatesSchema = z
   .object({
-    service: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    projectType: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    projectScope: z.string().max(MAX_PROJECT_SCOPE_CHARACTERS).default('').describe(TEXT_FIELD_DESCRIPTION),
-    projectObjective: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    audience: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    intendedOutputs: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    referencesStatus: z.enum(['', 'added', 'skipped']).default('').describe(TEXT_FIELD_DESCRIPTION),
-    scopePolished: z.string().default('').describe(`${TEXT_FIELD_DESCRIPTION} When projectScope is present, provide a concise one-sentence summary using only explicitly stated project details.`),
-    timelineBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    budgetBand: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    contactName: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
-    contactCompany: z.string().default('').describe(TEXT_FIELD_DESCRIPTION),
+    service: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    projectType: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    projectScope: z.string().max(MAX_PROJECT_SCOPE_CHARACTERS).optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    projectObjective: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    audience: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    intendedOutputs: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    referencesStatus: z.enum(['', 'added', 'skipped']).optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    scopePolished: z.string().optional().catch(undefined).describe(`${TEXT_FIELD_DESCRIPTION} When projectScope is present, provide a concise one-sentence summary using only explicitly stated project details.`),
+    timelineBand: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    budgetBand: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    contactName: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
+    contactCompany: z.string().optional().catch(undefined).describe(TEXT_FIELD_DESCRIPTION),
     contactEmail: z
       .union([z.literal(''), z.string().email()])
       .optional()
-      .describe("Either '' or a valid email address; do NOT omit the key.")
+      .catch(undefined)
+      .describe('Include only when the user provided or changed a valid email address.')
   })
-  .strict();
+  .strip();
 
 // Field-specific normalization and shorter generated-field caps remain in sanitizeDraftUpdates.
 
@@ -34,14 +35,6 @@ const generated = zodToJsonSchema(recordBriefUpdatesSchema, {
   target: 'jsonSchema7',
   $refStrategy: 'none'
 }) as Record<string, unknown>;
-
-// The LLM must always send every key (using '' as the unknown sentinel), even though
-// Zod treats defaulted fields as optional. List every property in `required` so the
-// tool-call contract enforces completeness regardless of JSON Schema's default semantics.
-{
-  const properties = (generated.properties ?? {}) as Record<string, unknown>;
-  generated.required = Object.keys(properties).sort();
-}
 
 export const recordBriefUpdatesJsonSchema = generated;
 
@@ -157,7 +150,13 @@ export function guardAgainstFabricatedBriefFields(
     const nextValue = typeof cleaned[field] === 'string' ? cleaned[field].trim() : '';
     const priorValue = priorDraft[field]?.trim() ?? '';
     if (priorValue && nextValue && nextValue !== priorValue && !textContains(userMessage, nextValue)) {
-      cleaned[field] = priorValue;
+      const additiveOutputs = field === 'intendedOutputs' && nextValue.toLowerCase().includes(priorValue.toLowerCase()) && (() => {
+        const priorTokens = new Set(priorValue.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+        const addedTokens = (nextValue.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((token) => token.length > 2 && !priorTokens.has(token));
+        const userTokens = new Set(userMessage.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+        return addedTokens.length > 0 && addedTokens.every((token) => userTokens.has(token));
+      })();
+      if (!additiveOutputs) cleaned[field] = priorValue;
     }
   }
 

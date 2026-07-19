@@ -1,9 +1,9 @@
 import schema from '../../config/monday-crm-schema.json';
 
 export type MondayConfig = {
-  token: string | null;
   boardId: string | null;
   apiVersion: '2026-07' | null;
+  authMode: 'oauth_2_1' | null;
   upsertEnabled: boolean;
   cleanupEnabled: boolean;
 };
@@ -24,13 +24,13 @@ export function getMondayConfig(
 ): MondayConfig {
   const upsertEnabled = parseFlag(environment.MONDAY_UPSERT_ENABLED, 'MONDAY_UPSERT_ENABLED');
   const cleanupEnabled = parseFlag(environment.MONDAY_CLEANUP_ENABLED, 'MONDAY_CLEANUP_ENABLED');
-  const token = environment.MONDAY_API_TOKEN?.trim() || null;
   const boardId = environment.MONDAY_BOARD_ID?.trim() || null;
   const apiVersion = environment.MONDAY_API_VERSION?.trim() || null;
+  const authMode = environment.MONDAY_AUTH_MODE === 'oauth_2_1' ? 'oauth_2_1' : null;
 
   if (upsertEnabled || cleanupEnabled) {
-    if (!token || boardId !== schema.boardId || apiVersion !== '2026-07' || environment.MONDAY_AUTH_MODE !== 'service_token') {
-      throw new Error('Monday enabled lanes require a supported token, board ID, API version, and service-token mode');
+    if (boardId !== schema.boardId || apiVersion !== '2026-07' || !authMode) {
+      throw new Error('Monday enabled lanes require the supported board, API version, and OAuth 2.1 mode');
     }
     if (!runbookAuthApprovalRef || environment.MONDAY_AUTH_APPROVAL_REF !== runbookAuthApprovalRef) {
       throw new Error('Monday enabled lanes require the runbook authentication approval reference');
@@ -38,9 +38,9 @@ export function getMondayConfig(
   }
 
   return {
-    token,
     boardId,
     apiVersion: apiVersion === '2026-07' ? apiVersion : null,
+    authMode,
     upsertEnabled,
     cleanupEnabled,
   };

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, test } from 'vitest';
 import zlib from 'node:zlib';
-import { extractTextFromBuffer } from '@/lib/uploads/extract-text';
+import { extractTextFromBuffer, extractTextResultFromBufferAsync } from '@/lib/uploads/extract-text';
 
 // Standard CRC32 (polynomial 0xEDB88320) so the test fixtures are well-formed ZIPs.
 const CRC_TABLE: number[] = (() => {
@@ -91,6 +91,27 @@ function buildMinimalZip(files: Record<string, string>): Buffer {
   return Buffer.concat([localData, centralData, eocd]);
 }
 
+function buildTextLayerPdf(textHex: string): Buffer {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${textHex.length + 36} >>\nstream\nBT /F1 12 Tf 72 720 Td <${textHex}> Tj ET\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(body, 'latin1'));
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(body, 'latin1');
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(body, 'latin1');
+}
+
 describe('extractTextFromBuffer', () => {
   test('extracts plain text from a .txt file', () => {
     const buffer = Buffer.from('Project: 30s animation\nBudget: $5,000 SGD');
@@ -142,6 +163,15 @@ describe('extractTextFromBuffer', () => {
     const text = extractTextFromBuffer(pdf, 'application/pdf');
     expect(text).toContain('Hello PDF Brief');
     expect(text).toContain('Project');
+  });
+
+  test('uses the maintained PDF parser for hexadecimal text-layer strings', async () => {
+    const pdf = buildTextLayerPdf(Buffer.from('Encoded PDF Brief', 'utf8').toString('hex'));
+
+    await expect(extractTextResultFromBufferAsync(pdf, 'application/pdf')).resolves.toEqual({
+      status: 'extracted',
+      text: 'Encoded PDF Brief',
+    });
   });
 
   test('returns empty string for unsupported extensions', () => {

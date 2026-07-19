@@ -3,7 +3,7 @@ import { getEnv } from '@/lib/env';
 import { buildSystemPrompt } from '@/lib/conversation/system-prompt';
 import { formatIntakeStageRecap, getCompletedIntakeStageCount, getCurrentIntakeStage, INTAKE_STAGES } from '@/lib/conversation/intake-stage';
 import { sanitizeDraftUpdates } from '@/lib/conversation/draft-schema';
-import { getLocalResponse, getFallbackResponse, getNextMissingFieldPrompt } from '@/lib/conversation/local-responses';
+import { getLocalResponse, getFallbackResponse, getNextMissingFieldPrompt, inferCompanyCandidate } from '@/lib/conversation/local-responses';
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
@@ -32,6 +32,7 @@ import {
   CONFIDENTIAL_INTAKE_RESPONSE
 } from '@/lib/privacy/confidential-intent';
 import { CHAT_PROVIDER_TIMEOUT_MS } from '@/lib/conversation/chat-timeouts';
+import { parseProviderResponse } from '@/app/api/chat/provider-response';
 
 export async function OPTIONS() {
   return corsOptionsResponse();
@@ -191,12 +192,9 @@ async function callOpenAICompatible(
     throw new Error(`LLM API returned ${response.status}`);
   }
 
-  const data = await response.json();
-  const choice = data?.choices?.[0];
-  const message = choice?.message;
-  const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
-  const rawContent = typeof message?.content === 'string' ? message.content : null;
-  const finishReason = choice?.finish_reason;
+  const providerResponse = parseProviderResponse(await response.json());
+  const hasToolCalls = providerResponse.toolCalls.length > 0;
+  const { rawContent, finishReason } = providerResponse;
   const truncated = finishReason === 'length' && !hasToolCalls && (rawContent?.trim().length ?? 0) > 0;
 
   if (finishReason === 'length' && !hasToolCalls) {
@@ -207,7 +205,7 @@ async function callOpenAICompatible(
     let toolArguments: Record<string, unknown> | null = null;
     let sharedWork: SharedWork | null = null;
 
-    for (const call of message.tool_calls) {
+    for (const call of providerResponse.toolCalls) {
       if (!call || typeof call !== 'object') continue;
       const functionName = call.function?.name;
       if (typeof call.function?.arguments !== 'string') continue;
@@ -224,7 +222,10 @@ async function callOpenAICompatible(
               },
               options?.userMessage ?? ''
             );
-            toolArguments = guarded;
+            toolArguments = {
+              ...(toolArguments ?? {}),
+              ...Object.fromEntries(Object.entries(guarded).filter(([, value]) => value !== undefined))
+            };
           } else {
             logger.warn('record_brief_updates tool arguments failed schema validation', {
               sessionId: options?.sessionId,
@@ -279,20 +280,10 @@ type ChatContext = {
   capturedFields?: string[];
 } | undefined;
 
-const CAPTURED_FIELD_KEYS = [
-  'projectScope',
-  'projectObjective',
-  'audience',
-  'intendedOutputs',
-  'referencesStatus',
-  'projectType',
-  'service',
-  'timelineBand',
-  'budgetBand',
-  'contactName',
-  'contactCompany',
-  'contactEmail'
-] as const;
+const CAPTURED_FIELD_KEYS = recordBriefUpdatesSchema
+  .keyof()
+  .options
+  .filter((key) => key !== 'scopePolished');
 
 function computeCapturedFieldsFromDraft(draft: Record<string, string>): string[] {
   const captured: string[] = [];
@@ -656,6 +647,21 @@ export async function POST(request: Request) {
     }
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
+    const priorValues = { ...createDefaultLeadDraft(), ...llmContext.priorDraft } as LeadDraft;
+    for (const [field, value] of Object.entries(draftUpdates)) {
+      if (priorValues[field as keyof LeadDraft] === value) delete draftUpdates[field as keyof typeof draftUpdates];
+    }
+    if (Object.keys(draftUpdates).length === 0 && !sharedWork) {
+      Object.assign(draftUpdates, inferDirectIntakeUpdates(priorValues, lastUserMessage));
+    }
+    const companyCandidate = inferCompanyCandidate(priorValues);
+    if (!priorValues.contactCompany?.trim() && companyCandidate) {
+      if (/^(?:yes|correct|that(?:'s| is) right|please do|use that)[.!]?$/i.test(lastUserMessage.trim())) {
+        draftUpdates.contactCompany = companyCandidate;
+      } else if (/^(?:no|skip|prefer not to say|not applicable)[.!]?$/i.test(lastUserMessage.trim())) {
+        draftUpdates.contactCompany = 'Not provided';
+      }
+    }
     let persisted: Awaited<ReturnType<typeof persistAuthenticatedDraftState>>;
     try {
       persisted = await persistAuthenticatedDraftState(draftState, draftUpdates);
@@ -685,13 +691,25 @@ export async function POST(request: Request) {
     const savedValues = toLeadDraftState(progress.canonicalDraft);
     const previousCompletedStageCount = getCompletedIntakeStageCount(llmContext.priorDraft);
     const currentCompletedStageCount = getCompletedIntakeStageCount(savedValues);
-    const stageRecaps = INTAKE_STAGES
+    const completedRecaps = INTAKE_STAGES
       .slice(previousCompletedStageCount, currentCompletedStageCount)
       .flatMap((stage) => {
         const recap = formatIntakeStageRecap(stage.id, savedValues);
         return recap ? [recap] : [];
       });
+    const stageRecaps = completedRecaps.length > 0
+      ? [`Brief recap: ${completedRecaps.map((recap) => recap.replace(/^So far:\s*/, '').replace(/\.$/, '')).join('; ')}.`]
+      : [];
     const missingFields = missingReviewFields(savedValues);
+    const shouldContinueIntake = !sharedWork && (
+      Object.keys(draftUpdates).length > 0 ||
+      (hasProjectNeed(priorValues) && /^(?:ok|okay|yes|yep|sure|go on|keep going|continue|next)[.!]?$/i.test(lastUserMessage.trim()))
+    );
+    if (shouldContinueIntake) {
+      replyText = ensureRequiredFollowUp(replyText, getNextMissingFieldPrompt({ ...createDefaultLeadDraft(), ...savedValues } as LeadDraft));
+    } else if (!replyText.trim() && sharedWork) {
+      replyText = 'Here are the references I found.';
+    }
 
     void logLlmEvent(sessionId, category, Object.keys(draftUpdates).length > 0, requestId);
 
@@ -731,6 +749,40 @@ export async function POST(request: Request) {
       message: `AI is temporarily unavailable, so I did not save that answer. Please retry it, or talk to the Balance team. ${fallbackQuestion}`
     }, undefined, request);
   }
+}
+
+function ensureRequiredFollowUp(text: string, question: string): string {
+  const cleaned = text.trim();
+  if (cleaned.endsWith(question)) return cleaned;
+  const withoutTrailingQuestion = cleaned.replace(/[^.!?\n]*\?\s*$/, '');
+  const prefix = withoutTrailingQuestion || 'Thanks — I saved that.';
+  return `${prefix}${prefix.endsWith('\n') ? '' : ' '}${question}`;
+}
+
+function hasProjectNeed(draft: LeadDraft): boolean {
+  return Boolean(draft.projectScope.trim() || draft.projectType?.trim() || draft.service.trim());
+}
+
+function inferDirectIntakeUpdates(draft: LeadDraft, userMessage: string): Partial<LeadDraft> {
+  const value = userMessage.trim();
+  if (!value || value.length > 1_000) return {};
+  if (/^(?:ok|okay|yes|yep|sure|go on|keep going|continue)[.!]?$/i.test(value)) return {};
+  const redirects = /^(?:skip|move on|next(?: question| topic)?|let'?s move on|can we (?:move on|talk about something else)|not relevant)[.!]?$/i;
+  if (redirects.test(value)) {
+    if (!draft.projectObjective.trim()) return { projectObjective: 'Skip' };
+    if (!draft.audience.trim()) return { audience: 'Skip' };
+    if (!draft.intendedOutputs.trim()) return { intendedOutputs: 'Skip' };
+    if (!draft.timelineBand.trim()) return { timelineBand: 'Not sure yet' };
+    if (!draft.budgetBand.trim()) return { budgetBand: 'Prefer not to share' };
+    if (!draft.referencesStatus.trim()) return { referencesStatus: 'skipped' };
+    return {};
+  }
+  if (value.includes('?') || /\b(?:already|mentioned|recommend|reference|example|portfolio|show me|tell me about)\b/i.test(value)) return {};
+  if (!hasProjectNeed(draft) || value.length > 200) return {};
+  if (!draft.projectObjective.trim()) return { projectObjective: value };
+  if (!draft.audience.trim()) return { audience: value };
+  if (!draft.intendedOutputs.trim()) return { intendedOutputs: value };
+  return {};
 }
 
 function splitReplyIntoMessages(text: string): string[] {
@@ -780,7 +832,6 @@ function splitLongChunk(chunk: string): string[] {
   const sentenceBoundary = /([.!?])\s+/g;
   const pieces: string[] = [];
   let buffer = '';
-  let lastBoundary = -1;
   let cursor = 0;
 
   for (const match of chunk.matchAll(sentenceBoundary)) {
@@ -791,7 +842,6 @@ function splitLongChunk(chunk: string): string[] {
       buffer = '';
     }
     buffer += chunk.slice(cursor, sentenceEnd);
-    lastBoundary = sentenceEnd;
     cursor = sentenceEnd;
     if (buffer.length > MAX_CHUNK) {
       pieces.push(buffer.trim());

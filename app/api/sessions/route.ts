@@ -119,9 +119,9 @@ export async function POST(request: Request) {
         logger.error('Failed to persist analysis consent');
         return jsonWithCors({ ok: false, code: 'session_unavailable' }, { status: 503 }, request);
       }
+      emitEvent('consent_granted', { sessionId, consentVersion }, requestId);
     }
 
-    emitEvent('consent_granted', { sessionId, consentVersion }, requestId);
     emitEvent('capability_issued', { sessionId }, requestId);
     return setSessionCapabilityCookie(jsonWithCors({
       sessionId,

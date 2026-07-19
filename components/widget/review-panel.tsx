@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { ProjectBriefCard, type BriefMutationOutcome } from '@/components/widget/widget-overlay-parts';
 import { brandTokens } from '@/lib/brand-tokens';
 import { isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { LeadDraft } from '@/lib/onboarding/types';
 
 type TransferStatus = 'saved' | 'queued' | 'delivered';
+type DataActionCallback = () => string | void | Promise<string | void>;
 
 function SecondaryButton({ onClick, children, ariaLabel }: { onClick: () => void; children: React.ReactNode; ariaLabel?: string }) {
   return (
@@ -59,10 +61,10 @@ export function ReviewPanel({
   onApprove: () => void | Promise<void>;
   onContinueRefining: () => void;
   onChange?: (key: string, value: string) => Promise<BriefMutationOutcome>;
-  onViewBrief?: () => void;
-  onClearBrief?: () => void;
-  onWithdrawTransfer?: () => void;
-  onRequestDeletion?: () => void;
+  onViewBrief?: DataActionCallback;
+  onClearBrief?: DataActionCallback;
+  onWithdrawTransfer?: DataActionCallback;
+  onRequestDeletion?: DataActionCallback;
   provenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
   referenceLinks?: ReadonlyArray<{ id: string; kind: string; url: string }>;
   onAddReference?: (url: string) => Promise<BriefMutationOutcome>;
@@ -74,6 +76,24 @@ export function ReviewPanel({
   const ready = isBriefReadyForApproval(draft);
   const hasProjectNeed = Boolean(draft.projectScope.trim() || draft.projectObjective.trim() || draft.service.trim());
   const hasContactDetail = Boolean(draft.contactName.trim() || draft.contactEmail.trim());
+  const [pendingDataAction, setPendingDataAction] = useState<string | null>(null);
+  const [dataStatus, setDataStatus] = useState<string | null>(null);
+  const [dataConfirmation, setDataConfirmation] = useState<'clear' | 'delete' | null>(null);
+
+  async function runDataAction(name: string, callback: DataActionCallback | undefined) {
+    if (!callback || pendingDataAction) return;
+    setPendingDataAction(name);
+    setDataStatus(null);
+    try {
+      const message = await callback();
+      if (message) setDataStatus(message);
+    } catch {
+      setDataStatus('The project data action could not be completed. Please try again.');
+    } finally {
+      setPendingDataAction(null);
+      setDataConfirmation(null);
+    }
+  }
 
   const approveDisabled = !ready || approved || approvalInFlight;
   const approveButtonLabel = approvalInFlight
@@ -112,14 +132,37 @@ export function ReviewPanel({
         <details className="balance-widget-data-controls">
           <summary>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-            <span>Manage brief &amp; data</span>
+            <span>Privacy &amp; project data</span>
             <svg className="balance-widget-data-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 10l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </summary>
           <div className="balance-widget-data-actions" aria-label="Brief and data controls">
-            {onViewBrief && <button type="button" className="balance-widget-inline-action" onClick={onViewBrief}>View brief</button>}
-            {onClearBrief && <button type="button" className="balance-widget-inline-action" onClick={onClearBrief}>Clear brief</button>}
-            {onWithdrawTransfer && <button type="button" className="balance-widget-inline-action" onClick={onWithdrawTransfer}>Withdraw consent</button>}
-            {onRequestDeletion && <button type="button" className="balance-widget-inline-action balance-widget-inline-action-danger" onClick={onRequestDeletion}>Request deletion</button>}
+            {onViewBrief && <button type="button" className="balance-widget-inline-action" disabled={Boolean(pendingDataAction)} onClick={() => void runDataAction('view', onViewBrief)}>View stored data</button>}
+            {onClearBrief && <button type="button" className="balance-widget-inline-action" disabled={Boolean(pendingDataAction)} onClick={() => setDataConfirmation('clear')}>Clear editable brief</button>}
+            {(onWithdrawTransfer || onRequestDeletion) && (
+              <details className="balance-widget-sharing-controls">
+                <summary>Sharing consent &amp; deletion</summary>
+                <div className="balance-widget-sharing-actions">
+                  {onWithdrawTransfer && <button type="button" className="balance-widget-inline-action" disabled={Boolean(pendingDataAction)} onClick={() => void runDataAction('withdraw', onWithdrawTransfer)}>Withdraw sharing consent</button>}
+                  {onRequestDeletion && <button type="button" className="balance-widget-inline-action balance-widget-inline-action-danger" disabled={Boolean(pendingDataAction)} onClick={() => setDataConfirmation('delete')}>Request project deletion</button>}
+                </div>
+              </details>
+            )}
+            {dataConfirmation === 'clear' && (
+              <div role="alert" className="balance-widget-data-confirmation">
+                <span>This clears the editable brief only. Uploads, links, consent history, approved transfers, provider copies, and backups are not deleted.</span>
+                <button type="button" className="balance-widget-inline-action balance-widget-inline-action-danger" onClick={() => void runDataAction('clear', onClearBrief)}>Confirm clear</button>
+                <button type="button" className="balance-widget-inline-action" onClick={() => setDataConfirmation(null)}>Cancel</button>
+              </div>
+            )}
+            {dataConfirmation === 'delete' && (
+              <div role="alert" className="balance-widget-data-confirmation">
+                <span>Deletion freezes this session and queues removal of stored project data. Provider copies and backups have separate retention controls.</span>
+                <button type="button" className="balance-widget-inline-action balance-widget-inline-action-danger" onClick={() => void runDataAction('delete', onRequestDeletion)}>Confirm deletion request</button>
+                <button type="button" className="balance-widget-inline-action" onClick={() => setDataConfirmation(null)}>Cancel</button>
+              </div>
+            )}
+            {pendingDataAction && <div role="status" className="balance-widget-data-status">Updating project data...</div>}
+            {dataStatus && <div role="status" className="balance-widget-data-status">{dataStatus}</div>}
           </div>
         </details>
       )}
@@ -169,7 +212,7 @@ export function ReviewPanel({
           </button>
           {ready && (
             <div id="producer-transfer-note" style={{ fontSize: 10, color: brandTokens.colors.mutedText, lineHeight: 1.5, textAlign: 'center' }}>
-              Sends this brief and its reference links to Balance through Telegram and may create a Monday.com record. Those copies have separate retention.
+              Sends this brief and its reference links to Balance. Approved copies may be retained in the services Balance uses to respond and manage enquiries.
             </div>
           )}
           {approvalInFlight && (

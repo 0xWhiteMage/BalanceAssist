@@ -67,7 +67,8 @@ describe('production migration policy', () => {
       { version: '057', filename: '057_event_deletion_freeze.sql', path: '/tmp/057' },
       { version: '058', filename: '058_unsent_crm_deletion.sql', path: '/tmp/058' },
       { version: '059', filename: '059_consent_1_2_compatibility.sql', path: '/tmp/059' },
-      { version: '060', filename: '060_consent_1_2_cutover.sql', path: '/tmp/060' }
+      { version: '060', filename: '060_consent_1_2_cutover.sql', path: '/tmp/060' },
+      { version: '061', filename: '061_api_security_retention_and_upload_quota.sql', path: '/tmp/061' }
     ]).map(({ version }) => version)).toEqual(['043']);
   });
 

@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
 import { crmMigrationVersions } from './apply-production-crm-migrations.mjs';
+import { integrationMigrationVersions } from './apply-production-integration-migrations.mjs';
 
 const policyBaseline = 37n;
 const reviewedCleanupVersions = ['038', '039', '040', '041', '042', '043'];
@@ -16,6 +17,7 @@ const reviewedTrustFeedbackVersion = '057';
 const reviewedUnsentCrmDeletionVersion = '058';
 const reviewedConsent12Version = '059';
 const reviewedConsent12CutoverVersion = '060';
+const reviewedApiSecurityVersion = '061';
 
 export function assertReviewedCleanupMigrationsRecorded(recordedVersions) {
   const recorded = new Set(recordedVersions);
@@ -30,6 +32,14 @@ export function assertReviewedCrmMigrationsRecorded(recordedVersions) {
   const pending = crmMigrationVersions.filter((version) => !recorded.has(version));
   if (pending.length) {
     throw new Error(`${pending.join(', ')} is pending; run Production CRM migrations before this release.`);
+  }
+}
+
+export function assertReviewedIntegrationMigrationsRecorded(recordedVersions) {
+  const recorded = new Set(recordedVersions);
+  const pending = integrationMigrationVersions.filter((version) => !recorded.has(version));
+  if (pending.length) {
+    throw new Error(`${pending.join(', ')} is pending; run Production integration migrations before this release.`);
   }
 }
 
@@ -71,13 +81,15 @@ export function assertReviewedConsent12MigrationRecorded(recordedVersions) {
 
 export function selectOrdinaryProductionMigrations(migrations) {
   return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version)
+    && !integrationMigrationVersions.includes(migration.version)
     && migration.version !== reviewedTrustControlsVersion
     && migration.version !== reviewedFinalReviewVersion
     && migration.version !== reviewedSessionControlsVersion
     && migration.version !== reviewedTrustFeedbackVersion
     && migration.version !== reviewedUnsentCrmDeletionVersion
     && migration.version !== reviewedConsent12Version
-    && migration.version !== reviewedConsent12CutoverVersion);
+    && migration.version !== reviewedConsent12CutoverVersion
+    && migration.version !== reviewedApiSecurityVersion);
 }
 
 export function assertExpandOnlyMigration(source, filename) {
@@ -129,6 +141,7 @@ export async function applyProductionMigrations(connectionString = process.env.P
   assertReviewedTrustFeedbackMigrationRecorded(recordedVersions);
   assertReviewedUnsentCrmDeletionMigrationRecorded(recordedVersions);
   assertReviewedConsent12MigrationRecorded(recordedVersions);
+  assertReviewedIntegrationMigrationsRecorded(recordedVersions);
 
   const migrations = selectOrdinaryProductionMigrations(getIncrementalMigrations(resolve(process.cwd(), 'supabase/migrations')));
   for (const migration of migrations) {

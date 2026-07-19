@@ -4,6 +4,10 @@ import { createServerSupabaseClient, hasSupabaseServerConfig } from '@/lib/supab
 import { createLogger, extractRequestId } from '@/lib/logger';
 import { verifyWebhookChatId, verifyWebhookSecret, verifyWebhookSender } from '@/lib/telegram/webhook-auth';
 import type { TelegramUpdate } from '@/lib/telegram';
+import { parseTelegramSenderAllowlist } from '@/lib/security/config';
+import { readJsonBodyLimited } from '@/lib/api/route-helpers';
+
+const MAX_TELEGRAM_UPDATE_BYTES = 256 * 1024;
 
 export async function POST(request: Request) {
   const logger = createLogger('telegram-webhook', extractRequestId(request));
@@ -19,26 +23,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
 
-  let update: TelegramUpdate;
-
-  try {
-    update = (await request.json()) as TelegramUpdate;
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 });
-  }
-
   const configuredChatId = process.env.TELEGRAM_CHAT_ID ?? null;
-  if (!configuredChatId && process.env.NODE_ENV === 'production') {
+  if (!configuredChatId) {
     return NextResponse.json({ ok: false, error: 'TELEGRAM_CHAT_ID not configured' }, { status: 503 });
   }
 
-  const allowedUsernames = process.env.TELEGRAM_ALLOWED_USERNAMES
-    ?.split(',')
-    .map(u => u.trim().toLowerCase())
-    .filter(Boolean) ?? [];
+  const allowlist = parseTelegramSenderAllowlist();
+  if (!allowlist.ok) {
+    return NextResponse.json({ ok: false, error: allowlist.error }, { status: 503 });
+  }
 
-  if (allowedUsernames.length === 0 && process.env.NODE_ENV === 'production') {
-    return NextResponse.json({ ok: false, error: 'TELEGRAM_ALLOWED_USERNAMES not configured' }, { status: 503 });
+  const body = await readJsonBodyLimited(request, MAX_TELEGRAM_UPDATE_BYTES);
+  if (!body.ok) {
+    return NextResponse.json(
+      { ok: false, error: body.tooLarge ? 'Payload too large' : 'Invalid JSON' },
+      { status: body.tooLarge ? 413 : 400 }
+    );
+  }
+  const update = body.data as TelegramUpdate;
+  const message = update.message;
+
+  const incomingChatId = message?.chat?.id;
+  if (typeof incomingChatId !== 'number' || !verifyWebhookChatId(incomingChatId, configuredChatId)) {
+    logger.warn('Wrong chat ID', { incoming: incomingChatId ?? null, expected: configuredChatId });
+    return NextResponse.json({ ok: true, ignored: 'wrong-chat' });
+  }
+
+  const senderUserId = message?.from?.id ?? null;
+  if (!verifyWebhookSender(senderUserId, allowlist.userIds)) {
+    logger.warn('Unauthorized sender', { hasSenderUserId: senderUserId !== null });
+    return NextResponse.json({ ok: true, ignored: 'unauthorized-sender' });
   }
 
   if (!hasSupabaseServerConfig()) {
@@ -84,27 +98,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Failed to record update' }, { status: 500 });
     }
     claimedUpdateId = update.update_id;
-  }
-
-  const message = update.message;
-
-  if (configuredChatId) {
-    const incomingChatId = message?.chat?.id;
-    if (typeof incomingChatId !== 'number' || !verifyWebhookChatId(incomingChatId, configuredChatId)) {
-      logger.warn('Wrong chat ID', {
-        incoming: incomingChatId ?? null,
-        expected: configuredChatId
-      });
-      return NextResponse.json({ ok: true, ignored: 'wrong-chat' });
-    }
-  }
-
-  if (allowedUsernames.length > 0) {
-    const senderUsername = message?.from?.username ?? null;
-    if (!verifyWebhookSender(senderUsername, allowedUsernames)) {
-      logger.warn('Unauthorized sender', { hasSenderUsername: Boolean(senderUsername) });
-      return NextResponse.json({ ok: true, ignored: 'unauthorized-sender' });
-    }
   }
 
   if (!message?.text) {

@@ -157,7 +157,12 @@ export const approvedCrmSnapshotSchema = z.object({
   company: z.string().max(500).nullable(),
   service: z.string().max(200).nullable(),
   projectType: z.string().max(500).nullable(),
-  projectScope: z.string().max(2_000).nullable(),
+  projectScope: z.string().max(4_000).nullable(),
+  projectObjective: z.string().max(4_000).nullish().transform((value) => value ?? null),
+  audience: z.string().max(4_000).nullish().transform((value) => value ?? null),
+  intendedOutputs: z.string().max(4_000).nullish().transform((value) => value ?? null),
+  scopePolished: z.string().max(4_000).nullish().transform((value) => value ?? null),
+  referencesStatus: z.string().max(500).nullish().transform((value) => value ?? null),
   timeline: z.string().max(500).nullable(),
   budget: z.string().max(500).nullable(),
   qualificationStatus: z.enum(['qualified', 'needs_review', 'misfit', 'unqualified']),
@@ -189,6 +194,14 @@ function columnValues(snapshot: ApprovedCrmSnapshot) {
     .sort((left, right) => left.url.localeCompare(right.url))
     .map(({ url, label }) => label ? `${url} | ${label}` : url)
     .join('\n');
+  const projectDetails = [
+    snapshot.projectScope && `Project scope: ${snapshot.projectScope}`,
+    snapshot.projectObjective && `Objective: ${snapshot.projectObjective}`,
+    snapshot.audience && `Audience: ${snapshot.audience}`,
+    snapshot.intendedOutputs && `Outputs: ${snapshot.intendedOutputs}`,
+    snapshot.scopePolished && `Brief summary: ${snapshot.scopePolished}`,
+    snapshot.referencesStatus && `References: ${snapshot.referencesStatus}`,
+  ].filter((value): value is string => Boolean(value)).join('\n\n');
 
   return withoutUndefined({
     [schema.columns.crm_record_id.id]: snapshot.crmRecordId,
@@ -199,7 +212,7 @@ function columnValues(snapshot: ApprovedCrmSnapshot) {
     [schema.columns.company.id]: snapshot.company ?? undefined,
     [schema.columns.service.id]: snapshot.service ? labelValue('service', snapshot.service) : undefined,
     [schema.columns.project_type.id]: snapshot.projectType ?? undefined,
-    [schema.columns.project_scope.id]: snapshot.projectScope ? { text: snapshot.projectScope.slice(0, 2_000) } : undefined,
+    [schema.columns.project_scope.id]: projectDetails ? { text: projectDetails.slice(0, 2_000) } : undefined,
     [schema.columns.timeline.id]: snapshot.timeline ?? undefined,
     [schema.columns.budget.id]: snapshot.budget ? labelValue('budget', snapshot.budget) : undefined,
     [schema.columns.qualification_status.id]: labelValue('qualification_status', snapshot.qualificationStatus),

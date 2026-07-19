@@ -42,6 +42,7 @@ const protectedTables = [
   'handoff_outbox',
   'schema_migrations',
   'api_rate_limits',
+  'session_upload_reservations',
   'session_consents',
   'crm_leads',
   'crm_lead_revisions',
@@ -281,7 +282,10 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                   '057_event_deletion_freeze.sql',
                   '058_unsent_crm_deletion.sql',
                   '059_consent_1_2_compatibility.sql',
-                  '060_consent_1_2_cutover.sql'
+                   '060_consent_1_2_cutover.sql',
+                   '061_api_security_retention_and_upload_quota.sql',
+                   '062_monday_oauth_2_1.sql',
+                   '063_local_media_processing.sql'
     ]);
   });
 
@@ -364,7 +368,7 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
   it('creates the required current tables', async () => {
     const result = await client!.query(
       "select table_name from information_schema.tables where table_schema = 'public' and table_name = any($1::text[])",
-       [['sessions', 'events', 'leads', 'human_messages', 'uploaded_files', 'reference_links', 'processed_telegram_updates', 'handoff_outbox', 'schema_migrations', 'api_rate_limits', 'session_consents', 'crm_leads', 'crm_lead_revisions', 'monday_sync_outbox', 'monday_reconciliation_checkpoints', 'monday_reconciliation_seen']]
+       [['sessions', 'events', 'leads', 'human_messages', 'uploaded_files', 'reference_links', 'processed_telegram_updates', 'handoff_outbox', 'schema_migrations', 'api_rate_limits', 'session_upload_reservations', 'session_consents', 'crm_leads', 'crm_lead_revisions', 'monday_sync_outbox', 'monday_reconciliation_checkpoints', 'monday_reconciliation_seen']]
     );
 
     expect(result.rows.map((row) => row.table_name).sort()).toEqual([
@@ -382,9 +386,61 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
       'reference_links',
       'schema_migrations',
        'session_consents',
+       'session_upload_reservations',
        'sessions',
       'uploaded_files'
     ]);
+  });
+
+  it('secures the API security 061 quota table and RPCs for service-role-only use', async () => {
+    const table = await client!.query(`
+      select c.relrowsecurity,
+        has_table_privilege('anon', c.oid, 'select') as anon_select,
+        has_table_privilege('authenticated', c.oid, 'insert') as authenticated_insert,
+        exists (
+          select 1 from aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) acl
+          where acl.grantee = 0
+        ) as public_access
+      from pg_class c where c.oid = 'public.session_upload_reservations'::regclass
+    `);
+    expect(table.rows).toEqual([{
+      relrowsecurity: true,
+      anon_select: false,
+      authenticated_insert: false,
+      public_access: false
+    }]);
+
+    const functions = await client!.query(`
+      select p.proname, p.prosecdef, p.proconfig, pg_get_function_result(p.oid) as result,
+        has_function_privilege('anon', p.oid, 'execute') as anon_execute,
+        has_function_privilege('authenticated', p.oid, 'execute') as authenticated_execute,
+        has_function_privilege('service_role', p.oid, 'execute') as service_role_execute,
+        exists (
+          select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+          where acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+        ) as public_execute
+      from pg_proc p
+      where p.oid in (
+        'public.prune_processed_telegram_updates(interval,integer)'::regprocedure,
+        'public.reserve_session_upload_quota(uuid,bigint,bigint)'::regprocedure,
+        'public.release_session_upload_quota(uuid)'::regprocedure
+      ) order by p.proname
+    `);
+    expect(functions.rows).toEqual([
+      expect.objectContaining({ proname: 'prune_processed_telegram_updates', result: 'integer' }),
+      expect.objectContaining({ proname: 'release_session_upload_quota', result: 'boolean' }),
+      expect.objectContaining({ proname: 'reserve_session_upload_quota', result: 'uuid' })
+    ]);
+    for (const fn of functions.rows) {
+      expect(fn).toMatchObject({
+        prosecdef: true,
+        proconfig: expect.arrayContaining(['search_path=public, pg_temp']),
+        anon_execute: false,
+        authenticated_execute: false,
+        service_role_execute: true,
+        public_execute: false
+      });
+    }
   });
 
   it('enables RLS and denies direct table privileges to public API roles and control tables', async () => {
@@ -1220,7 +1276,10 @@ describe.skipIf(!connectionString)('database schema migrations', () => {
                    '057:057_event_deletion_freeze.sql',
                    '058:058_unsent_crm_deletion.sql',
                    '059:059_consent_1_2_compatibility.sql',
-                   '060:060_consent_1_2_cutover.sql'
+                    '060:060_consent_1_2_cutover.sql',
+                     '061:061_api_security_retention_and_upload_quota.sql',
+                     '062:062_monday_oauth_2_1.sql',
+                     '063:063_local_media_processing.sql'
     ]);
   });
 

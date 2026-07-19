@@ -216,8 +216,8 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
 
     act(() => resize(true));
     const readyStatus = screen.getByRole('status', { name: 'Brief ready' });
-    expect(readyStatus).toHaveTextContent('Your core brief is ready. Review it in the Brief tab.');
-    expect(screen.getAllByText(/Your core brief is ready/i)).toHaveLength(1);
+    expect(readyStatus).toHaveTextContent('Your brief is ready to check before it is sent to Balance. Open the Brief tab to review it.');
+    expect(screen.getAllByText(/Your brief is ready to check/i)).toHaveLength(1);
 
     act(() => resize(false));
     expect(screen.queryByRole('status', { name: 'Brief ready' })).toBeNull();
@@ -305,18 +305,20 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     await waitFor(() => {
       const confirmation = document.querySelector('[data-testid="approve-confirmation"]');
       expect(confirmation).not.toBeNull();
-      expect(screen.getByRole('button', { name: /book a catch-up/i })).toBeInTheDocument();
-      expect(screen.getByText('Queued for the Balance team')).toBeInTheDocument();
-      expect(screen.getByText('Was this clear?')).toBeInTheDocument();
+      expect(within(confirmation as HTMLElement).getByRole('button', { name: /edit brief/i })).toBeInTheDocument();
+      expect(within(confirmation as HTMLElement).queryByRole('button', { name: /schedule a call/i })).toBeNull();
+      expect(within(confirmation as HTMLElement).queryByRole('button', { name: /message the team/i })).toBeNull();
+      expect(screen.getByText('Brief saved. Waiting to send to Balance.')).toBeInTheDocument();
+      expect(screen.getByText('Optional feedback')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it helped' }));
     await waitFor(() => expect(logEventMock).toHaveBeenCalledWith({
       sessionId: 'mock-session-id',
       eventName: 'trust_feedback',
       properties: { dimension: 'clarity_helpfulness', response: 'yes' }
     }));
-    expect(screen.getByText('Thanks for the feedback.')).toHaveAttribute('role', 'status');
+    expect(screen.getByText('Feedback saved. Thank you.')).toHaveAttribute('role', 'status');
 
     expect(screen.getByTestId('approve-confirmation').textContent).not.toMatch(/crm|telegram|revision|reviewed/i);
   });
@@ -358,7 +360,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.click(approveButton);
 
     await waitFor(() => {
-      expect(screen.getByText('Brief saved')).toBeInTheDocument();
+      expect(screen.getByText('Brief saved.')).toBeInTheDocument();
     });
   });
 
@@ -468,7 +470,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     expect(alert).toBeVisible();
     fireEvent.click(retry);
     await waitFor(() => expect(finalizeLeadMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('Queued for the Balance team')).toBeInTheDocument();
+    expect(await screen.findByText('Brief saved. Waiting to send to Balance.')).toBeInTheDocument();
     expect(screen.queryByTestId('review-rail')).toBeNull();
     expect(mountedRail).not.toBeInTheDocument();
   }, 20_000);
@@ -488,9 +490,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Brief' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send brief to Balance' }));
 
-    expect(await screen.findByText('Delivered to the Balance team')).toBeInTheDocument();
-    expect(screen.queryByText('Brief saved')).toBeNull();
-    expect(screen.queryByText('Queued for the Balance team')).toBeNull();
+    expect(await screen.findByText('Brief sent to Balance.')).toBeInTheDocument();
+    expect(screen.queryByText('Brief saved.')).toBeNull();
+    expect(screen.queryByText('Brief saved. Waiting to send to Balance.')).toBeNull();
   }, 10_000);
 
   test('does not finalize until producer-transfer consent has been recorded', async () => {
@@ -534,7 +536,7 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     expect(finalizeLeadMock).not.toHaveBeenCalled();
   }, 10000);
 
-  test('after Calendly completes without verified server confirmation, the widget stays truthful about team notification', async () => {
+  test('keeps scheduling available outside the simplified saved-brief row', async () => {
     mockWidgetFetch();
 
     render(<WidgetOverlay autoOpen={true} calendlyUrlOverride="https://calendly.com/balance/15-minute-call" />);
@@ -556,22 +558,9 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     })) as HTMLButtonElement;
     fireEvent.click(approveButton);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /book a catch-up/i })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /book a catch-up/i }));
-
-    await waitFor(() => {
-      const embed = document.querySelector('[data-testid="mock-calendly-embed"]');
-      expect(embed).not.toBeNull();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /complete booking/i }));
-
-    await waitFor(() => {
-      expect(document.body.textContent).toMatch(/still verifying that the balance team received it/i);
-    });
-    expect(document.body.textContent).not.toMatch(/notified automatically/i);
+    const confirmation = await screen.findByTestId('approve-confirmation');
+    expect(within(confirmation).getByRole('button', { name: /edit brief/i })).toBeInTheDocument();
+    expect(within(confirmation).queryByRole('button', { name: /schedule a call/i })).toBeNull();
+    expect(screen.getByRole('link', { name: /schedule a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/15-minute-call');
   }, 10000);
 });

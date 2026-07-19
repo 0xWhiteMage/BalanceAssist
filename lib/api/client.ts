@@ -1,5 +1,18 @@
+import { z } from 'zod';
 import type { EventPayload } from '@/lib/api/contracts';
-import { CHAT_CLIENT_TIMEOUT_MS } from '@/lib/conversation/chat-timeouts';
+import { fetchWithTimeout } from '@/lib/api/fetch';
+import { CONSENT_VERSION } from '@/lib/privacy/notice';
+
+export { chatRequest, parseChatResponse } from '@/lib/api/chat-client';
+export type {
+  ChatReplyItem,
+  ChatRequestPayload,
+  ChatResponse,
+  ChatSharedWork,
+  ChatSharedWorkEntry
+} from '@/lib/api/chat-client';
+export { finalizeLead } from '@/lib/api/finalize-client';
+export type { FinalizeLeadResponse } from '@/lib/api/finalize-client';
 
 export type SessionResponse = {
   sessionId: string;
@@ -15,44 +28,6 @@ export type EventResponse = {
   ok: boolean;
   eventName: string;
 };
-
-export type FinalizeLeadResponse =
-  | {
-      ok: true;
-      sessionId: string;
-      qualificationStatus: string | null;
-      persisted: true;
-      queued: boolean;
-      delivered: boolean;
-      retryable: boolean;
-      handoffId?: string;
-      score?: number | null;
-      recommendedNextStep?: string | null;
-      crmRecordId?: string;
-      crmQueued: boolean;
-      crmRevision?: number;
-      approvedDraftVersion: number;
-      approvalInputHash: string;
-      approvedReferenceSetHash: string;
-    }
-  | { ok: true; sessionId: string; persisted: false; reason: string };
-
-const REQUEST_TIMEOUT_MS = 10000;
-
-async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(input, {
-      credentials: 'include',
-      ...init,
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
 
 async function postJson<T>(url: string, body: unknown): Promise<T | null> {
   try {
@@ -72,7 +47,6 @@ async function postJson<T>(url: string, body: unknown): Promise<T | null> {
     return null;
   }
 }
-
 function sanitizeSourceUrl(sourceUrl: string): string {
   try {
     const url = new URL(sourceUrl);
@@ -143,22 +117,6 @@ export async function getCurrentSession(): Promise<SessionResponse | null> {
 
 export async function logEvent(payload: EventPayload): Promise<EventResponse | null> {
   return postJson<EventResponse>('/api/events', payload);
-}
-
-export async function finalizeLead(payload: { sessionId: string }): Promise<FinalizeLeadResponse | null> {
-  try {
-    const response = await fetchWithTimeout('/api/leads/finalize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true
-    });
-    if (!response.ok) return null;
-    const parsed = finalizeLeadResponseSchema.safeParse(await response.json());
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
 }
 
 export async function recordProducerTransferConsent(sessionId: string): Promise<boolean> {
@@ -245,7 +203,7 @@ export async function relayUserMessage(sessionId: string, text: string, requestI
       headers: { 'Content-Type': 'application/json', 'x-request-id': requestId },
       body: JSON.stringify({ sessionId, text }),
       keepalive: true
-    });
+    }, 30_000);
     if (!response.ok) return { persisted: false, queued: false, delivered: false };
     const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean };
     return {
@@ -564,202 +522,3 @@ export async function updateProjectDraft(
     return { ok: false, conflict: false };
   }
 }
-
-export type ChatSharedWorkEntry = {
-  title: string;
-  url: string;
-  description?: string;
-  image_url?: string;
-  category?: 'reference' | 'mood' | 'pitch';
-  slug: string;
-  clients?: string;
-  year?: number | null;
-};
-
-export type ChatSharedWork = {
-  entries: ChatSharedWorkEntry[];
-};
-
-export type ChatReplyItem = {
-  text: string;
-};
-
-export type ChatRequestPayload = {
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
-  context?: {
-    step?: string;
-    isTeamConnected?: boolean;
-    draft?: string;
-    sessionId?: string;
-    capturedFields?: string[];
-    workSearchPending?: boolean;
-    sharedWorkSlugs?: string[];
-  };
-};
-
-type ChatResponseBase = {
-  replies: ChatReplyItem[];
-  draftUpdates: Record<string, string | boolean>;
-  briefReady: boolean;
-  sharedWork: ChatSharedWork | null;
-};
-
-type CanonicalChatResponse = ChatResponseBase & {
-  outcome: 'draft_persisted' | 'draft_conflict';
-  canonicalDraft: Record<string, string>;
-  canonicalProvenance?: Record<string, 'user-stated' | 'inferred' | 'confirmed' | 'cleared'>;
-  draftVersion: number;
-  currentStage: 'project' | 'audience' | 'planning' | 'references-contact';
-  stageRecaps: string[];
-};
-
-export type ChatResponse =
-  | CanonicalChatResponse
-  | (ChatResponseBase & { outcome: 'non_persistence' })
-  | (ChatResponseBase & { outcome: 'confidential_diversion' })
-  | (ChatResponseBase & { outcome: 'draft_save_failed' })
-  | (ChatResponseBase & {
-      outcome: 'provider_unavailable';
-      error: 'Chat service unavailable';
-      detail: 'chat_provider_unavailable';
-    });
-
-const clientReplyFields = {
-  message: z.string().min(1).optional(),
-  messages: z.array(z.string().min(1)).min(1).optional()
-};
-const clientSharedWorkSchema = z.object({ entries: z.array(z.object({
-    title: z.string(), url: z.string(), description: z.string().optional(), image_url: z.string().optional(),
-    category: z.enum(['reference', 'mood', 'pitch']).optional(), slug: z.string(), clients: z.string().optional(), year: z.number().nullable().optional()
-  })) });
-const clientCanonicalFields = {
-  canonicalDraft: z.record(z.string()),
-  canonicalProvenance: z.record(z.enum(['user-stated', 'inferred', 'confirmed', 'cleared'])).optional(),
-  draftVersion: z.number().int().nonnegative(),
-  currentStage: z.enum(['project', 'audience', 'planning', 'references-contact']),
-  stageRecaps: z.array(z.string()),
-  briefReady: z.boolean()
-};
-const chatResponseSchema = z.discriminatedUnion('outcome', [
-  z.object({
-    outcome: z.literal('draft_persisted'), ...clientReplyFields, ...clientCanonicalFields,
-    draftUpdates: z.record(z.union([z.string(), z.boolean()])).optional(), sharedWork: clientSharedWorkSchema.optional(),
-    reviewPrompt: z.string().nullable().optional(), missingFields: z.array(z.string()).optional(), truncated: z.boolean().optional()
-  }).strict(),
-  z.object({ outcome: z.literal('draft_conflict'), ...clientReplyFields, ...clientCanonicalFields }).strict(),
-  z.object({ outcome: z.literal('non_persistence'), ...clientReplyFields, sharedWork: clientSharedWorkSchema.optional() }).strict(),
-  z.object({ outcome: z.literal('confidential_diversion'), ...clientReplyFields }).strict(),
-  z.object({ outcome: z.literal('draft_save_failed'), ...clientReplyFields }).strict(),
-  z.object({
-    outcome: z.literal('provider_unavailable'), error: z.literal('Chat service unavailable'),
-    detail: z.literal('chat_provider_unavailable')
-  }).strict()
-]).superRefine((value, context) => {
-  if (value.outcome !== 'provider_unavailable' && !value.message && !value.messages) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Either message or messages must be provided' });
-  }
-});
-
-export async function chatRequest(payload: ChatRequestPayload): Promise<ChatResponse | null> {
-  const sanitizedPayload = {
-    ...payload,
-    messages: payload.messages.filter(
-      (message): message is { role: 'user'; content: string } => message.role === 'user'
-    )
-  };
-
-  let response: Response;
-  let responseBody: unknown;
-  try {
-    response = await fetchWithTimeout('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sanitizedPayload),
-      keepalive: true
-    }, CHAT_CLIENT_TIMEOUT_MS);
-    responseBody = await response.json();
-  } catch {
-    return null;
-  }
-
-  const parsed = chatResponseSchema.safeParse(responseBody);
-  if (!parsed.success) return null;
-  const data = parsed.data;
-  const validStatus =
-    (response.status === 200 && ['draft_persisted', 'non_persistence', 'confidential_diversion'].includes(data.outcome)) ||
-    (response.status === 409 && data.outcome === 'draft_conflict') ||
-    (response.status === 500 && data.outcome === 'draft_save_failed') ||
-    (response.status === 503 && data.outcome === 'provider_unavailable');
-  if (!validStatus) return null;
-
-  if (data.outcome === 'provider_unavailable') {
-    return {
-      outcome: 'provider_unavailable',
-      error: data.error,
-      detail: data.detail,
-      replies: [],
-      draftUpdates: {},
-      briefReady: false,
-      sharedWork: null
-    };
-  }
-
-  const textChunks: string[] = (() => {
-    if (Array.isArray(data.messages) && data.messages.length > 0) {
-      return data.messages;
-    }
-    if (typeof data.message === 'string' && data.message.trim().length > 0) {
-      return [data.message];
-    }
-    return [];
-  })();
-
-  const base = {
-    replies: textChunks.map((text) => ({ text })),
-    outcome: data.outcome,
-    draftUpdates: 'draftUpdates' in data ? data.draftUpdates ?? {} : {},
-    briefReady: data.outcome === 'draft_persisted' || data.outcome === 'draft_conflict' ? data.briefReady : false,
-    sharedWork: 'sharedWork' in data ? data.sharedWork ?? null : null
-  };
-  if (data.outcome === 'draft_persisted' || data.outcome === 'draft_conflict') {
-    return {
-      ...base,
-      outcome: data.outcome,
-      canonicalDraft: data.canonicalDraft,
-      canonicalProvenance: data.canonicalProvenance,
-      draftVersion: data.draftVersion,
-      currentStage: data.currentStage,
-      stageRecaps: data.stageRecaps
-    };
-  }
-  return { ...base, outcome: data.outcome };
-}
-import { z } from 'zod';
-
-const finalizeLeadResponseSchema = z.discriminatedUnion('persisted', [
-  z.object({
-    ok: z.literal(true),
-    sessionId: z.string(),
-    qualificationStatus: z.string().nullable(),
-    persisted: z.literal(true),
-    queued: z.boolean(),
-    delivered: z.boolean(),
-    retryable: z.boolean(),
-    handoffId: z.string().optional(),
-    score: z.number().nullable().optional(),
-    recommendedNextStep: z.string().nullable().optional(),
-    crmRecordId: z.string().optional(),
-    crmQueued: z.boolean(),
-    crmRevision: z.number().int().nonnegative().optional(),
-    approvedDraftVersion: z.number().int().nonnegative(),
-    approvalInputHash: z.string().min(1),
-    approvedReferenceSetHash: z.string().min(1)
-  }).strict(),
-  z.object({
-    ok: z.literal(true),
-    sessionId: z.string(),
-    persisted: z.literal(false),
-    reason: z.string()
-  }).strict()
-]);
-import { CONSENT_VERSION } from '@/lib/privacy/notice';

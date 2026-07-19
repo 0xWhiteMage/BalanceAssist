@@ -28,19 +28,22 @@ export function TrustFeedback({
   }
 
   if (submitted) {
-    return <div role="status" style={{ padding: '0 16px 16px', fontSize: 12 }}>Thanks for the feedback.</div>;
+    return <div role="status" className="balance-widget-feedback-confirmation">Feedback saved. Thank you.</div>;
   }
 
   return (
-    <section aria-labelledby="trust-feedback-question" style={{ display: 'grid', gap: 8, padding: '0 16px 16px' }}>
-      <p id="trust-feedback-question" style={{ margin: 0, fontSize: 12, fontWeight: 700 }}>Was this clear?</p>
-      <p style={{ margin: 0, fontSize: 11, opacity: 0.72 }}>Only this choice is recorded, not your messages.</p>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('yes')}>Yes</button>
-        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('not_quite')}>Not quite</button>
+    <section aria-labelledby="trust-feedback-title" className="balance-widget-feedback">
+      <div>
+        <p className="balance-widget-feedback-kicker">Optional feedback</p>
+        <p id="trust-feedback-title">Did Balance Assist create a clear, useful brief?</p>
+        <p>We use this one answer to improve the experience. Your messages are not included.</p>
       </div>
-      {pending && <div role="status">Saving feedback</div>}
-      {error && <div role="alert">Feedback was not saved. Please try again.</div>}
+      <div className="balance-widget-feedback-actions">
+        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('yes')}>Yes, it helped</button>
+        <button type="button" className="balance-widget-action" disabled={pending} aria-busy={pending || undefined} onClick={() => void submit('not_quite')}>Needs improvement</button>
+      </div>
+      {pending && <div role="status">Saving feedback…</div>}
+      {error && <div role="alert">Feedback could not be saved. Try again.</div>}
     </section>
   );
 }

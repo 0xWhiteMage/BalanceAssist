@@ -12,6 +12,17 @@ type ConversationContext = {
   isTeamConnected: boolean;
 };
 
+const PERSONAL_EMAIL_DOMAINS = new Set(['gmail', 'googlemail', 'yahoo', 'hotmail', 'outlook', 'icloud', 'me', 'live', 'protonmail', 'proton']);
+
+export function inferCompanyCandidate(draft: Partial<LeadDraft>): string | null {
+  const domain = draft.contactEmail?.trim().toLowerCase().match(/@([a-z0-9-]+)(?:\.[a-z0-9-]+)+$/)?.[1];
+  if (domain && !PERSONAL_EMAIL_DOMAINS.has(domain)) {
+    return domain.split('-').filter(Boolean).map((part) => part[0].toUpperCase() + part.slice(1)).join(' ');
+  }
+  const scopeCandidate = draft.projectScope?.match(/\b(?:for|with|at)\s+([A-Z][\w&.-]+(?:\s+[A-Z][\w&.-]+){0,3})/);
+  return scopeCandidate?.[1]?.trim() ?? null;
+}
+
 function getNextMissingFieldPrompt(draft: LeadDraft): string {
   if (!draft.projectScope.trim()) return 'Tell me a bit about the project you want to create.';
   if (!draft.projectObjective.trim()) return 'What should this project achieve?';
@@ -20,7 +31,12 @@ function getNextMissingFieldPrompt(draft: LeadDraft): string {
   if (!draft.timelineBand) return 'What timeline are you working with?';
   if (!draft.budgetBand) return 'What budget range are you working with?';
   if (!draft.referencesStatus.trim()) return 'Would you like to add any references, or skip that for now?';
+  if (!draft.contactName.trim() && !draft.contactEmail.trim()) return 'What name or email should I put on the brief?';
   if (!draft.contactName.trim()) return 'What name should I put on the brief?';
+  const companyCandidate = inferCompanyCandidate(draft);
+  if (!draft.contactCompany?.trim() && companyCandidate) {
+    return `Your project details suggest ${companyCandidate}. Should I list that as the company, or use another name?`;
+  }
   return 'Would you like to review and send the brief, or continue refining it?';
 }
 

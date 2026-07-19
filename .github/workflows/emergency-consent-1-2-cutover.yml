@@ -106,11 +106,12 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - name: Verify production alias serves the release commit
@@ -158,7 +159,11 @@ jobs:
           const projectResponse = await fetch(`https://api.vercel.com/v9/projects/${process.env.VERCEL_PROJECT_ID}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
           if (!projectResponse.ok) process.exit(1);
           const project = await projectResponse.json();
-          if (project.gitProviderOptions?.createDeployments !== 'disabled') process.exit(1);
+          if (project.id !== process.env.VERCEL_PROJECT_ID || project.accountId !== process.env.VERCEL_ORG_ID) process.exit(1);
+          const [owner, repository] = process.env.GITHUB_REPOSITORY.split('/');
+          if (!project.link?.type?.startsWith('github') || project.link.org?.toLowerCase() !== owner.toLowerCase() || project.link.repo?.toLowerCase() !== repository.toLowerCase()) process.exit(1);
+          const config = JSON.parse(await (await import('node:fs/promises')).readFile('vercel.json', 'utf8'));
+          if (config.git?.deploymentEnabled?.main !== false) process.exit(1);
           const host = new URL(process.env.PRODUCTION_URL).hostname;
           const aliasResponse = await fetch(`https://api.vercel.com/v4/aliases/${host}?teamId=${process.env.VERCEL_ORG_ID}`, { headers });
           if (!aliasResponse.ok) process.exit(1);

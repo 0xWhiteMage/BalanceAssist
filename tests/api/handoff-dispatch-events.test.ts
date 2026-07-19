@@ -162,7 +162,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
         session_id: 'sess-relay',
         created_at: '2026-07-11T11:59:00.000Z',
         claim_token: '66666666-6666-4666-8666-666666666666',
-        payload: { sessionId: 'sess-relay', type: 'relay', messageId: 42, summary: 'Private user message', threadId: null },
+        payload: { sessionId: 'sess-relay', type: 'relay', messageId: 42, summary: '<b>Private user message</b>', threadId: null },
         resolution: 'claimed'
       })
       .mockResolvedValueOnce(null);
@@ -176,7 +176,7 @@ describe('POST /api/internal/handoff-dispatch delivery events', () => {
 
     expect(response.status).toBe(200);
     expect(ensureTelegramTopicMock).toHaveBeenCalledWith(expect.anything(), 'sess-relay', null, null, 'sess-rel');
-    expect(sendTelegramMessageMock).toHaveBeenCalledWith('Private user message', { threadId: 77, plainText: true });
+    expect(sendTelegramMessageMock).toHaveBeenCalledWith('<b>Private user message</b>', { threadId: 77, plainText: true });
     expect(persistTelegramMessageDeliveryMock).toHaveBeenCalledWith(expect.anything(), 42, 77, 501);
     expect(persistTelegramMessageDeliveryMock.mock.invocationCallOrder[0]).toBeLessThan(markDeliveredMock.mock.invocationCallOrder[0]);
   });

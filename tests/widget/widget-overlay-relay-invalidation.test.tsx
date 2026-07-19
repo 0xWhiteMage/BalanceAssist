@@ -73,7 +73,7 @@ describe('WidgetOverlay relay invalidation', () => {
     render(<WidgetOverlay autoOpen={true} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Talk to the team without AI' }));
-    const input = await screen.findByPlaceholderText(/message the team request/i);
+    const input = await screen.findByPlaceholderText(/write a message to the balance team/i);
     fireEvent.change(input, { target: { value: 'Please call me' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 

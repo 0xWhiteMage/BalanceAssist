@@ -11,7 +11,7 @@ type MessageBubbleProps = {
 };
 
 function renderText(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|\\n)/g);
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|\\n|\n)/g);
 
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {
@@ -30,7 +30,7 @@ function renderText(text: string) {
       );
     }
 
-    if (part === '\\n') {
+    if (part === '\\n' || part === '\n') {
       return <br key={i} />;
     }
 
@@ -57,7 +57,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
             letterSpacing: '0.02em'
           }}
         >
-          {message.text}
+          {renderText(message.text)}
         </div>
       </div>
     );

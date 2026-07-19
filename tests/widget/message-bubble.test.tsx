@@ -14,6 +14,15 @@ function botMessage(inlineCards: ChatMessage['inlineCards']): ChatMessage {
 }
 
 describe('MessageBubble inline cards', () => {
+  test('renders real and escaped newlines as line breaks', () => {
+    const { container, rerender } = render(<MessageBubble message={{ ...botMessage(undefined), text: 'First\nSecond' }} />);
+    expect(container.querySelectorAll('br')).toHaveLength(1);
+    expect(screen.getByRole('group', { name: 'Message from Balance Assist' })).toHaveTextContent('FirstSecond');
+
+    rerender(<MessageBubble message={{ ...botMessage(undefined), text: 'First\\nSecond' }} />);
+    expect(container.querySelectorAll('br')).toHaveLength(1);
+  });
+
   test('programmatically identifies AI, user, team, and system speakers', () => {
     const { rerender } = render(<MessageBubble message={botMessage(undefined)} />);
     expect(screen.getByRole('group', { name: 'Message from Balance Assist' })).toBeInTheDocument();
@@ -26,6 +35,9 @@ describe('MessageBubble inline cards', () => {
 
     rerender(<MessageBubble message={{ id: 'system', sender: 'bot', text: 'Connected', timestamp: 0, isSystem: true }} />);
     expect(screen.getByRole('group', { name: 'System message' })).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ id: 'system', sender: 'bot', text: 'Connected\nWaiting', timestamp: 0, isSystem: true }} />);
+    expect(screen.getByRole('group', { name: 'System message' }).querySelectorAll('br')).toHaveLength(1);
   });
 
   test('email card renders an <a> with the exact mailto href', () => {

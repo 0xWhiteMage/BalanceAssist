@@ -23,6 +23,8 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
+          test "$PRODUCTION_URL" = "https://balance-assist.vercel.app"
+          test -n "$CRON_SECRET"
           curl --fail --silent --show-error --max-time 30 --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
             "${PRODUCTION_URL}/api/internal/monday-lifecycle"

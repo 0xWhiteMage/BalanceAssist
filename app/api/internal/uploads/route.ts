@@ -66,5 +66,7 @@ export async function GET(request: Request) {
     })
   );
 
-  return jsonWithCors({ ok: true, uploads: signed });
+  return jsonWithCors({ ok: true, uploads: signed }, {
+    headers: { 'Cache-Control': 'private, no-store' }
+  });
 }

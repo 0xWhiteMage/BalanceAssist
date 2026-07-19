@@ -144,7 +144,7 @@ export async function POST(request: Request) {
 
         const result = await sendTelegramMessage(payload.summary, {
           threadId,
-          ...(payload.type === 'relay' ? { plainText: true } : {})
+          plainText: true
         });
 
         if (result) {

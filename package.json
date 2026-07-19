@@ -2,6 +2,11 @@
   "name": "balance-assist",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10 <11"
+  },
+  "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 3000",
     "build": "node -e \"require('fs').rmSync('.next',{ recursive: true, force: true })\" && next build",
@@ -17,7 +22,7 @@
     "test:release-proof:http": "vitest run --no-file-parallelism tests/integration/release-proof-http.test.ts",
     "test:supabase": "node scripts/test-supabase.mjs",
     "test:supabase:service-role": "vitest run tests/integration/supabase-service-role.test.ts",
-    "test:e2e": "playwright install chromium && playwright test",
+    "test:e2e": "playwright test",
     "monday:schema:verify": "node scripts/verify-monday-schema.mjs"
   },
   "overrides": {
@@ -37,6 +42,7 @@
   "dependencies": {
     "@supabase/supabase-js": "2.54.0",
     "next": "^15.5.20",
+    "pdfjs-dist": "5.4.296",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "zod": "3.25.76"

@@ -157,7 +157,7 @@ describe.skipIf(!connectionString)('release proof journey', () => {
     process.env.TELEGRAM_BOT_TOKEN = `${runId}-bot`;
     process.env.TELEGRAM_CHAT_ID = '-100123';
     process.env.TELEGRAM_WEBHOOK_SECRET = `${runId}-webhook`;
-    process.env.TELEGRAM_ALLOWED_USERNAMES = 'producer';
+    process.env.TELEGRAM_ALLOWED_USER_IDS = '2';
     telegramServer = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -259,6 +259,8 @@ describe.skipIf(!connectionString)('release proof journey', () => {
       .resolves.toMatchObject({ rows: [{ filename: '059_consent_1_2_compatibility.sql' }] });
     await expect(client!.query("select filename from public.schema_migrations where version = '060'"))
       .resolves.toMatchObject({ rows: [{ filename: '060_consent_1_2_cutover.sql' }] });
+    await expect(client!.query("select filename from public.schema_migrations where version = '061'"))
+      .resolves.toMatchObject({ rows: [{ filename: '061_api_security_retention_and_upload_quota.sql' }] });
     await expect(client!.query("select tgenabled from pg_trigger where tgname = 'events_require_active_session' and tgrelid = 'public.events'::regclass"))
       .resolves.toMatchObject({ rows: [{ tgenabled: 'O' }] });
     await client!.query(

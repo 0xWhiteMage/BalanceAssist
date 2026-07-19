@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import schema from '../../config/monday-crm-schema.json';
 import { getMondayConfig } from './config';
+import { MondayOAuthError, refreshMondayAccessToken, resolveMondayAccessToken } from './oauth';
 
 export type MondayFailureCode =
   | 'monday_auth_failed'
@@ -88,16 +89,24 @@ function failureForGraphql(body: { errors: unknown[] }, responseMetadata: Monday
   return new MondayClientError('monday_payload_invalid', false, responseMetadata);
 }
 
-function requireConnection(environment: Environment, lane?: MondayLane): MondayConnection {
+async function requireConnection(environment: Environment, lane?: MondayLane, forceRefresh = false): Promise<MondayConnection> {
   const config = getMondayConfig(environment);
   if (lane === 'upsert' && !config.upsertEnabled || lane === 'cleanup' && !config.cleanupEnabled) {
     throw new MondayClientError('monday_permission_denied', false);
   }
-  if (!config.token || !config.boardId || !config.apiVersion) {
+  if (!config.authMode || !config.boardId || !config.apiVersion) {
     throw new MondayClientError('monday_auth_failed', false);
   }
   if (config.boardId !== schema.boardId) throw new MondayClientError('monday_schema_drift', false);
-  return { token: config.token, boardId: config.boardId, apiVersion: config.apiVersion };
+  try {
+    const token = await (forceRefresh ? refreshMondayAccessToken : resolveMondayAccessToken)({ environment });
+    return { token, boardId: config.boardId, apiVersion: config.apiVersion };
+  } catch (error) {
+    if (error instanceof MondayOAuthError && error.retryable) {
+      throw new MondayClientError('monday_temporary_failure', true);
+    }
+    throw new MondayClientError('monday_auth_failed', false);
+  }
 }
 
 async function request(
@@ -108,24 +117,30 @@ async function request(
   idempotencyKey?: string,
   lane?: MondayLane,
 ): Promise<{ data: Record<string, unknown>; metadata: MondayResponseMetadata }> {
-  const config = requireConnection(environment, lane);
-  let response: Response;
-  try {
-    response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: config.token,
-        'API-Version': '2026-07',
-        'Content-Type': 'application/json',
-        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-      },
-      body: JSON.stringify({ query, variables }),
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch {
-    throw new MondayClientError('monday_temporary_failure', true);
+  let config = await requireConnection(environment, lane);
+  let response: Response | undefined;
+  let body: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      response = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: config.token,
+          'API-Version': '2026-07',
+          'Content-Type': 'application/json',
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw new MondayClientError('monday_temporary_failure', true);
+    }
+    body = await response.json().catch(() => null);
+    if (response.status !== 401 || attempt === 1) break;
+    config = await requireConnection(environment, lane, true);
   }
-  const body: unknown = await response.json().catch(() => null);
+  if (!response) throw new MondayClientError('monday_temporary_failure', true);
   const responseMetadata = metadata(response, body);
   if (!response.ok) throw failureForStatus(response.status, responseMetadata, Boolean(idempotencyKey));
   if (!body || typeof body !== 'object') throw new MondayClientError('monday_temporary_failure', true, responseMetadata);

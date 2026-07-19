@@ -62,11 +62,20 @@ describe('production release workflows', () => {
     expect(envExample).toContain('TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for');
     expect(readme).toContain('ALLOWED_ORIGINS=https://balancestudio.tv,https://www.balancestudio.tv,https://balance-assist.vercel.app');
     expect(readme).toContain('TRUSTED_CLIENT_IP_HEADER=x-vercel-forwarded-for');
-    const vercelAudit = jobs.gates?.steps?.find((step) => step.name === 'Verify Vercel dashboard release control');
+    const vercelAudit = jobs.gates?.steps?.find((step) => step.name === 'Verify Vercel auto-deploy-disabled prerequisite');
     expect(vercelAudit?.env?.VERCEL_GIT_DEPLOYMENTS_DISABLED_AT).toBe('${{ vars.VERCEL_GIT_DEPLOYMENTS_DISABLED_AT }}');
+    expect(vercelAudit?.env?.VERCEL_TOKEN).toBe('${{ secrets.VERCEL_TOKEN }}');
+    expect(vercelAudit?.env?.VERCEL_ORG_ID).toBe('${{ secrets.VERCEL_ORG_ID }}');
+    expect(vercelAudit?.env?.VERCEL_PROJECT_ID).toBe('${{ secrets.VERCEL_PROJECT_ID }}');
     expect(vercelAudit?.run).toContain('test -n "$VERCEL_GIT_DEPLOYMENTS_DISABLED_AT"');
     expect(vercelAudit?.run).toContain('^[0-9]{4}-[0-9]{2}-[0-9]{2}T');
     expect(vercelAudit?.run).toContain('90 * 24 * 60 * 60');
+    expect(vercelAudit?.run).toContain('/v9/projects/${process.env.VERCEL_PROJECT_ID}');
+    expect(vercelAudit?.run).toContain('project.id !== process.env.VERCEL_PROJECT_ID');
+    expect(vercelAudit?.run).toContain("project.link?.type?.startsWith('github')");
+    expect(vercelAudit?.run).toContain('config.git?.deploymentEnabled?.main !== false');
+    expect(sessionConfig?.run).toContain('TELEGRAM_ALLOWED_USER_IDS');
+    expect(sessionConfig?.run).toContain("/^[1-9]\\d*$/");
     const schemaReadiness = jobs.gates?.steps?.find((step) => step.name === 'Verify production trust schema readiness');
     expect(schemaReadiness?.env?.SUPABASE_URL).toBe('${{ secrets.SUPABASE_URL }}');
     expect(schemaReadiness?.env?.SUPABASE_SERVICE_ROLE_KEY).toBe('${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}');
@@ -98,7 +107,7 @@ describe('production release workflows', () => {
     expect(promoteCheckout?.env?.RELEASE_SHA).toBe('${{ needs.validate.outputs.sha }}');
     const promoteSetupNode = jobs.promote?.steps?.find((step) => step.uses?.startsWith('actions/setup-node@'));
     expect(promoteSetupNode?.uses).toBe('actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020');
-    expect(promoteSetupNode?.with).toMatchObject({ 'node-version': 20, cache: 'npm' });
+    expect(promoteSetupNode?.with).toMatchObject({ 'node-version-file': '.node-version', cache: 'npm' });
     expect(jobs.promote?.steps?.some((step) => step.run === 'npm ci')).toBe(true);
     for (const [name, job] of Object.entries(jobs)) {
       const hasCredentials = JSON.stringify(job).includes('secrets.') || job.environment !== undefined;
@@ -121,8 +130,24 @@ describe('production release workflows', () => {
     expect(validate?.run).toContain('Reviewer-GitHub');
     expect(validate?.run).toContain('sort -u "$reviewer_list"');
     expect(validate?.run).toContain('/comments?per_page=100');
-    expect(validate?.run).toContain("trustedAssociations.has(comment.author_association)");
-    expect(validate?.run).toContain("new Set(['OWNER'])");
+    expect(validate?.env?.TRUSTED_REVIEWERS).toBe('${{ vars.RELEASE_TRUSTED_REVIEWERS }}');
+    expect(validate?.env?.MIN_REVIEWERS).toBe('${{ vars.RELEASE_MIN_REVIEWERS }}');
+    expect(validate?.run).toContain('[[ "$MIN_REVIEWERS" =~ ^[1-5]$ ]]');
+    expect(validate?.run).toContain('test -n "$TRUSTED_REVIEWERS"');
+    expect(validate?.run).toContain('unique.size !== entries.length || unique.size < minimum');
+    expect(validate?.run).toContain('trustedReviewers.has(reviewer.toLowerCase())');
+    for (const [role, variable] of [
+      ['product-ux', 'PRODUCT_REVIEW_REF'],
+      ['engineering', 'ENGINEERING_REVIEW_REF'],
+      ['accessibility', 'ACCESSIBILITY_REVIEW_REF'],
+      ['conversation', 'CONVERSATION_REVIEW_REF'],
+      ['trust-privacy', 'PRIVACY_REVIEW_REF'],
+    ]) {
+      expect(validate?.run).toContain(`validate_review ${role} "$${variable}"`);
+    }
+    expect(validate?.run).toContain('test "$(sort -u "$reviewer_list" | wc -l)" -ge "$MIN_REVIEWERS"');
+    expect(validate?.run).not.toContain('test "$(sort -u "$reviewer_list" | wc -l)" = "5"');
+    expect(source).not.toContain('trustedReviewers.size < 5');
     expect(validate?.run).toContain('^[0-9a-f]{40}$');
     expect(validate?.run).toContain('git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main');
     expect(validate?.run).toContain('git merge-base --is-ancestor "$RELEASE_REF" origin/main');
@@ -131,7 +156,10 @@ describe('production release workflows', () => {
     expect(source).not.toContain('"${{ inputs.ref }}"');
     for (const job of Object.values(jobs).filter((job) => job.needs)) {
       const checkout = job.steps?.find((step) => step.name === 'Checkout validated release commit');
-      if (checkout) expect(checkout.env?.RELEASE_SHA).toBe('${{ needs.validate.outputs.sha }}');
+      if (checkout) {
+        expect(checkout.env?.RELEASE_SHA).toBe('${{ needs.validate.outputs.sha }}');
+        expect(checkout.with?.['persist-credentials']).toBe(false);
+      }
     }
     expect(jobs.deploy?.steps?.find((step) => step.name === 'Deploy immutable Vercel preview')?.run).toContain('vercel deploy --prebuilt');
     expect(jobs.deploy?.steps?.find((step) => step.name === 'Deploy immutable Vercel preview')?.run).toContain('--meta githubCommitSha="$GITHUB_SHA"');
@@ -189,6 +217,12 @@ describe('production release workflows', () => {
     expect(migrate?.env?.PRODUCTION_DATABASE_URL).toBe('${{ secrets.PRODUCTION_DATABASE_URL }}');
     expect(migrate?.run).toContain('test -n "$PRODUCTION_DATABASE_URL"');
     expect(migrate?.run).toContain('node scripts/apply-production-migrations.mjs');
+    expect(migrate?.run).toContain('node scripts/apply-production-api-security-061.mjs --dry-run');
+    expect(migrate?.run).toContain("version = '061'");
+    expect(migrate?.run).toContain('supabase/production-api-security-061.sql');
+    expect(migrate?.run).toContain("'public.reserve_session_upload_quota(uuid,bigint,bigint)'::regprocedure");
+    expect(migrate?.run).toContain("reservations.relrowsecurity !== true");
+    expect(migrate?.run).toContain('fn.service_role_execute !== true');
     expect(migrate?.run).toContain('expand-only');
     expect(migrate?.run).toContain("t.tgname = 'events_require_active_session'");
     expect(migrate?.run).toContain("row.tgenabled !== 'O'");
@@ -203,6 +237,8 @@ describe('production release workflows', () => {
     expect(cutover?.run).toContain("fn.owner !== 'postgres'");
     expect(cutover?.run).toContain('vercel alias set "$PREVIOUS_DEPLOYMENT_URL" "$PRODUCTION_URL"');
     expect(migrate?.run).not.toContain('secrets.');
+    expect(source.indexOf('Verify Vercel auto-deploy-disabled prerequisite')).toBeLessThan(source.indexOf('node scripts/apply-production-api-security-061.mjs --dry-run'));
+    expect(source.indexOf('node scripts/apply-production-api-security-061.mjs --dry-run')).toBeLessThan(source.indexOf('name: Verify approved deployment proof record'));
     expect(source).not.toContain('deletion.jobId');
     expect(source).toContain('npm audit --omit=dev --audit-level=high');
     for (const [, action] of source.matchAll(/^\s*uses:\s+([^\s]+)$/gm)) {

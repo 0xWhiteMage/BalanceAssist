@@ -7,17 +7,20 @@ const {
   classifyConfidentialFilenameMock,
   classifyConfidentialIntentMock,
   requireSessionMock,
-  storePrivateUploadMock
+  storePrivateUploadMock,
+  consumeRateLimitMock
 } = vi.hoisted(() => ({
   actualClassifier: { current: undefined as undefined | ((filename: string) => string) },
   actualIntentClassifier: { current: undefined as undefined | ((value: string) => string) },
   classifyConfidentialFilenameMock: vi.fn(),
   classifyConfidentialIntentMock: vi.fn(),
   requireSessionMock: vi.fn(),
-  storePrivateUploadMock: vi.fn()
+  storePrivateUploadMock: vi.fn(),
+  consumeRateLimitMock: vi.fn()
 }));
 
 vi.mock('@/lib/api/require-session', () => ({ requireSession: requireSessionMock }));
+vi.mock('@/lib/security/rate-limit', () => ({ consumeRateLimit: consumeRateLimitMock }));
 vi.mock('@/lib/uploads/private-storage', () => ({
   storePrivateUpload: storePrivateUploadMock,
   deletePrivateUpload: vi.fn(),
@@ -56,11 +59,18 @@ describe('POST /api/telegram/upload analysis-only contract', () => {
     classifyConfidentialIntentMock.mockReset();
     classifyConfidentialIntentMock.mockImplementation((value: string) => actualIntentClassifier.current!(value));
     requireSessionMock.mockClear();
+    consumeRateLimitMock.mockReset();
+    consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
     storePrivateUploadMock.mockClear();
     requireSessionMock.mockResolvedValue({
       ok: true,
       auth: { sessionId: '11111111-2222-3333-4444-555555555555', capability: 'capability' },
-      supabase: { from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true, notice_version: '1.2' }], error: null })) })) })) })) }
+      supabase: {
+        rpc: vi.fn(async (name: string) => name === 'reserve_session_upload_quota'
+          ? { data: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', error: null }
+          : { data: true, error: null }),
+        from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(async () => ({ data: [{ scope: 'analysis', granted: true, notice_version: '1.2' }], error: null })) })) })) }))
+      }
     });
     storePrivateUploadMock.mockResolvedValue({ status: 'stored', objectKey: 'opaque', mimeType: 'text/plain', extractedText: 'Draft-only analysis' });
   });

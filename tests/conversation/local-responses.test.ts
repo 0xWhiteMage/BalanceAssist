@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { getFallbackResponse, getLocalResponse } from '@/lib/conversation/local-responses';
+import { getFallbackResponse, getLocalResponse, inferCompanyCandidate } from '@/lib/conversation/local-responses';
 import { createDefaultLeadDraft } from '@/lib/onboarding/default-state';
 
 afterEach(() => {
@@ -77,6 +77,12 @@ test('fallback replies never contain the killed "Happy to help" phrase', () => {
     expect(sample).not.toMatch(/Happy to help/i);
     expect(sample).not.toMatch(/What's the part/i);
   }
+});
+
+test('infers company candidates only from grounded business details', () => {
+  expect(inferCompanyCandidate({ contactEmail: 'sam@north-star.com' })).toBe('North Star');
+  expect(inferCompanyCandidate({ contactEmail: 'sam@gmail.com' })).toBeNull();
+  expect(inferCompanyCandidate({ projectScope: 'A campaign for Acme Studios' })).toBe('Acme Studios');
 });
 
 test('getFallbackResponse returns one of the three brief-flow-aware prompts', () => {

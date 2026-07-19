@@ -98,6 +98,7 @@ describe('privileged routes fail closed when secrets are unset', () => {
     });
     const response = await GET(request);
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
   });
 
   test('POST /api/internal/handoff-dispatch returns 503 when INTERNAL_DISPATCH_SECRET is unset', async () => {

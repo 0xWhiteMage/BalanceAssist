@@ -77,7 +77,9 @@ describe('production consent 1.2 cutover migration 060 policy', () => {
     expect(workflow).toContain("run.path === '.github/workflows/ci.yml'");
     expect(workflow).toContain("deployment.readyState !== 'READY'");
     expect(workflow).toContain('sha !== process.env.RELEASE_SHA');
-    expect(workflow).toContain("project.gitProviderOptions?.createDeployments !== 'disabled'");
+    expect(workflow).toContain('project.id !== process.env.VERCEL_PROJECT_ID');
+    expect(workflow).toContain("project.link?.type?.startsWith('github')");
+    expect(workflow).toContain('config.git?.deploymentEnabled?.main !== false');
     expect(workflow).toContain('git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main');
     expect(workflow).toContain('node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run');
     expect(workflow).toContain('SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}');

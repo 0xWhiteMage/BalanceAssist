@@ -16,17 +16,39 @@ import {
 } from '@/lib/privacy/confidential-intent';
 
 export type ReferenceLink = { id?: string; sessionId?: string; kind: 'youtube' | 'vimeo' | 'figma' | 'loom' | 'gdrive' | 'other'; url: string };
-export type ReferenceFile = { name: string; sizeBytes: number; mime: string; telegramFileId: string };
 type ReferenceMutationOutcome = { status: 'saved' } | { status: 'failed'; message: string };
 
-type FileStatus = 'queued' | 'validating' | 'stored' | 'stored-no-text' | 'analysis-failed' | 'failed' | 'retryable';
+type FileStatus = 'queued' | 'validating' | 'stored' | 'stored-no-text' | 'unsupported' | 'analysis-failed' | 'failed' | 'retryable';
 
 type QueuedFile = {
+  id: string;
   file: File;
   status: FileStatus;
   error?: string;
   extractedText?: string;
 };
+
+const STORAGE_AVAILABILITY_TTL_MS = 30_000;
+const storageAvailabilityCache = new Map<string, { available: boolean; expiresAt: number }>();
+const storageAvailabilityProbes = new Map<string, Promise<boolean>>();
+
+function probePrivateStorage(sessionId: string): Promise<boolean> {
+  const cached = storageAvailabilityCache.get(sessionId);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.available);
+  if (cached) storageAvailabilityCache.delete(sessionId);
+  const pending = storageAvailabilityProbes.get(sessionId);
+  if (pending) return pending;
+  const probe = fetch('/api/telegram/upload', { credentials: 'include' })
+    .then(async (response) => response.ok && (await response.json()).available === true)
+    .catch(() => false)
+    .then((available) => {
+      storageAvailabilityCache.set(sessionId, { available, expiresAt: Date.now() + STORAGE_AVAILABILITY_TTL_MS });
+      return available;
+    })
+    .finally(() => storageAvailabilityProbes.delete(sessionId));
+  storageAvailabilityProbes.set(sessionId, probe);
+  return probe;
+}
 
 async function readFileBuffer(file: File): Promise<ArrayBuffer> {
   if (typeof file.arrayBuffer === 'function') {
@@ -78,39 +100,53 @@ function uploadErrorDetails(code: unknown, status: number): { message: string; r
 
 export function AttachmentDropzone({
   onAddLink,
-  onAddFile,
   onFileAnalyzed,
   sessionId,
   consent,
-  messageContext = ''
+  messageContext = '',
+  referenceLinks = []
 }: {
   onAddLink: (url: string) => Promise<ReferenceMutationOutcome>;
-  onAddFile: (file: ReferenceFile) => void;
   onFileAnalyzed?: (fileName: string, extractedText: string) => Promise<void> | void;
   sessionId?: string | null;
   consent?: AttachmentConsent | null;
   messageContext?: string;
+  referenceLinks?: ReadonlyArray<ReferenceLink>;
 }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [privateStorageAvailable, setPrivateStorageAvailable] = useState(false);
+  const [uploadInProgress, setUploadInProgress] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeSessionRef = useRef(sessionId);
+  const uploadGenerationRef = useRef(0);
 
   useEffect(() => {
+    if (activeSessionRef.current === sessionId) return;
+    activeSessionRef.current = sessionId;
+    uploadGenerationRef.current += 1;
+    setQueuedFiles([]);
+    setError(null);
+    setUploadInProgress(false);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setPrivateStorageAvailable(false);
+      return;
+    }
     let active = true;
-    void fetch('/api/telegram/upload', { credentials: 'include' })
-      .then(async (response) => response.ok && (await response.json()).available === true)
+    void probePrivateStorage(sessionId)
       .then((available) => { if (active) setPrivateStorageAvailable(available); })
-      .catch(() => { if (active) setPrivateStorageAvailable(false); });
     return () => { active = false; };
-  }, []);
+  }, [sessionId]);
 
   const effectiveConsent = consent ?? null;
   const acceptedFormats = `${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.slice(0, -1).join(', ')}, and ${PRIVATE_ANALYSIS_UPLOAD_POLICY.acceptedFormats.at(-1)}`;
   const maxFileSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFileSizeBytes / (1024 * 1024);
   const maxTotalSizeMb = PRIVATE_ANALYSIS_UPLOAD_POLICY.maxTotalSizeBytes / (1024 * 1024);
-  const filesEnabled = privateStorageAvailable && Boolean(sessionId);
+  const filesEnabled = privateStorageAvailable && Boolean(sessionId) && !uploadInProgress;
 
   function shouldDivertMessage(value: string): boolean {
     try {
@@ -141,9 +177,9 @@ export function AttachmentDropzone({
     fileInputRef.current?.click();
   }
 
-  function updateFileStatus(fileName: string, status: FileStatus, error?: string) {
+  function updateFileStatus(id: string, status: FileStatus, error?: string) {
     setQueuedFiles((prev) =>
-      prev.map((qf) => (qf.file.name === fileName ? { ...qf, status, error } : qf))
+      prev.map((qf) => (qf.id === id ? { ...qf, status, error } : qf))
     );
   }
 
@@ -185,49 +221,75 @@ export function AttachmentDropzone({
     }
   }
 
-  async function uploadFiles(fileArray: File[]) {
-    if (!sessionId) return;
+  async function uploadFiles(queued: QueuedFile[], uploadSessionId: string, generation: number) {
+    const isCurrent = () => generation === uploadGenerationRef.current && activeSessionRef.current === uploadSessionId;
+    setUploadInProgress(true);
     try {
       const fd = new FormData();
       fd.set('mode', 'analysis');
-      for (const file of fileArray) {
-        updateFileStatus(file.name, 'validating');
-        fd.append('files', file, file.name);
+      for (const item of queued) {
+        updateFileStatus(item.id, 'validating');
+        fd.append('files', item.file, item.file.name);
       }
       const res = await fetch('/api/telegram/upload', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'x-upload-mode': 'analysis', 'x-session-id': sessionId },
+        headers: { 'x-upload-mode': 'analysis', 'x-session-id': uploadSessionId },
         body: fd
       });
+      if (!isCurrent()) return;
       if (!res.ok) {
         const body = await res.json().catch(() => null) as { code?: unknown } | null;
         const details = uploadErrorDetails(body?.code, res.status);
         setError(details.message);
-        for (const file of fileArray) updateFileStatus(file.name, details.retryable ? 'retryable' : 'failed', details.message);
+        for (const item of queued) updateFileStatus(item.id, details.retryable ? 'retryable' : 'failed', details.message);
         return;
       }
-      const body = await res.json() as { analyses?: Array<{ extractedText?: unknown }> };
+      const body = await res.json() as { analyses?: Array<{ extractedText?: unknown; extractionStatus?: unknown }> };
+      if (!isCurrent()) return;
       setError(null);
-      for (const [index, file] of fileArray.entries()) {
-        const extractedText = body.analyses?.[index]?.extractedText;
-        if (typeof extractedText !== 'string' || !extractedText.trim()) {
-          updateFileStatus(file.name, 'stored-no-text');
+      if (!Array.isArray(body.analyses) || body.analyses.length !== queued.length) {
+        const analysisError = 'Stored privately, but the analysis result could not be confirmed.';
+        for (const item of queued) updateFileStatus(item.id, 'analysis-failed', analysisError);
+        setError(analysisError);
+        return;
+      }
+      for (const [index, item] of queued.entries()) {
+        const file = item.file;
+        const analysis = body.analyses[index];
+        const extractedText = analysis.extractedText;
+        if (analysis.extractionStatus === 'unsupported') {
+          updateFileStatus(item.id, 'unsupported');
+          continue;
+        }
+        if (analysis.extractionStatus === 'no_text' && extractedText === '') {
+          updateFileStatus(item.id, 'stored-no-text');
+          continue;
+        }
+        if (analysis.extractionStatus !== 'extracted' || typeof extractedText !== 'string' || !extractedText.trim()) {
+          const analysisError = 'Stored privately, but text extraction failed.';
+          updateFileStatus(item.id, 'analysis-failed', analysisError);
+          setError(analysisError);
           continue;
         }
         try {
+          if (!isCurrent()) return;
           await onFileAnalyzed?.(file.name, extractedText);
-          updateFileStatus(file.name, 'stored');
+          if (!isCurrent()) return;
+          updateFileStatus(item.id, 'stored');
         } catch {
           const analysisError = 'Stored privately, but its text could not be added to the AI draft.';
-          updateFileStatus(file.name, 'analysis-failed', analysisError);
+          updateFileStatus(item.id, 'analysis-failed', analysisError);
           setError(analysisError);
         }
       }
     } catch {
-      const uploadError = 'The upload service could not be reached. Check your connection and try again.';
+      if (!isCurrent()) return;
+      const uploadError = 'The upload result could not be confirmed. Check your connection, then select the file again.';
       setError(uploadError);
-      for (const file of fileArray) updateFileStatus(file.name, 'retryable', uploadError);
+      for (const item of queued) updateFileStatus(item.id, 'failed', uploadError);
+    } finally {
+      if (isCurrent()) setUploadInProgress(false);
     }
   }
 
@@ -242,6 +304,10 @@ export function AttachmentDropzone({
         setError('Your secure session is still starting. Please wait before selecting a file.');
         return;
       }
+      const uploadSessionId = sessionId;
+      const generation = uploadGenerationRef.current + 1;
+      uploadGenerationRef.current = generation;
+      const isCurrent = () => generation === uploadGenerationRef.current && activeSessionRef.current === uploadSessionId;
       if (fileArray.some((file) => shouldDivertFilename(file.name))) {
         setError(CONFIDENTIAL_INTAKE_RESPONSE);
         return;
@@ -256,9 +322,10 @@ export function AttachmentDropzone({
         setError('Consent details are missing. Please re-confirm your upload permissions.');
         return;
       }
-      if (!await persistConsent('analysis')) return;
+      if (!await persistConsent('analysis') || !isCurrent()) return;
 
       const buffers = await Promise.all(fileArray.map((f) => readFileBuffer(f)));
+      if (!isCurrent()) return;
       const batchResult = validateFileBatch(fileArray.map((file, i) => ({ file, buffer: buffers[i] })));
       if (!batchResult.ok) {
         setError(batchResult.reason ?? 'Files failed validation.');
@@ -272,15 +339,17 @@ export function AttachmentDropzone({
         }
       }
 
-      const newQueued: QueuedFile[] = fileArray.map((file) => ({ file, status: 'queued' as FileStatus }));
+      const newQueued: QueuedFile[] = fileArray.map((file) => ({ id: crypto.randomUUID(), file, status: 'queued' as FileStatus }));
       setQueuedFiles(newQueued);
       setError(null);
 
-      await uploadFiles(fileArray);
+      await uploadFiles(newQueued, uploadSessionId, generation);
     } catch {
       const processingError = 'The file could not be processed. Please retry.';
       setError(processingError);
-      for (const file of selectedFiles) updateFileStatus(file.name, 'retryable', processingError);
+      setQueuedFiles((current) => current.map((item) => selectedFiles.includes(item.file)
+        ? { ...item, status: 'retryable', error: processingError }
+        : item));
     } finally {
       input.value = '';
     }
@@ -289,7 +358,8 @@ export function AttachmentDropzone({
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       <div style={{ display: 'grid', gap: 3 }}>
-        <div
+        <h2
+          id="attachment-dialog-title"
           style={{
             fontSize: 10,
             fontWeight: 600,
@@ -298,8 +368,8 @@ export function AttachmentDropzone({
             letterSpacing: '0.16em'
           }}
         >
-          Add project files
-        </div>
+          Add project references
+        </h2>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
           {!sessionId
             ? 'File sharing will be ready when your secure session starts. You can add a reference link now.'
@@ -308,6 +378,15 @@ export function AttachmentDropzone({
               : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
       </div>
+
+      {referenceLinks.length > 0 && (
+        <section aria-labelledby="saved-references-title" className="balance-attachment-saved-links">
+          <h3 id="saved-references-title">Saved references</h3>
+          {referenceLinks.map((link) => (
+            <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
+          ))}
+        </section>
+      )}
 
       <form onSubmit={handleUrlSubmit} className="balance-widget-reference-form">
         <label htmlFor="attachment-reference-url" style={{ width: '100%', fontSize: 11, color: brandTokens.colors.lightText }}>
@@ -341,9 +420,9 @@ export function AttachmentDropzone({
           Use non-confidential files only. Accepted: {acceptedFormats}; up to{' '}
           {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxFiles} files, {maxFileSizeMb} MB each, and{' '}
           {maxTotalSizeMb} MB total. Files are validated and stored privately for the temporary
-          retention period. TXT and PDF may yield up to{' '}
+          retention period. TXT, CSV, and text-based PDF files may yield up to{' '}
           {PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters.toLocaleString('en-US')} characters
-          of server-extracted text; accepted images and CSV may yield no extracted text. Any extracted
+          of server-extracted text. Image text analysis is not supported, and scanned PDFs need a text layer. Any extracted
           text used in AI mode is processed by an AI processing service. Files with no readable text remain
           stored privately but cannot inform the AI draft. Consent, filename checks, private storage, and
           extraction do not prove a file is non-confidential. Files and extracted text are never sent to
@@ -402,10 +481,10 @@ export function AttachmentDropzone({
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
       />
 
-      {queuedFiles.at(-1) && (
+      {queuedFiles.length > 0 && (
         <div role="status" aria-live="polite" style={{ display: 'grid', gap: 4, fontSize: 11, color: brandTokens.colors.mutedText }}>
-          {[queuedFiles.at(-1)!].map((qf) => (
-            <div key={qf.file.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {queuedFiles.map((qf) => (
+            <div key={qf.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: qf.status === 'failed' || qf.status === 'retryable' ? 'tomato' : brandTokens.colors.lightText }}>
                 {qf.file.name}
               </span>
@@ -413,13 +492,19 @@ export function AttachmentDropzone({
                 {qf.status === 'queued' && 'Queued'}
                 {qf.status === 'validating' && 'Validating...'}
                 {qf.status === 'stored' && 'Stored privately'}
-                {qf.status === 'stored-no-text' && 'Stored privately; no readable text was found for AI analysis'}
+                {qf.status === 'stored-no-text' && 'Stored privately; no readable text layer was found'}
+                {qf.status === 'unsupported' && 'Stored privately; image text analysis is not supported'}
                 {qf.status === 'analysis-failed' && qf.error}
                 {qf.status === 'failed' && `Failed: ${qf.error}`}
                 {qf.status === 'retryable' && qf.error}
               </span>
               {qf.status === 'retryable' && (
-                <button type="button" className="balance-widget-inline-action" onClick={() => void uploadFiles([qf.file])}>
+                <button type="button" className="balance-widget-inline-action" onClick={() => {
+                  if (!sessionId) return;
+                  const generation = uploadGenerationRef.current + 1;
+                  uploadGenerationRef.current = generation;
+                  void uploadFiles([qf], sessionId, generation);
+                }}>
                   Retry upload
                 </button>
               )}

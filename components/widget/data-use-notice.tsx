@@ -1,6 +1,5 @@
 'use client';
 
-import { brandTokens } from '@/lib/brand-tokens';
 import { DATA_USE_NOTICE_COPY, CONSENT_VERSION, type ConsentRecord } from '@/lib/privacy/notice';
 
 export function DataUseNotice({
@@ -20,77 +19,42 @@ export function DataUseNotice({
   }
 
   return (
-    <div
-      data-testid="data-use-notice"
-      style={{
-        padding: '16px',
-        borderBottom: `1px solid ${brandTokens.colors.subtleBorder}`
-      }}
-    >
-      <h3
-        style={{
-          margin: '0 0 8px',
-          fontSize: '14px',
-          fontWeight: 600,
-          color: brandTokens.colors.lightText,
-          fontFamily: brandTokens.typography.ui
-        }}
-      >
+    <div data-testid="data-use-notice" className="balance-consent-card">
+      <div className="balance-consent-kicker">Balance Assist</div>
+      <h3 className="balance-consent-title">
         {DATA_USE_NOTICE_COPY.title}
       </h3>
-      <p
-        style={{
-          margin: '0 0 12px',
-          fontSize: '12px',
-          lineHeight: '1.5',
-          color: brandTokens.colors.mutedText,
-          fontFamily: brandTokens.typography.ui
-        }}
-      >
+      <p className="balance-consent-summary">
         {DATA_USE_NOTICE_COPY.summary}
       </p>
-      <details style={{ marginBottom: 12, color: brandTokens.colors.mutedText, fontSize: 11, lineHeight: 1.5 }}>
-        <summary style={{ minHeight: 32, padding: '7px 0', cursor: 'pointer', color: brandTokens.colors.lightText }}>
+      <div className="balance-consent-actions">
+        <button type="button" className="balance-entry-action balance-entry-action--primary" aria-label="Build a brief with AI" onClick={handleAcknowledge}>
+          <span className="balance-entry-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3l1.35 4.1L17.5 8.5l-4.15 1.4L12 14l-1.35-4.1L6.5 8.5l4.15-1.4L12 3zM18.5 14l.75 2.25L21.5 17l-2.25.75L18.5 20l-.75-2.25L15.5 17l2.25-.75L18.5 14z" /></svg>
+          </span>
+          <span className="balance-entry-copy"><strong>Build a brief with AI</strong><small>Create a non-confidential project brief</small></span>
+          <span className="balance-entry-arrow" aria-hidden="true">&rarr;</span>
+        </button>
+        <button type="button" className="balance-entry-action" aria-label="Talk to the team without AI" onClick={onHuman}>
+          <span className="balance-entry-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" /></svg>
+          </span>
+          <span className="balance-entry-copy"><strong>Talk to the team without AI</strong><small>Send a message directly to Balance</small></span>
+          <span className="balance-entry-arrow" aria-hidden="true">&rarr;</span>
+        </button>
+        <button type="button" className="balance-entry-action balance-entry-action--tertiary" onClick={onLeave}>Leave</button>
+      </div>
+      <details className="balance-consent-details">
+        <summary>
           How your data is handled
         </summary>
-        <p style={{ margin: '4px 0 0' }}>{DATA_USE_NOTICE_COPY.body}</p>
+        <p>{DATA_USE_NOTICE_COPY.body}</p>
       </details>
-      <a
-        href={DATA_USE_NOTICE_COPY.privacyLink}
-        style={{
-          display: 'inline-block',
-          marginBottom: '12px',
-          fontSize: '12px',
-          color: brandTokens.colors.warmGold,
-          fontFamily: brandTokens.typography.ui,
-          textDecoration: 'underline',
-          textUnderlineOffset: '2px'
-        }}
-      >
-        {DATA_USE_NOTICE_COPY.privacyLinkLabel}
-      </a>
-      <p style={{ margin: '0 0 10px', fontSize: 11, lineHeight: 1.5, color: brandTokens.colors.mutedText }}>
-        Choosing AI accepts this use for the temporary brief. You will review it before anything is sent to Balance.
-      </p>
-      <div style={{ display: 'grid', gap: 8 }}>
-        <button type="button" className="balance-entry-action balance-entry-action--primary" onClick={handleAcknowledge} style={entryActionStyle}>Build a brief with AI</button>
-        <button type="button" className="balance-entry-action" onClick={onHuman} style={entryActionStyle}>Talk to the team without AI</button>
-        <button type="button" className="balance-entry-action balance-entry-action--tertiary" onClick={onLeave} style={entryActionStyle}>Leave</button>
-      </div>
+      <details className="balance-consent-details">
+        <summary>Privacy policy</summary>
+        <p>{DATA_USE_NOTICE_COPY.privacy}</p>
+        <a href={DATA_USE_NOTICE_COPY.privacyLink}>Read the full privacy policy</a>
+      </details>
     </div>
   );
 }
-
-const entryActionStyle = {
-  width: '100%',
-  minHeight: '44px',
-  padding: '10px 16px',
-  borderRadius: '20px',
-  border: `1px solid ${brandTokens.colors.warmGold}`,
-  background: 'transparent',
-  color: brandTokens.colors.lightText,
-  fontSize: '12px',
-  fontWeight: 600,
-  fontFamily: brandTokens.typography.ui,
-  cursor: 'pointer'
-};

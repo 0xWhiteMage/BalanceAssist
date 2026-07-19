@@ -72,6 +72,28 @@ describe('security/origin', () => {
       expect(origins).toContain('https://other.com');
       expect(origins).toContain('https://balancestudio.tv');
     });
+
+    it('includes only exact Vercel-provided hostnames in preview deployments', () => {
+      process.env.VERCEL_ENV = 'preview';
+      process.env.VERCEL_URL = 'balance-assist-abc123-team.vercel.app';
+      process.env.VERCEL_BRANCH_URL = 'balance-assist-git-feature-team.vercel.app';
+      const origins = getAllowedOrigins();
+      expect(origins).toContain('https://balance-assist-abc123-team.vercel.app');
+      expect(origins).toContain('https://balance-assist-git-feature-team.vercel.app');
+      expect(origins).not.toContain('https://other-project.vercel.app');
+    });
+
+    it('ignores malformed preview hostnames and preview values in production', () => {
+      process.env.VERCEL_ENV = 'preview';
+      process.env.VERCEL_URL = 'evil.com/path.vercel.app';
+      process.env.VERCEL_BRANCH_URL = 'other-project.example.com';
+      expect(getAllowedOrigins()).not.toContain('https://evil.com/path.vercel.app');
+      expect(getAllowedOrigins()).not.toContain('https://other-project.example.com');
+
+      process.env.VERCEL_ENV = 'production';
+      process.env.VERCEL_URL = 'balance-assist-preview-team.vercel.app';
+      expect(getAllowedOrigins()).not.toContain('https://balance-assist-preview-team.vercel.app');
+    });
   });
 
   describe('isAllowedOrigin', () => {

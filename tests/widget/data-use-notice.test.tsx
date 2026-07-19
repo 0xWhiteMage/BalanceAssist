@@ -6,15 +6,6 @@ import { brandTokens } from '@/lib/brand-tokens';
 import { DATA_USE_NOTICE_COPY, CONSENT_VERSION } from '@/lib/privacy/notice';
 
 describe('DataUseNotice', () => {
-  const entryActionContract = {
-    width: '100%',
-    minHeight: '44px',
-    padding: '10px 16px',
-    borderRadius: '20px',
-    background: 'transparent',
-    fontWeight: '600'
-  };
-
   function contrastRatio(foreground: string, background: string) {
     function luminance(hex: string) {
       const channels = hex.match(/[a-f\d]{2}/gi)?.map((value) => Number.parseInt(value, 16) / 255) ?? [];
@@ -46,15 +37,11 @@ describe('DataUseNotice', () => {
       expect(action).toBeEnabled();
       expect(action.tagName).toBe('BUTTON');
       expect(action).toHaveAttribute('type', 'button');
-      expect(action.style).toMatchObject(entryActionContract);
-      expect(action).toHaveStyle({
-        borderColor: brandTokens.colors.warmGold,
-        borderStyle: 'solid',
-        borderWidth: '1px'
-      });
     }
 
     expect(actions.every((action) => action.classList.contains('balance-entry-action'))).toBe(true);
+    expect(actions[0]).toHaveClass('balance-entry-action--primary');
+    expect(actions[2]).toHaveClass('balance-entry-action--tertiary');
   }
 
   test('keeps the shared boundary above 3:1 against every panel gradient endpoint', () => {
@@ -84,7 +71,7 @@ describe('DataUseNotice', () => {
     renderNotice({ onConsent });
 
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI processing service/i);
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/nothing is sent to Balance until you separately review and approve the brief/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI draft stays separate from the Balance team until you separately review and approve the brief/i);
     expect(onConsent).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Build a brief with AI' }));
     expect(onConsent).toHaveBeenCalledOnce();
@@ -129,18 +116,19 @@ describe('DataUseNotice', () => {
     expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/backups/i);
   });
 
-  test('names Monday.com as a recipient of an approved project transfer', () => {
+  test('describes approved transfer services without exposing platform names', () => {
     renderNotice();
 
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/monday\.com/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/services Balance uses to respond and manage enquiries/i);
+    expect(screen.getByTestId('data-use-notice').textContent).not.toMatch(/Monday\.com|Telegram/i);
     expect(CONSENT_VERSION).toBe('1.2');
   });
 
   test('distinguishes AI session processing from team-contact relay delivery', () => {
     renderNotice();
 
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI processing service receives each message and relevant temporary draft or extracted file text/i);
-    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/team-contact mode.*message.*Balance team through Telegram/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/AI processing service receives each AI-mode message, relevant temporary brief context, and text extracted from supported files/i);
+    expect(screen.getByTestId('data-use-notice')).toHaveTextContent(/team-contact mode sends only the message you choose to share with the Balance team and does not use AI/i);
   });
 
   test('links to the privacy page for more detail', () => {
@@ -156,8 +144,8 @@ describe('DataUseNotice', () => {
   test('describes the AI processing service without a customer-visible vendor name and preserves the human-only route', () => {
     renderNotice();
     const notice = screen.getByTestId('data-use-notice');
-    expect(notice).toHaveTextContent(/AI processing service receives each message/i);
-    expect(notice).toHaveTextContent(/non-confidential, high-level project brief/i);
+    expect(notice).toHaveTextContent(/AI processing service receives each AI-mode message/i);
+    expect(notice).toHaveTextContent(/non-confidential, high-level project details/i);
     expect(screen.getByRole('button', { name: 'Talk to the team without AI' })).toBeInTheDocument();
     expect(notice.textContent).not.toMatch(/DeepSeek|MiniMax|OpenAI|fallback provider/i);
   });

@@ -113,7 +113,7 @@ describe('POST /api/chat', () => {
     global.fetch = originalFetch;
   });
 
-  function makeToolCallResponse(content: string, name: string, argumentsStr: string) {
+  function makeToolCallResponse(content: string | null, name: string, argumentsStr: string) {
     return {
       ok: true,
       status: 200,
@@ -269,10 +269,66 @@ describe('POST /api/chat', () => {
       canonicalDraft: { projectScope: 'A launch film that should Build awareness', projectObjective: 'Build awareness' },
       draftVersion: 4,
       currentStage: 'audience',
-      stageRecaps: ['So far: A launch film that should Build awareness; objective: Build awareness.'],
+      stageRecaps: ['Brief recap: A launch film that should Build awareness; objective: Build awareness.'],
       briefReady: false
     });
     expect(harness.sessionUpdates).toHaveLength(1);
+  });
+
+  test('persists a valid tool call with null content and supplies the canonical follow-up', async () => {
+    global.fetch = vi.fn(async () => makeToolCallResponse(null, 'record_brief_updates', JSON.stringify({
+      projectScope: 'A launch film'
+    }))) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { res, data } = await postChat({ messages: [{ role: 'user', content: 'A launch film' }] });
+
+    expect(res.status).toBe(200);
+    expect(data.draftUpdates.projectScope).toBe('A launch film');
+    expect(data.message).toBe('Thanks — I saved that. What should this project achieve?');
+  });
+
+  test('does not duplicate the canonical budget follow-up', async () => {
+    const savedAt = '2026-07-17T00:00:00.000Z';
+    const values = {
+      projectScope: 'Launch film', projectObjective: 'Build awareness', audience: 'Young adults',
+      intendedOutputs: 'Hero film', timelineBand: '1-2-months'
+    };
+    const draft = Object.fromEntries(Object.entries(values).map(([field, value]) => [field, {
+      value, provenance: 'confirmed', updatedAt: savedAt
+    }]));
+    const harness = createChatSupabase({ id: 'test-session', draft, draft_version: 5 });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse(
+      'Got it. What budget range are you working with?',
+      'record_brief_updates',
+      JSON.stringify(values)
+    )) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { data } = await postChat({ messages: [{ role: 'user', content: 'One to two months' }] });
+
+    expect(data.message.match(/What budget range are you working with\?/g)).toHaveLength(1);
+  });
+
+  test('confirms an inferred company from a business email only after affirmation', async () => {
+    const savedAt = '2026-07-17T00:00:00.000Z';
+    const draft = {
+      contactEmail: { value: 'sam@north-star.com', provenance: 'confirmed', updatedAt: savedAt }
+    };
+    const harness = createChatSupabase({ id: 'test-session', draft, draft_version: 1 });
+    requireSessionMock.mockResolvedValue({
+      ok: true, auth: { sessionId: 'test-session', capability: 'test-session.secret' }, supabase: harness.supabase
+    });
+    global.fetch = vi.fn(async () => makeToolCallResponse('Great.', 'record_brief_updates', '{}')) as unknown as typeof fetch;
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+
+    const { data } = await postChat({ messages: [{ role: 'user', content: 'yes' }] });
+
+    expect(data.draftUpdates.contactCompany).toBe('North Star');
+    expect(data.canonicalDraft.contactCompany).toBe('North Star');
   });
 
   test('roundtrips the complete 4,000-character first scope while bounding generated summary text', async () => {
@@ -328,7 +384,7 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(200);
     expect(data.stageRecaps).toEqual([
-      'So far: references: Skipped; contact email: hello@example.com.'
+      'Brief recap: references: Skipped; contact email: hello@example.com.'
     ]);
   });
 
@@ -1325,10 +1381,10 @@ describe('POST /api/chat', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(data.message).toBe('Got it.');
+    expect(data.message).toBe('Got it. What should this project achieve?');
     expect(data.draftUpdates.contactName).toBe('Tool');
     expect(data.briefReady).toBe(true);
-    expect(data.reviewPrompt).toBe('Your core brief is ready. Review it in the brief panel.');
+    expect(data.reviewPrompt).toBe('Your brief is ready to check before it is sent to Balance. Review the brief panel before sending.');
     expect(data.missingFields).toEqual([]);
   });
 
@@ -1375,7 +1431,7 @@ describe('POST /api/chat', () => {
     expect(data.reviewPrompt).toBeNull();
   });
 
-  test('ignores tool call that fails safeParse (bad contactEmail) (no toolArguments)', async () => {
+  test('drops a malformed tool field while preserving valid grounded fields', async () => {
     global.fetch = vi.fn(async () => makeToolCallResponse(
       'Trying something.',
       'record_brief_updates',
@@ -1396,12 +1452,16 @@ describe('POST /api/chat', () => {
     process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
     const { res, data } = await postChat({
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', content: '30s animation, Video production, timeline 1-2-months, budget 20k-50k' }],
       context: { step: 'intro', draft: '{}' }
     });
 
     expect(res.status).toBe(200);
-    expect(data.draftUpdates).toEqual({});
+    expect(data.draftUpdates).toMatchObject({
+      service: 'production', projectType: 'Video', projectScope: '30s animation, Video production, timeline 1-2-months, budget 20k-50k',
+      timelineBand: '1-2-months', budgetBand: '20k-50k'
+    });
+    expect(data.draftUpdates.contactEmail).toBeUndefined();
     expect(data.briefReady).toBe(false);
     expect(data.reviewPrompt).toBeNull();
   });

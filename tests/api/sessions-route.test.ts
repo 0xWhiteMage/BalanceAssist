@@ -2,11 +2,12 @@ import { NextRequest } from 'next/server';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { extractSessionIdFromCapability } from '@/lib/security/session-capability';
 
-const { hasSupabaseServerConfigMock, createServerSupabaseClientMock, consumeRateLimitMock, getClientIpMaterialMock } = vi.hoisted(() => ({
+const { hasSupabaseServerConfigMock, createServerSupabaseClientMock, consumeRateLimitMock, getClientIpMaterialMock, emitEventMock } = vi.hoisted(() => ({
   hasSupabaseServerConfigMock: vi.fn(),
   createServerSupabaseClientMock: vi.fn(),
   consumeRateLimitMock: vi.fn(),
-  getClientIpMaterialMock: vi.fn()
+  getClientIpMaterialMock: vi.fn(),
+  emitEventMock: vi.fn()
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/lib/security/rate-limit', () => ({
   consumeRateLimit: consumeRateLimitMock,
   getClientIpMaterial: getClientIpMaterialMock
 }));
+vi.mock('@/lib/observability/events', () => ({ emitEvent: emitEventMock }));
 
 import { POST } from '@/app/api/sessions/route';
 import { OPTIONS } from '@/app/api/sessions/route';
@@ -33,6 +35,7 @@ beforeEach(() => {
   consumeRateLimitMock.mockReset();
   consumeRateLimitMock.mockResolvedValue({ permitted: true, retryAfterSeconds: 0 });
   getClientIpMaterialMock.mockReset();
+  emitEventMock.mockReset();
   getClientIpMaterialMock.mockReturnValue('203.0.113.7');
   hasSupabaseServerConfigMock.mockReturnValue(true);
   createServerSupabaseClientMock.mockImplementation(() => ({
@@ -107,6 +110,7 @@ test('does not grant analysis consent for a human-only relay session', async () 
 
   expect(response.status).toBe(200);
   expect(rpc).not.toHaveBeenCalled();
+  expect(emitEventMock).not.toHaveBeenCalledWith('consent_granted', expect.anything(), expect.anything());
 });
 
 test('returns 429 and does not persist a session when the durable creation limiter rejects the client', async () => {

@@ -58,11 +58,17 @@ afterEach(() => {
 });
 
 describe('producer-requested human uploads', () => {
-  test('does not expose the producer upload control in AI mode', async () => {
+  test('keeps the requested-file input available when the team connection starts from AI mode', async () => {
     render(<WidgetOverlay autoOpen={true} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Build a brief with AI' }));
 
-    expect(screen.queryByRole('button', { name: 'Upload requested files' })).toBeNull();
+    const uploadButton = await screen.findByRole('button', { name: 'Upload files' });
+    const fileInput = screen.getByLabelText('Choose requested files');
+    const inputClick = vi.spyOn(fileInput, 'click');
+
+    fireEvent.click(uploadButton);
+
+    expect(inputClick).toHaveBeenCalledOnce();
   });
 
   test('shows a keyboard-reachable human-only control and uploads with explicit producer consent', async () => {
@@ -95,9 +101,9 @@ describe('producer-requested human uploads', () => {
     expect(screen.queryByRole('button', { name: 'Upload requested files' })).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'Talk to the team without AI' }));
 
-    const uploadButton = await screen.findByRole('button', { name: 'Upload requested files' });
+    const uploadButton = await screen.findByRole('button', { name: 'Upload files' });
     expect(uploadButton).toBeVisible();
-    expect(uploadButton).toHaveClass('balance-widget-action', 'balance-widget-icon-action');
+    expect(uploadButton).toHaveClass('balance-widget-action', 'balance-request-primary');
     uploadButton.focus();
     expect(uploadButton).toHaveFocus();
 
@@ -139,5 +145,36 @@ describe('producer-requested human uploads', () => {
 
     expect(await screen.findByText('Requested file upload failed.')).toBeVisible();
     expect(relayActions.markUploadFailed).toHaveBeenCalled();
+  });
+
+  test('retains owned preview URLs across close and reopen, then revokes them on unmount', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const createObjectUrl = vi.fn(() => 'blob:owned-preview');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/consent')) return new Response(JSON.stringify({ ok: true, consent: { producerTransfer: true } }), { status: 200 });
+      if (url.includes('/api/telegram/upload')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const view = render(<WidgetOverlay autoOpen={true} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Talk to the team without AI' }));
+    fireEvent.change(await screen.findByLabelText('Choose requested files'), {
+      target: { files: [new File(['image'], 'frame.png', { type: 'image/png' })] }
+    });
+    await waitFor(() => expect(createObjectUrl).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByLabelText('Close Balance Assist'));
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('Open Balance Assist'));
+    expect(await screen.findByText('Upload quarantined: frame.png')).toBeVisible();
+    expect(createObjectUrl).toHaveBeenCalledOnce();
+
+    view.unmount();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:owned-preview');
+    delete (URL as { createObjectURL?: unknown }).createObjectURL;
+    delete (URL as { revokeObjectURL?: unknown }).revokeObjectURL;
   });
 });

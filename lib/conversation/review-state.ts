@@ -2,8 +2,8 @@ import type { LeadDraft } from '@/lib/onboarding/types';
 
 export function getReviewPrompt(isMobile: boolean): string {
   return isMobile
-    ? 'Your core brief is ready. Review it in the Brief tab.'
-    : 'Your core brief is ready. Review it in the brief panel.';
+    ? 'Your brief is ready to check before it is sent to Balance. Open the Brief tab to review it.'
+    : 'Your brief is ready to check before it is sent to Balance. Review the brief panel before sending.';
 }
 
 export const REVIEW_PROMPT = getReviewPrompt(false);

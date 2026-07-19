@@ -142,7 +142,7 @@ describe('session-scoped API routes', () => {
     expect(requireSessionMock).toHaveBeenCalledWith(request, 'sess-messages');
   });
 
-  test('POST /api/telegram/relay requires session auth and forwards the body sessionId', async () => {
+  test('POST /api/telegram/relay authenticates before reading the body', async () => {
     mockUnauthorizedSession();
 
     const { POST } = await import('@/app/api/telegram/relay/route');
@@ -155,7 +155,7 @@ describe('session-scoped API routes', () => {
     const response = await POST(request);
 
     expect(response.status).toBe(401);
-    expect(requireSessionMock).toHaveBeenCalledWith(request, 'sess-relay');
+    expect(requireSessionMock).toHaveBeenCalledWith(request);
   });
 
   test('POST /api/telegram/upload requires session auth and forwards the session header', async () => {
@@ -187,7 +187,7 @@ describe('session-scoped API routes', () => {
     }
   });
 
-  test('POST /api/telegram/schedule-complete requires session auth and forwards the body sessionId', async () => {
+  test('POST /api/telegram/schedule-complete authenticates before reading the body', async () => {
     mockUnauthorizedSession();
 
     const { POST } = await import('@/app/api/telegram/schedule-complete/route');
@@ -200,7 +200,7 @@ describe('session-scoped API routes', () => {
     const response = await POST(request);
 
     expect(response.status).toBe(401);
-    expect(requireSessionMock).toHaveBeenCalledWith(request, 'sess-schedule');
+    expect(requireSessionMock).toHaveBeenCalledWith(request);
   });
 
   test('POST /api/attachments/link privately stores under the authenticated session without transfer consent', async () => {
@@ -231,7 +231,7 @@ describe('session-scoped API routes', () => {
       persisted: true,
       link: { id: 'link-1', sessionId: 'sess-link-auth' }
     });
-    expect(requireSessionMock).toHaveBeenCalledWith(request, undefined);
+    expect(requireSessionMock).toHaveBeenCalledWith(request);
     expect(consentSelect).not.toHaveBeenCalled();
     expect(consentEq).not.toHaveBeenCalled();
     expect(consentOrder).not.toHaveBeenCalled();

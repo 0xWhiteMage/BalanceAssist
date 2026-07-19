@@ -8,6 +8,30 @@ export interface WebhookConfig {
   webhookSecret: string | null;
 }
 
+export type TelegramSenderAllowlist =
+  | { ok: true; userIds: number[] }
+  | { ok: false; error: 'TELEGRAM_ALLOWED_USER_IDS not configured' | 'TELEGRAM_ALLOWED_USER_IDS invalid' | 'TELEGRAM_ALLOWED_USERNAMES is no longer supported; migrate to TELEGRAM_ALLOWED_USER_IDS' };
+
+export function parseTelegramSenderAllowlist(env: Record<string, string | undefined> = process.env): TelegramSenderAllowlist {
+  const configured = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
+  if (!configured) {
+    if (env.TELEGRAM_ALLOWED_USERNAMES?.trim()) {
+      return { ok: false, error: 'TELEGRAM_ALLOWED_USERNAMES is no longer supported; migrate to TELEGRAM_ALLOWED_USER_IDS' };
+    }
+    return { ok: false, error: 'TELEGRAM_ALLOWED_USER_IDS not configured' };
+  }
+
+  const values = configured.split(',').map((value) => value.trim());
+  if (values.some((value) => !/^[1-9]\d*$/.test(value))) {
+    return { ok: false, error: 'TELEGRAM_ALLOWED_USER_IDS invalid' };
+  }
+  const userIds = values.map(Number);
+  if (userIds.some((value) => !Number.isSafeInteger(value))) {
+    return { ok: false, error: 'TELEGRAM_ALLOWED_USER_IDS invalid' };
+  }
+  return { ok: true, userIds: [...new Set(userIds)] };
+}
+
 export function requireAdminConfig(): AdminConfig {
   const token = process.env.SETUP_TOKEN;
 

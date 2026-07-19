@@ -10,6 +10,9 @@ type Dependencies = {
 };
 
 type SendResult = 'persisted' | 'failed' | 'invalidated';
+const MAX_ACTIVE_POLLING_MS = 5 * 60 * 1000;
+const MAX_POLL_BACKOFF_MS = 15_000;
+const PASSIVE_POLLING_MS = 15_000;
 
 export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }: Dependencies) {
   const [requested, setRequested] = useState(false);
@@ -30,6 +33,12 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   const [identity, setIdentity] = useState(0);
   const identityRef = useRef(identity);
   const [pollingEnabled, setPollingEnabled] = useState(true);
+  const [environmentReady, setEnvironmentReady] = useState(() =>
+    typeof document === 'undefined' || (document.visibilityState !== 'hidden' && navigator.onLine !== false)
+  );
+  const pollFailuresRef = useRef(0);
+  const activePollingMsRef = useRef(0);
+  const passivePollingRef = useRef(false);
 
   useEffect(() => {
     if (sessionIdRef.current === sessionId) return;
@@ -42,9 +51,26 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     sinceIdRef.current = 0;
     retryRef.current = null;
     pendingSendGenerationRef.current = null;
+    pollFailuresRef.current = 0;
+    activePollingMsRef.current = 0;
+    passivePollingRef.current = false;
     setRequested(false); setStatus('idle'); setIsTeamConnected(false); setWaitingForReply(false); setPollingEnabled(true);
     setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false); setMessages([]);
   }, [sessionId]);
+
+  useEffect(() => {
+    const updateEnvironment = () => {
+      setEnvironmentReady(document.visibilityState !== 'hidden' && navigator.onLine !== false);
+    };
+    document.addEventListener('visibilitychange', updateEnvironment);
+    window.addEventListener('online', updateEnvironment);
+    window.addEventListener('offline', updateEnvironment);
+    return () => {
+      document.removeEventListener('visibilitychange', updateEnvironment);
+      window.removeEventListener('online', updateEnvironment);
+      window.removeEventListener('offline', updateEnvironment);
+    };
+  }, []);
 
   const poll = useCallback(async () => {
     if (identity !== identityRef.current || sessionId !== sessionIdRef.current || !sessionId || pollingRef.current !== null) return;
@@ -84,20 +110,31 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
   }, [fetchTeamMessages, identity, sessionId]);
 
   useEffect(() => {
-    if (!requested || !sessionId || !pollingEnabled) return;
+    if (!requested || !sessionId || !pollingEnabled || !environmentReady) return;
     let cancelled = false;
     const schedule = () => {
+      const baseDelay = waitingForReply ? 1000 : 2000;
+      const activeDelay = Math.min(baseDelay * (2 ** pollFailuresRef.current), MAX_POLL_BACKOFF_MS);
+      if (!passivePollingRef.current && activePollingMsRef.current + activeDelay > MAX_ACTIVE_POLLING_MS) {
+        passivePollingRef.current = true;
+        setWaitingForReply(false);
+      }
+      const delay = passivePollingRef.current ? PASSIVE_POLLING_MS : activeDelay;
       timerRef.current = setTimeout(async () => {
-        await poll().catch(() => undefined);
+        if (!passivePollingRef.current) activePollingMsRef.current += delay;
+        await poll().then(
+          () => { pollFailuresRef.current = 0; },
+          () => { pollFailuresRef.current = Math.min(pollFailuresRef.current + 1, 4); }
+        );
         if (!cancelled) schedule();
-      }, waitingForReply ? 1000 : 2000);
+      }, delay);
     };
     schedule();
     return () => {
       cancelled = true;
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [poll, pollingEnabled, requested, sessionId, waitingForReply]);
+  }, [environmentReady, poll, pollingEnabled, requested, sessionId, waitingForReply]);
 
   const requestHandoff = useCallback(() => {
     if (requested) return false;
@@ -113,6 +150,10 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     generationRef.current = generation;
     pollingRef.current = null;
     pendingSendGenerationRef.current = generation;
+    activePollingMsRef.current = 0;
+    passivePollingRef.current = false;
+    pollFailuresRef.current = 0;
+    setPollingEnabled(true);
     setWaitingForReply(true);
     setStatus('sending');
     const retry = retryRef.current?.text === text ? retryRef.current : {
@@ -148,6 +189,9 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     sinceIdRef.current = 0;
     retryRef.current = null;
     pendingSendGenerationRef.current = null;
+    pollFailuresRef.current = 0;
+    activePollingMsRef.current = 0;
+    passivePollingRef.current = false;
     setRequested(false); setStatus('idle'); setIsTeamConnected(false); setWaitingForReply(false); setPollingEnabled(true);
     setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false); setMessages([]);
   }, []);
@@ -159,7 +203,12 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
     setPollingEnabled(false);
   }, []);
 
-  const resume = useCallback(() => setPollingEnabled(true), []);
+  const resume = useCallback(() => {
+    activePollingMsRef.current = 0;
+    passivePollingRef.current = false;
+    pollFailuresRef.current = 0;
+    setPollingEnabled(true);
+  }, []);
 
   const clearRequests = useCallback(() => {
     setFileRequestOpen(false); setFileRequestNote(null); setScheduleRequestOpen(false);

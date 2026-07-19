@@ -87,6 +87,12 @@ describe('POST /api/attachments/link', () => {
   beforeEach(() => {
     vi.resetModules();
     requireSessionMock.mockReset();
+    const { client } = buildSupabase();
+    requireSessionMock.mockResolvedValue({
+      ok: true,
+      auth: { sessionId: 'sess-1', capability: 'sess-1.secret' },
+      supabase: client
+    });
   });
 
   afterEach(() => {
@@ -153,6 +159,21 @@ describe('POST /api/attachments/link', () => {
     expect(inserts[0].session_id).toBe('sess-auth');
   });
 
+  test('authenticates before reading an invalid body', async () => {
+    requireSessionMock.mockResolvedValue({ ok: false, response: new Response('{}', { status: 401 }) });
+    const { POST } = await import('@/app/api/attachments/link/route');
+    const response = await POST(new Request('http://localhost/api/attachments/link', { method: 'POST', body: 'not-json' }));
+    expect(response.status).toBe(401);
+  });
+
+  test('rejects an oversized authenticated body', async () => {
+    const { POST } = await import('@/app/api/attachments/link/route');
+    const response = await POST(new Request('http://localhost/api/attachments/link', {
+      method: 'POST', headers: { 'content-length': String(17 * 1024) }, body: '{}'
+    }));
+    expect(response.status).toBe(413);
+  });
+
   test('rejects malformed URLs', async () => {
     const { POST } = await import('@/app/api/attachments/link/route');
       const req = new Request('http://localhost/api/attachments/link', {
@@ -182,7 +203,7 @@ describe('POST /api/attachments/link', () => {
       await expect(response.json()).resolves.toEqual({
         ok: false, persisted: false, error: 'https_reference_required'
       });
-      expect(requireSessionMock).not.toHaveBeenCalled();
+      expect(requireSessionMock).toHaveBeenCalledOnce();
     }
   );
 

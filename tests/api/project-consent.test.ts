@@ -94,4 +94,24 @@ describe('POST /api/projects/[sessionId]/consent', () => {
     expect(response.status).toBe(401);
     expect(client.rpc).not.toHaveBeenCalled();
   });
+
+  test('authenticates before reading an invalid body', async () => {
+    requireSessionMock.mockResolvedValue({ ok: false, response: new Response('{}', { status: 401 }) });
+    const { POST } = await import('@/app/api/projects/[sessionId]/consent/route');
+    const response = await POST(new Request('https://www.balancestudio.tv/api/projects/session-1/consent', {
+      method: 'POST', body: 'not-json'
+    }), { params: Promise.resolve({ sessionId: 'session-1' }) });
+    expect(response.status).toBe(401);
+  });
+
+  test('rejects an oversized authenticated body', async () => {
+    const { client } = buildSupabase();
+    requireSessionMock.mockResolvedValue({ ok: true, auth: { sessionId: 'session-1' }, supabase: client });
+    const { POST } = await import('@/app/api/projects/[sessionId]/consent/route');
+    const response = await POST(new Request('https://www.balancestudio.tv/api/projects/session-1/consent', {
+      method: 'POST', headers: { 'content-length': '9000' }, body: '{}'
+    }), { params: Promise.resolve({ sessionId: 'session-1' }) });
+    expect(response.status).toBe(413);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
 });

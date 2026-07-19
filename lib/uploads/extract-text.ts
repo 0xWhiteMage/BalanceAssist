@@ -5,6 +5,7 @@ const MAX_PDF_COMPRESSED_STREAM_BYTES = 256 * 1024;
 const MAX_PDF_INFLATED_BYTES = 512 * 1024;
 const MAX_PDF_TOTAL_INFLATED_BYTES = 1024 * 1024;
 const MAX_PDF_STREAMS = 16;
+const MAX_PDF_PAGES = 50;
 
 type ZipEntry = {
   name: string;
@@ -194,8 +195,7 @@ function extractFromPdf(buffer: Buffer): string {
   if (operators.length > 0) {
     return operators.join(' ');
   }
-  // Last-resort fallback: keep printable ASCII runs.
-  return combined.replace(/[^\x20-\x7E]+/g, ' ');
+  return '';
 }
 
 function normalizeWhitespace(value: string): string {
@@ -209,10 +209,70 @@ function normalizeWhitespace(value: string): string {
 
 export function extractTextFromBuffer(buffer: Buffer, verifiedMime: string): string {
   let text = '';
-  if (verifiedMime === 'text/plain') {
+  if (verifiedMime === 'text/plain' || verifiedMime === 'text/csv') {
     text = buffer.toString('utf8');
   } else if (verifiedMime === 'application/pdf') {
     text = extractFromPdf(buffer);
   }
   return normalizeWhitespace(text).slice(0, PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters);
+}
+
+async function extractFromPdfTextLayer(buffer: Buffer): Promise<string> {
+  type PdfDocument = { numPages: number; getPage: (pageNumber: number) => Promise<{ getTextContent: () => Promise<{ items: unknown[] }>; cleanup: () => void }>; destroy: () => Promise<void> };
+  type PdfLoadingTask = { promise: Promise<PdfDocument>; destroy: () => Promise<void> };
+  let loadingTask: PdfLoadingTask | undefined;
+  let pdfDocument: PdfDocument | undefined;
+  try {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    loadingTask = getDocument({
+      data: new Uint8Array(buffer),
+      isEvalSupported: false,
+      useSystemFonts: true,
+      verbosity: 0,
+    }) as unknown as PdfLoadingTask;
+    pdfDocument = await loadingTask.promise;
+    if (pdfDocument.numPages < 1 || pdfDocument.numPages > MAX_PDF_PAGES) return '';
+
+    const parts: string[] = [];
+    let characters = 0;
+    for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+      const page = await pdfDocument.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item) => typeof item === 'object' && item !== null && 'str' in item ? String((item as { str: unknown }).str) : '')
+        .filter(Boolean)
+        .join(' ');
+      page.cleanup();
+      if (pageText) {
+        parts.push(pageText);
+        characters += pageText.length;
+      }
+      if (characters >= PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters) break;
+    }
+    return parts.join('\n');
+  } catch {
+    return extractFromPdf(buffer);
+  } finally {
+    if (pdfDocument) await pdfDocument.destroy().catch(() => undefined);
+    else if (loadingTask) await loadingTask.destroy().catch(() => undefined);
+  }
+}
+
+export type TextExtractionResult =
+  | { status: 'extracted'; text: string }
+  | { status: 'no_text'; text: '' }
+  | { status: 'unsupported'; text: '' };
+
+export function extractTextResultFromBuffer(buffer: Buffer, verifiedMime: string): TextExtractionResult {
+  if (verifiedMime.startsWith('image/')) return { status: 'unsupported', text: '' };
+  const text = extractTextFromBuffer(buffer, verifiedMime);
+  return text ? { status: 'extracted', text } : { status: 'no_text', text: '' };
+}
+
+export async function extractTextResultFromBufferAsync(buffer: Buffer, verifiedMime: string): Promise<TextExtractionResult> {
+  if (verifiedMime.startsWith('image/')) return { status: 'unsupported', text: '' };
+  const text = verifiedMime === 'application/pdf'
+    ? normalizeWhitespace(await extractFromPdfTextLayer(buffer)).slice(0, PRIVATE_ANALYSIS_UPLOAD_POLICY.maxExtractedCharacters)
+    : extractTextFromBuffer(buffer, verifiedMime);
+  return text ? { status: 'extracted', text } : { status: 'no_text', text: '' };
 }

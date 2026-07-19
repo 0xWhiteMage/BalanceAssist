@@ -82,4 +82,22 @@ describe('POST /api/telegram/schedule-complete', () => {
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
     expect(writes).toHaveLength(0);
   });
+
+  test('authenticates before reading an invalid body', async () => {
+    requireSessionMock.mockResolvedValue({ ok: false, response: new Response('{}', { status: 401 }) });
+    const { POST } = await import('@/app/api/telegram/schedule-complete/route');
+    const response = await POST(new Request('http://localhost/api/telegram/schedule-complete', {
+      method: 'POST', body: 'not-json'
+    }));
+    expect(response.status).toBe(401);
+  });
+
+  test('rejects an oversized authenticated body', async () => {
+    requireSessionMock.mockResolvedValue({ ok: true, auth: { sessionId: 'sess-123' }, supabase: {} });
+    const { POST } = await import('@/app/api/telegram/schedule-complete/route');
+    const response = await POST(new Request('http://localhost/api/telegram/schedule-complete', {
+      method: 'POST', headers: { 'content-length': '9000' }, body: '{}'
+    }));
+    expect(response.status).toBe(413);
+  });
 });

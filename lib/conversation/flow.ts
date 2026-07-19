@@ -5,7 +5,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
     id: 'intro',
     botMessages: [
       'Hi! I\'m **Balance Assist** — Balance Studio\'s intelligent AI agent.',
-      "I can help you explore services, share a project brief, or connect you with the right person on our team.\n\nJust so you know — I'm an AI assistant, not a human. Our team may review our conversation to serve you better.",
+      "I can help you explore services, shape a non-confidential project brief, or connect you with the Balance team. I'm an AI assistant, not a human.",
       'What can I help you with today? I can answer questions about Balance Studio, help shape a project brief, or connect you with our team if you\'d prefer a human conversation.'
     ],
     freeText: true,
