@@ -49,19 +49,33 @@ export function buildBackupAuditReference(manifest) {
   return `BACKUP_AUDIT:${manifest.createdAt}|${manifest.provider}|${manifest.backupId}|${manifest.releaseSha}`;
 }
 
+function postgresTlsOptions(value) {
+  return { rejectUnauthorized: new URL(value).searchParams.get('sslmode') !== 'require' };
+}
+
 async function managementRequest(token, path, options = {}) {
-  const response = await fetch(`${managementApi}${path}`, {
-    ...options,
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-      ...options.headers
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await fetch(`${managementApi}${path}`, {
+      ...options,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        ...options.headers
+      }
+    });
+    if (response.ok) {
+      if (response.status === 204) return null;
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
     }
-  });
-  if (!response.ok) throw new Error(`Supabase management request failed (${response.status}) for ${path.split('?')[0]}`);
-  if (response.status === 204) return null;
-  const text = await response.text();
-  return text ? JSON.parse(text) : null;
+    if (response.status !== 429 || attempt === 4) {
+      throw new Error(`Supabase management request failed (${response.status}) for ${path.split('?')[0]}`);
+    }
+    const retryAfterHeader = response.headers.get('retry-after');
+    const retryAfter = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader);
+    const delay = Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter * 1_000 : 2 ** attempt * 1_000;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(delay, 30_000)));
+  }
 }
 
 async function resetDatabasePassword(token, password) {
@@ -229,6 +243,7 @@ export async function createProductionCleanupBackup() {
   const runId = required('GITHUB_RUN_ID');
   const configuredSourceDatabaseUrl = required('SOURCE_DATABASE_URL');
   assertProductionDatabaseUrl(configuredSourceDatabaseUrl);
+  const sourceSslMode = new URL(configuredSourceDatabaseUrl).searchParams.get('sslmode') ?? 'verify-full';
   const sourceDatabaseUrl = normalizeSessionPoolerUrl(configuredSourceDatabaseUrl);
   const sourceSupabaseUrl = required('SOURCE_SUPABASE_URL');
   const sourceServiceRoleKey = required('SOURCE_SUPABASE_SERVICE_ROLE_KEY');
@@ -256,7 +271,7 @@ export async function createProductionCleanupBackup() {
     await assertOnlyTemporaryTargetKey(accessToken, temporaryKey.id);
 
     const targetDatabaseUrl = `postgresql://postgres.${cleanupBackupProjectRef}:${encodeURIComponent(initialTargetPassword)}@${targetDatabaseHost}:5432/postgres`;
-    sourceClient = new Client({ connectionString: sourceDatabaseUrl, ssl: { rejectUnauthorized: true } });
+    sourceClient = new Client({ connectionString: sourceDatabaseUrl, ssl: postgresTlsOptions(configuredSourceDatabaseUrl) });
     await sourceClient.connect();
     await sourceClient.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const snapshotResult = await sourceClient.query('SELECT pg_export_snapshot() AS snapshot');
@@ -266,7 +281,7 @@ export async function createProductionCleanupBackup() {
 
     await runDockerPostgres({
       directory: workingDirectory,
-      environment: { SOURCE_DATABASE_URL: sourceDatabaseUrl, SOURCE_SNAPSHOT: sourceSnapshot },
+      environment: { SOURCE_DATABASE_URL: sourceDatabaseUrl, SOURCE_SNAPSHOT: sourceSnapshot, PGSSLMODE: sourceSslMode },
       script: 'pg_dump --dbname="$SOURCE_DATABASE_URL" --snapshot="$SOURCE_SNAPSHOT" --schema=public --format=custom --no-owner --no-privileges --file=/backup/public.dump'
     });
     await sourceClient.query('COMMIT');
@@ -275,11 +290,11 @@ export async function createProductionCleanupBackup() {
 
     await runDockerPostgres({
       directory: workingDirectory,
-      environment: { TARGET_DATABASE_URL: targetDatabaseUrl },
+      environment: { TARGET_DATABASE_URL: targetDatabaseUrl, PGSSLMODE: 'require' },
       script: 'ready=0; for attempt in $(seq 1 12); do if psql "$TARGET_DATABASE_URL" --no-psqlrc --tuples-only --command="SELECT 1" >/dev/null; then ready=1; break; fi; sleep 5; done; test "$ready" = 1; pg_restore --dbname="$TARGET_DATABASE_URL" --clean --if-exists --exit-on-error --no-owner --no-privileges /backup/public.dump'
     });
 
-    targetClient = new Client({ connectionString: targetDatabaseUrl, ssl: { rejectUnauthorized: true } });
+    targetClient = new Client({ connectionString: targetDatabaseUrl, ssl: { rejectUnauthorized: false } });
     await targetClient.connect();
     const targetCounts = await publicTableCounts(targetClient);
     assertMatchingCounts(sourceCounts, targetCounts);
@@ -287,7 +302,7 @@ export async function createProductionCleanupBackup() {
     const targetStorage = createClient(targetSupabaseUrl, temporaryKey.api_key, { auth: { persistSession: false } });
     await replaceTargetBuckets(sourceStorage, targetStorage);
 
-    sourceClient = new Client({ connectionString: sourceDatabaseUrl, ssl: { rejectUnauthorized: true } });
+    sourceClient = new Client({ connectionString: sourceDatabaseUrl, ssl: postgresTlsOptions(configuredSourceDatabaseUrl) });
     await sourceClient.connect();
     await sourceClient.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const storage = await copyAndVerifyObjects({ sourceClient, sourceStorage, targetStorage });
