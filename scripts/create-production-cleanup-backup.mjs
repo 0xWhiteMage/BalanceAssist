@@ -26,6 +26,7 @@ function quoteIdentifier(value) {
 export function normalizeSessionPoolerUrl(value) {
   const url = new URL(value);
   if (url.port === '6543') url.port = '5432';
+  url.search = '';
   return url.toString();
 }
 
@@ -33,10 +34,12 @@ export function assertProductionDatabaseUrl(value) {
   const database = new URL(value);
   const direct = database.hostname === `db.${productionProjectRef}.supabase.co` && database.username === 'postgres';
   const pooled = database.hostname.endsWith('.pooler.supabase.com') && database.username === `postgres.${productionProjectRef}`;
+  const connectionOptions = [...database.searchParams];
+  const safeConnectionOptions = connectionOptions.every(([key, option]) => key === 'sslmode' && ['require', 'verify-full'].includes(option));
   if (!['postgres:', 'postgresql:'].includes(database.protocol)
     || (!direct && !pooled)
     || database.pathname !== '/postgres'
-    || database.search
+    || !safeConnectionOptions
     || database.hash) {
     throw new Error('SOURCE_DATABASE_URL is not the reviewed production database');
   }
@@ -93,15 +96,15 @@ async function deleteTargetKey(token, id, wasCompromised = false) {
 async function purgeTargetApi(token) {
   const keys = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys`);
   for (const key of keys ?? []) {
-    if (key.type !== 'legacy') await deleteTargetKey(token, key.id, true);
+    if (key.type === 'secret') await deleteTargetKey(token, key.id, true);
   }
   await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy?enabled=false`, { method: 'PUT' });
 }
 
 async function assertOnlyTemporaryTargetKey(token, temporaryKeyId) {
   const keys = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys`);
-  const activeModernKeys = (keys ?? []).filter((key) => key.type !== 'legacy');
-  if (activeModernKeys.length !== 1 || activeModernKeys[0].id !== temporaryKeyId) {
+  const activeSecretKeys = (keys ?? []).filter((key) => key.type === 'secret');
+  if (activeSecretKeys.length !== 1 || activeSecretKeys[0].id !== temporaryKeyId) {
     throw new Error('backup target API keys were not sealed before the snapshot');
   }
   const legacy = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy`);
@@ -110,7 +113,7 @@ async function assertOnlyTemporaryTargetKey(token, temporaryKeyId) {
 
 async function assertSealedTargetApi(token) {
   const keys = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys`);
-  if ((keys ?? []).some((key) => key.type !== 'legacy')) throw new Error('backup target still has an active modern API key');
+  if ((keys ?? []).some((key) => key.type === 'secret')) throw new Error('backup target still has an active privileged API key');
   const legacy = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy`);
   if (legacy?.enabled !== false) throw new Error('backup target legacy API keys remain enabled');
 }
@@ -333,7 +336,10 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
     ? sealProductionCleanupBackupTarget()
     : createProductionCleanupBackup();
   operation.catch((error) => {
-    console.error(error.message);
+    const messages = error instanceof AggregateError
+      ? error.errors.map((cause) => cause instanceof Error ? cause.message : 'unknown sealing failure')
+      : [error.message];
+    console.error(messages.join('; '));
     process.exitCode = 1;
   });
 }
