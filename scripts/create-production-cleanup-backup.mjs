@@ -93,12 +93,12 @@ async function deleteTargetKey(token, id, wasCompromised = false) {
   );
 }
 
-async function purgeTargetApi(token) {
+async function prepareTargetApi(token, temporaryKeyId) {
+  await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy?enabled=false`, { method: 'PUT' });
   const keys = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys`);
   for (const key of keys ?? []) {
-    if (key.type === 'secret') await deleteTargetKey(token, key.id, true);
+    if (key.type === 'secret' && key.id !== temporaryKeyId) await deleteTargetKey(token, key.id, true);
   }
-  await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy?enabled=false`, { method: 'PUT' });
 }
 
 async function assertOnlyTemporaryTargetKey(token, temporaryKeyId) {
@@ -122,7 +122,12 @@ export async function sealProductionCleanupBackupTarget() {
   const accessToken = required('SUPABASE_ACCESS_TOKEN');
   const sealedTargetPassword = randomBytes(36).toString('base64url');
   const errors = [];
-  try { await purgeTargetApi(accessToken); } catch (error) { errors.push(error); }
+  let temporaryKey;
+  try {
+    temporaryKey = await createTemporaryTargetKey(accessToken, `seal_${Date.now()}`);
+    await prepareTargetApi(accessToken, temporaryKey.id);
+    await deleteTargetKey(accessToken, temporaryKey.id, false);
+  } catch (error) { errors.push(error); }
   try { await resetDatabasePassword(accessToken, sealedTargetPassword); } catch (error) { errors.push(error); }
   try { await assertSealedTargetApi(accessToken); } catch (error) { errors.push(error); }
   if (errors.length) throw new AggregateError(errors, 'backup target could not be sealed');
@@ -243,8 +248,8 @@ export async function createProductionCleanupBackup() {
 
   try {
     await resetDatabasePassword(accessToken, initialTargetPassword);
-    await purgeTargetApi(accessToken);
     temporaryKey = await createTemporaryTargetKey(accessToken, runId);
+    await prepareTargetApi(accessToken, temporaryKey.id);
     await assertOnlyTemporaryTargetKey(accessToken, temporaryKey.id);
 
     const targetDatabaseUrl = `postgresql://postgres.${cleanupBackupProjectRef}:${encodeURIComponent(initialTargetPassword)}@${targetDatabaseHost}:5432/postgres`;
@@ -321,7 +326,9 @@ export async function createProductionCleanupBackup() {
       try { await targetClient.end(); } catch {}
     }
     const sealingErrors = [];
-    try { await purgeTargetApi(accessToken); } catch (error) { sealingErrors.push(error); }
+    try {
+      if (temporaryKey?.id) await deleteTargetKey(accessToken, temporaryKey.id, false);
+    } catch (error) { sealingErrors.push(error); }
     try { await resetDatabasePassword(accessToken, sealedTargetPassword); } catch (error) { sealingErrors.push(error); }
     try { await assertSealedTargetApi(accessToken); } catch (error) { sealingErrors.push(error); }
     await rm(workingDirectory, { force: true, recursive: true });

@@ -58,6 +58,9 @@ describe('production cleanup backup policy', () => {
     const source = await readFile(resolve(root, 'scripts/create-production-cleanup-backup.mjs'), 'utf8');
     expect(source).toContain("api-keys/legacy?enabled=false");
     expect(source).toContain("key.type === 'secret'");
+    const snapshot = source.slice(source.indexOf('export async function createProductionCleanupBackup()'));
+    expect(snapshot.indexOf('createTemporaryTargetKey(accessToken, runId)'))
+      .toBeLessThan(snapshot.indexOf('prepareTargetApi(accessToken, temporaryKey.id)'));
     expect(source).toContain('postgres@sha256:');
     expect(source).toContain('pg_export_snapshot()');
     expect(source).toContain('--snapshot="$SOURCE_SNAPSHOT"');
