@@ -71,7 +71,9 @@ describe('production release workflows', () => {
     expect(vercelAudit?.run).toContain('^[0-9]{4}-[0-9]{2}-[0-9]{2}T');
     expect(vercelAudit?.run).toContain('90 * 24 * 60 * 60');
     expect(vercelAudit?.run).toContain('/v9/projects/${process.env.VERCEL_PROJECT_ID}');
-    expect(vercelAudit?.run).toContain('project.id !== process.env.VERCEL_PROJECT_ID');
+    expect(vercelAudit?.run).toContain('Vercel project ID does not match the protected configuration');
+    expect(vercelAudit?.run).toContain('Vercel project lookup failed');
+    expect(vercelAudit?.run).toContain('Vercel project GitHub repository does not match');
     expect(vercelAudit?.run).toContain("project.link?.type?.startsWith('github')");
     expect(vercelAudit?.run).toContain('config.git?.deploymentEnabled?.main !== false');
     expect(sessionConfig?.run).toContain('TELEGRAM_ALLOWED_USER_IDS');
