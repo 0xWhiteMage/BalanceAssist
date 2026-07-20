@@ -70,6 +70,8 @@ describe('production cleanup backup policy', () => {
     expect(source).toContain('assertMatchingCounts(sourceCounts, targetCounts)');
     expect(source).toContain("createHash('sha256').update(sourceBytes)");
     expect(source).toContain('targetHash !== sourceHash');
+    expect(source).toContain('attempt < 12');
+    expect(source).toContain('target.storage.deleteBucket(bucket.id)');
     expect(source).toContain("PGSSLMODE: sourceSslMode");
     expect(source).toContain("response.status !== 429");
     expect(source).toContain("response.headers.get('retry-after')");

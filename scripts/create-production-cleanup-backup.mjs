@@ -193,10 +193,25 @@ async function replaceTargetBuckets(source, target) {
   const targetBuckets = await target.storage.listBuckets();
   if (targetBuckets.error) throw new Error('could not inventory backup target buckets');
   for (const bucket of targetBuckets.data ?? []) {
-    const emptied = await target.storage.emptyBucket(bucket.id);
-    if (emptied.error) throw new Error('could not empty an existing backup target bucket');
-    const deleted = await target.storage.deleteBucket(bucket.id);
-    if (deleted.error) throw new Error('could not delete an existing backup target bucket');
+    let cleanupError;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const emptied = await target.storage.emptyBucket(bucket.id);
+      if (emptied.error) {
+        cleanupError = emptied.error;
+      } else {
+        const deleted = await target.storage.deleteBucket(bucket.id);
+        if (!deleted.error) {
+          cleanupError = undefined;
+          break;
+        }
+        cleanupError = deleted.error;
+      }
+      if (attempt < 11) await new Promise((resolveDelay) => setTimeout(resolveDelay, 5_000));
+    }
+    if (cleanupError) {
+      const status = 'statusCode' in cleanupError ? cleanupError.statusCode : 'unknown';
+      throw new Error(`could not delete an existing backup target bucket (${status})`);
+    }
   }
 
   const created = await target.storage.createBucket(cleanupBackupBucket, {
