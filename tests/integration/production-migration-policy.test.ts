@@ -71,6 +71,7 @@ describe('production migration policy', () => {
       { version: '043', filename: '043_deletion_state_batched_cleanup.sql', path: '/tmp/043' },
       { version: '044', filename: '044_monday_crm_projection_tables.sql', path: '/tmp/044' },
       { version: '045', filename: '045_orphaned_private_attachment_cleanup.sql', path: '/tmp/045' },
+      { version: '046', filename: '046_claim_next_handoff_qualification.sql', path: '/tmp/046' },
       { version: '047', filename: '047_atomic_crm_approval.sql', path: '/tmp/047' },
       { version: '053', filename: '053_monday_reconciliation.sql', path: '/tmp/053' },
       { version: '054', filename: '054_additive.sql', path: '/tmp/054' },

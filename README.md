@@ -64,7 +64,7 @@ See `.env.example` for the canonical list. Summary:
 ### 1. Production prerequisites
 
 ```bash
-Apply the full incremental migration chain in order through `061_api_security_retention_and_upload_quota.sql` (except intentionally absent `005`, `050`, and `051`). Do not combine it with legacy snapshot `000_full_schema.sql`. Versions `038` through `043` use the original reviewed cleanup path, orphan cleanup `045` uses its own protected workflow, CRM versions use their protected workflow, `060` runs at the consent cutover gate, and `061` uses its hash-protected artifact in the production migration job; do not apply those special migrations ad hoc.
+Apply the full incremental migration chain in order through `061_api_security_retention_and_upload_quota.sql` (except intentionally absent `005`, `050`, and `051`). Do not combine it with legacy snapshot `000_full_schema.sql`. Versions `038` through `043` use the original reviewed cleanup path, orphan cleanup `045` uses its own protected workflow, legacy function fix `046` is superseded by protected migration `056`, CRM versions use their protected workflow, `060` runs at the consent cutover gate, and `061` uses its hash-protected artifact in the production migration job; do not apply those special migrations ad hoc.
 ```
 
 ### 2. Connect Vercel

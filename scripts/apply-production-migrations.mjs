@@ -11,6 +11,7 @@ import { integrationMigrationVersions } from './apply-production-integration-mig
 const policyBaseline = 37n;
 const reviewedCleanupVersions = ['038', '039', '040', '041', '042', '043'];
 const reviewedOrphanedPrivateAttachmentCleanupVersion = '045';
+const supersededMigrationVersions = ['046'];
 const reviewedTrustControlsVersion = '054';
 const reviewedFinalReviewVersion = '055';
 const reviewedSessionControlsVersion = '056';
@@ -86,6 +87,7 @@ export function selectOrdinaryProductionMigrations(migrations) {
   return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version)
     && !integrationMigrationVersions.includes(migration.version)
     && migration.version !== reviewedOrphanedPrivateAttachmentCleanupVersion
+    && !supersededMigrationVersions.includes(migration.version)
     && migration.version !== reviewedTrustControlsVersion
     && migration.version !== reviewedFinalReviewVersion
     && migration.version !== reviewedSessionControlsVersion
