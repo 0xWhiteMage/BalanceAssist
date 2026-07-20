@@ -55,7 +55,7 @@ describe('production API security migration 061 policy', () => {
     const apply = workflow.indexOf('node scripts/apply-production-api-security-061.mjs --dry-run');
     expect(workflow).toContain('name: Verify Vercel auto-deploy-disabled prerequisite');
     expect(workflow).toContain('VERCEL_GIT_DEPLOYMENTS_DISABLED_AT');
-    expect(workflow).toContain('project.id !== process.env.VERCEL_PROJECT_ID');
+    expect(workflow).toContain('Vercel project ID does not match the protected configuration');
     expect(workflow).toContain("project.link?.type?.startsWith('github')");
     expect(workflow).toContain('config.git?.deploymentEnabled?.main !== false');
     expect(apply).toBeGreaterThan(workflow.indexOf('name: Smoke immutable deployment'));
