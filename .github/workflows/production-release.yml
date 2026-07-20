@@ -460,9 +460,13 @@ jobs:
           const projectRef = process.env.EXPECTED_SUPABASE_PROJECT_REF;
           const direct = database.hostname === `db.${projectRef}.supabase.co` && database.username === 'postgres';
           const pooled = database.hostname.endsWith('.pooler.supabase.com') && database.username === `postgres.${projectRef}`;
+          const connectionOptions = [...database.searchParams];
+          const safeConnectionOptions = connectionOptions.every(([key, option]) => key === 'sslmode' && ['require', 'verify-full'].includes(option));
           if (database.protocol !== 'postgresql:' && database.protocol !== 'postgres:') process.exit(1);
-          if ((!direct && !pooled) || database.pathname !== '/postgres' || database.search || database.hash) process.exit(1);
+          if ((!direct && !pooled) || database.pathname !== '/postgres' || !safeConnectionOptions || database.hash) process.exit(1);
           NODE
+          PRODUCTION_DATABASE_URL="$(node -e "const database = new URL(process.env.PRODUCTION_DATABASE_URL); if (database.searchParams.get('sslmode') === 'require') database.searchParams.set('uselibpqcompat', 'true'); process.stdout.write(database.toString())")"
+          export PRODUCTION_DATABASE_URL
           # The runner enforces expand-only SQL; cleanup needs a separate approved workflow.
           node scripts/apply-production-migrations.mjs
           node --input-type=module <<'NODE'
@@ -743,7 +747,10 @@ jobs:
           const projectRef = process.env.EXPECTED_SUPABASE_PROJECT_REF;
           const direct = database.hostname === `db.${projectRef}.supabase.co` && database.username === 'postgres';
           const pooled = database.hostname.endsWith('.pooler.supabase.com') && database.username === `postgres.${projectRef}`;
-          if ((database.protocol !== 'postgresql:' && database.protocol !== 'postgres:') || (!direct && !pooled) || database.pathname !== '/postgres' || database.search || database.hash) process.exit(1);
+          const connectionOptions = [...database.searchParams];
+          const safeConnectionOptions = connectionOptions.every(([key, option]) => key === 'sslmode' && ['require', 'verify-full'].includes(option));
+          if ((database.protocol !== 'postgresql:' && database.protocol !== 'postgres:') || (!direct && !pooled) || database.pathname !== '/postgres' || !safeConnectionOptions || database.hash) process.exit(1);
+          if (database.searchParams.get('sslmode') === 'require') database.searchParams.set('uselibpqcompat', 'true');
           function reviewedBody(functionName) {
             const source = fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8').replace(/\r\n/g, '\n');
             const signature = source.indexOf(`FUNCTION public.${functionName}`);
@@ -752,7 +759,7 @@ jobs:
             if (signature < 0 || start < 5 || end < 0) process.exit(1);
             return source.slice(start, end).trim();
           }
-          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL, ssl: { rejectUnauthorized: true } });
+          const client = new pg.Client({ connectionString: database.toString() });
           try {
             await client.connect();
             const recorded = await client.query("SELECT filename FROM public.schema_migrations WHERE version = '060'");
