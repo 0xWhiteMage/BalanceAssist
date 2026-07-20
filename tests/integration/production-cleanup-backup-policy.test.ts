@@ -57,6 +57,7 @@ describe('production cleanup backup policy', () => {
   it('seals credentials and verifies database and private object copies', async () => {
     const source = await readFile(resolve(root, 'scripts/create-production-cleanup-backup.mjs'), 'utf8');
     expect(source).toContain("api-keys/legacy?enabled=false");
+    expect(source).toContain("legacy?.enabled !== false");
     expect(source).toContain("key.type === 'secret'");
     const snapshot = source.slice(source.indexOf('export async function createProductionCleanupBackup()'));
     expect(snapshot.indexOf('createTemporaryTargetKey(accessToken, runId)'))
