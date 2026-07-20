@@ -10,6 +10,7 @@ import { integrationMigrationVersions } from './apply-production-integration-mig
 
 const policyBaseline = 37n;
 const reviewedCleanupVersions = ['038', '039', '040', '041', '042', '043'];
+const reviewedOrphanedPrivateAttachmentCleanupVersion = '045';
 const reviewedTrustControlsVersion = '054';
 const reviewedFinalReviewVersion = '055';
 const reviewedSessionControlsVersion = '056';
@@ -32,6 +33,16 @@ export function assertReviewedCrmMigrationsRecorded(recordedVersions) {
   const pending = crmMigrationVersions.filter((version) => !recorded.has(version));
   if (pending.length) {
     throw new Error(`${pending.join(', ')} is pending; run Production CRM migrations before this release.`);
+  }
+}
+
+export function assertReviewedOrphanedPrivateAttachmentCleanupRecorded(recordedMigrations) {
+  const matches = recordedMigrations.filter(({ version }) => version === reviewedOrphanedPrivateAttachmentCleanupVersion);
+  if (!matches.length) {
+    throw new Error('045 is pending; run Production orphaned private attachment cleanup 045 before this release.');
+  }
+  if (matches.length !== 1 || matches[0].filename !== '045_orphaned_private_attachment_cleanup.sql') {
+    throw new Error('045 is recorded with an unexpected filename; refusing the ordinary production release.');
   }
 }
 
@@ -74,6 +85,7 @@ export function assertReviewedConsent12MigrationRecorded(recordedVersions) {
 export function selectOrdinaryProductionMigrations(migrations) {
   return migrations.filter((migration) => !crmMigrationVersions.includes(migration.version)
     && !integrationMigrationVersions.includes(migration.version)
+    && migration.version !== reviewedOrphanedPrivateAttachmentCleanupVersion
     && migration.version !== reviewedTrustControlsVersion
     && migration.version !== reviewedFinalReviewVersion
     && migration.version !== reviewedSessionControlsVersion
@@ -108,12 +120,12 @@ export function assertExpandOnlyMigration(source, filename) {
   }
 }
 
-async function getRecordedMigrationVersions(connectionString) {
+async function getRecordedMigrations(connectionString) {
   const client = new Client({ connectionString });
   await client.connect();
   try {
-    const { rows } = await client.query('SELECT version FROM public.schema_migrations');
-    return rows.map((row) => String(row.version));
+    const { rows } = await client.query('SELECT version, filename FROM public.schema_migrations');
+    return rows.map((row) => ({ version: String(row.version), filename: String(row.filename) }));
   } finally {
     await client.end();
   }
@@ -124,9 +136,11 @@ export async function applyProductionMigrations(connectionString = process.env.P
     throw new Error('PRODUCTION_DATABASE_URL is required in the protected production-migrations environment.');
   }
 
-  const recordedVersions = await getRecordedMigrationVersions(connectionString);
+  const recordedMigrations = await getRecordedMigrations(connectionString);
+  const recordedVersions = recordedMigrations.map(({ version }) => version);
   assertReviewedCleanupMigrationsRecorded(recordedVersions);
   assertReviewedCrmMigrationsRecorded(recordedVersions);
+  assertReviewedOrphanedPrivateAttachmentCleanupRecorded(recordedMigrations);
   assertReviewedTrustControlsMigrationRecorded(recordedVersions);
   assertReviewedFinalReviewMigrationRecorded(recordedVersions);
   assertReviewedSessionControlsMigrationRecorded(recordedVersions);

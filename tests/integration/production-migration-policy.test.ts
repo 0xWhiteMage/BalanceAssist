@@ -22,6 +22,17 @@ describe('production migration policy', () => {
       .toThrow('043 is pending; run Production cleanup migrations before this release');
   });
 
+  it('requires the reviewed orphaned private attachment cleanup before ordinary releases', () => {
+    expect(() => productionMigrations.assertReviewedOrphanedPrivateAttachmentCleanupRecorded([
+      { version: '045', filename: '045_orphaned_private_attachment_cleanup.sql' }
+    ])).not.toThrow();
+    expect(() => productionMigrations.assertReviewedOrphanedPrivateAttachmentCleanupRecorded([]))
+      .toThrow('045 is pending; run Production orphaned private attachment cleanup 045 before this release');
+    expect(() => productionMigrations.assertReviewedOrphanedPrivateAttachmentCleanupRecorded([
+      { version: '045', filename: '045_other.sql' }
+    ])).toThrow('unexpected filename');
+  });
+
   it('requires every reviewed CRM migration before ordinary production releases', () => {
     const recordedVersions = ['038', '039', '040', '041', '042', '043', '044', '047', '048', '049', '052', '053'];
 
@@ -59,6 +70,7 @@ describe('production migration policy', () => {
     expect(productionMigrations.selectOrdinaryProductionMigrations([
       { version: '043', filename: '043_deletion_state_batched_cleanup.sql', path: '/tmp/043' },
       { version: '044', filename: '044_monday_crm_projection_tables.sql', path: '/tmp/044' },
+      { version: '045', filename: '045_orphaned_private_attachment_cleanup.sql', path: '/tmp/045' },
       { version: '047', filename: '047_atomic_crm_approval.sql', path: '/tmp/047' },
       { version: '053', filename: '053_monday_reconciliation.sql', path: '/tmp/053' },
       { version: '054', filename: '054_additive.sql', path: '/tmp/054' },
@@ -75,8 +87,8 @@ describe('production migration policy', () => {
   it('queries the migration tracker before evaluating production migration files', async () => {
     const source = await readFile(resolve(process.cwd(), 'scripts/apply-production-migrations.mjs'), 'utf8');
 
-    expect(source).toContain("await client.query('SELECT version FROM public.schema_migrations')");
-    expect(source.indexOf("await client.query('SELECT version FROM public.schema_migrations')"))
+    expect(source).toContain("await client.query('SELECT version, filename FROM public.schema_migrations')");
+    expect(source.indexOf("await client.query('SELECT version, filename FROM public.schema_migrations')"))
       .toBeLessThan(source.indexOf('for (const migration of migrations)'));
   });
 

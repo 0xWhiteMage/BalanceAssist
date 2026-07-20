@@ -64,7 +64,7 @@ See `.env.example` for the canonical list. Summary:
 ### 1. Production prerequisites
 
 ```bash
-Apply the full incremental migration chain in order through `061_api_security_retention_and_upload_quota.sql` (except intentionally absent `005`, `050`, and `051`). Do not combine it with legacy snapshot `000_full_schema.sql`. Versions `038` through `043` use the dedicated reviewed cleanup path, CRM versions use their protected workflow, `060` runs at the consent cutover gate, and `061` uses its hash-protected artifact in the production migration job; do not apply those special migrations ad hoc.
+Apply the full incremental migration chain in order through `061_api_security_retention_and_upload_quota.sql` (except intentionally absent `005`, `050`, and `051`). Do not combine it with legacy snapshot `000_full_schema.sql`. Versions `038` through `043` use the original reviewed cleanup path, orphan cleanup `045` uses its own protected workflow, CRM versions use their protected workflow, `060` runs at the consent cutover gate, and `061` uses its hash-protected artifact in the production migration job; do not apply those special migrations ad hoc.
 ```
 
 ### 2. Connect Vercel
@@ -116,7 +116,9 @@ CRM migrations use the separate protected `production-crm-migrations` workflow. 
 4. Confirm the post-migration health smoke passes. This workflow does not build or deploy the application, change a Vercel alias, or configure any webhook.
 5. If the managed workflow is unavailable after the same backup attestation and protected approval, use only `supabase/production-cleanup-038-043.sql` in the Supabase SQL Editor. Do not paste individual migrations or omit the backup attestation; retain the attestation with the release record.
 
-After the recorded-version verification succeeds, dispatch the ordinary production release for later additive migrations as needed.
+Migration `045_orphaned_private_attachment_cleanup.sql` is a later one-time cleanup and is not part of the already-applied `038`-`043` artifact. Bind a fresh `PRODUCTION_BACKUP_AUDIT_REFERENCE` to the selected release SHA, then dispatch `Production orphaned private attachment cleanup 045`. That workflow hash-verifies the source and `supabase/production-orphaned-private-attachment-cleanup-045.sql`, applies only that guarded artifact through the managed Supabase CLI, and runs production health smoke. Ordinary production releases remain blocked until `045` is recorded with its exact filename.
+
+After both recorded-version verifications succeed, dispatch the ordinary production release for later additive migrations as needed.
 
 The `Handoff dispatch` workflow runs every five minutes and can be started with `workflow_dispatch`. This is a best-effort cadence: GitHub scheduled workflows can be delayed, especially during high load, so it does not guarantee dispatch exactly every five minutes. Dispatch retries wait at least one five-minute scheduler window. A fourth failed dispatch evaluation escalates pending handoffs at or after 15 minutes, subject to scheduler delay.
 
