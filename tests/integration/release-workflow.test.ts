@@ -232,10 +232,13 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain("crmDeletion.prosrc.trim() !== reviewedBody('supabase/migrations/058_unsent_crm_deletion.sql'");
     expect(migrate?.run).toContain("compatibility.prosrc.trim() !== reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql'");
     expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");
+    expect(migrate?.run).toContain("database.searchParams.set('uselibpqcompat', 'true')");
+    expect(migrate?.run).toContain("['require', 'verify-full'].includes(option)");
     expect(migrate?.run).toContain("row.owner !== 'postgres'");
     expect(jobs.promote?.environment).toBe('production-consent-cutover');
     const cutover = jobs.promote?.steps?.find((step) => step.name === 'Apply consent 1.2 cutover');
     expect(cutover?.run).toContain('node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run');
+    expect(cutover?.run).toContain("database.searchParams.set('uselibpqcompat', 'true')");
     expect(cutover?.run).toContain("fn.owner !== 'postgres'");
     expect(cutover?.run).toContain('vercel alias set "$PREVIOUS_DEPLOYMENT_URL" "$PRODUCTION_URL"');
     expect(migrate?.run).not.toContain('secrets.');
