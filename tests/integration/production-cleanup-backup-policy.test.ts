@@ -65,6 +65,8 @@ describe('production cleanup backup policy', () => {
     expect(source).toContain('postgres@sha256:');
     expect(source).toContain('pg_export_snapshot()');
     expect(source).toContain('--snapshot="$SOURCE_SNAPSHOT"');
+    expect(source).toContain('DROP SCHEMA public CASCADE');
+    expect(source).not.toContain('pg_restore --dbname="$TARGET_DATABASE_URL" --clean');
     expect(source).toContain('assertMatchingCounts(sourceCounts, targetCounts)');
     expect(source).toContain("createHash('sha256').update(sourceBytes)");
     expect(source).toContain('targetHash !== sourceHash');

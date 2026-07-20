@@ -291,7 +291,7 @@ export async function createProductionCleanupBackup() {
     await runDockerPostgres({
       directory: workingDirectory,
       environment: { TARGET_DATABASE_URL: targetDatabaseUrl, PGSSLMODE: 'require' },
-      script: 'ready=0; for attempt in $(seq 1 12); do if psql "$TARGET_DATABASE_URL" --no-psqlrc --tuples-only --command="SELECT 1" >/dev/null; then ready=1; break; fi; sleep 5; done; test "$ready" = 1; pg_restore --dbname="$TARGET_DATABASE_URL" --clean --if-exists --exit-on-error --no-owner --no-privileges /backup/public.dump'
+      script: 'ready=0; for attempt in $(seq 1 12); do if psql "$TARGET_DATABASE_URL" --no-psqlrc --tuples-only --command="SELECT 1" >/dev/null; then ready=1; break; fi; sleep 5; done; test "$ready" = 1; psql "$TARGET_DATABASE_URL" --no-psqlrc --set=ON_ERROR_STOP=1 --command="DROP SCHEMA public CASCADE"; pg_restore --dbname="$TARGET_DATABASE_URL" --exit-on-error --no-owner --no-privileges /backup/public.dump'
     });
 
     targetClient = new Client({ connectionString: targetDatabaseUrl, ssl: { rejectUnauthorized: false } });
