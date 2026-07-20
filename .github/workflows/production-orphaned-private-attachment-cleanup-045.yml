@@ -1,0 +1,90 @@
+name: Production orphaned private attachment cleanup 045
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable commit SHA containing reviewed cleanup migration 045
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-cleanup-migrations
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - name: Validate trusted cleanup workflow and commit
+        id: validate
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-orphaned-private-attachment-cleanup-045.yml@refs/heads/main"
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet release
+          cd release
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "$RELEASE_REF^{commit}"
+          git merge-base --is-ancestor "$RELEASE_REF" origin/main
+          release_sha="$(git rev-parse "$RELEASE_REF^{commit}")"
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
+
+  cleanup:
+    needs: [validate]
+    environment: production-cleanup-migrations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Validate backup and apply reviewed cleanup artifact
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PRODUCTION_BACKUP_AUDIT_REFERENCE: ${{ secrets.PRODUCTION_BACKUP_AUDIT_REFERENCE }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$PRODUCTION_BACKUP_AUDIT_REFERENCE"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          [[ "$PRODUCTION_BACKUP_AUDIT_REFERENCE" =~ ^BACKUP_AUDIT:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z\|[a-z0-9][a-z0-9._-]{0,63}\|[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\|[0-9a-f]{40}$ ]]
+          IFS='|' read -r backup_at backup_provider backup_id backup_release_sha <<< "${PRODUCTION_BACKUP_AUDIT_REFERENCE#BACKUP_AUDIT:}"
+          attested_at="$(date -u -d "$backup_at" +%s)"
+          now="$(date -u +%s)"
+          test "$attested_at" -le "$now"
+          test $((now - attested_at)) -le $((24 * 60 * 60))
+          test "$backup_release_sha" = "$RELEASE_SHA"
+          node scripts/apply-production-orphaned-private-attachment-cleanup-045.mjs --dry-run
+          npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes
+          npx --no-install supabase db query --linked --file supabase/production-orphaned-private-attachment-cleanup-045.sql
+
+  smoke:
+    needs: [cleanup, validate]
+    environment: production-cleanup-migrations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke post-cleanup production health
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_SHA"
+          test -n "$PRODUCTION_URL"
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null "$PRODUCTION_URL/api/health"

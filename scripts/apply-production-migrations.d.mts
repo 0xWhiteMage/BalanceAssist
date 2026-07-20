@@ -1,5 +1,8 @@
 export function assertExpandOnlyMigration(source: string, filename: string): void;
 export function assertReviewedCleanupMigrationsRecorded(recordedVersions: string[]): void;
+export function assertReviewedOrphanedPrivateAttachmentCleanupRecorded(
+  recordedMigrations: Array<{ version: string; filename: string }>
+): void;
 export function assertReviewedCrmMigrationsRecorded(recordedVersions: string[]): void;
 export function assertReviewedTrustControlsMigrationRecorded(recordedVersions: string[]): void;
 export function assertReviewedFinalReviewMigrationRecorded(recordedVersions: string[]): void;
