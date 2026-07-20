@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -55,6 +56,7 @@ jobs:
       - run: npm ci
       - name: Validate backup and apply reviewed cleanup artifact
         env:
+          GH_TOKEN: ${{ github.token }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           PRODUCTION_BACKUP_AUDIT_REFERENCE: ${{ secrets.PRODUCTION_BACKUP_AUDIT_REFERENCE }}
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
@@ -70,6 +72,61 @@ jobs:
           test "$attested_at" -le "$now"
           test $((now - attested_at)) -le $((24 * 60 * 60))
           test "$backup_release_sha" = "$RELEASE_SHA"
+          test "$backup_provider" = "supabase-project-snapshot"
+          [[ "$backup_id" =~ ^ynwdsmgfirhqwkvzxzsj-run-([0-9]+)$ ]]
+          backup_run_id="${BASH_REMATCH[1]}"
+          run_path="$(mktemp)"
+          artifacts_path="$(mktemp)"
+          latest_runs_path="$(mktemp)"
+          archive_path="$(mktemp)"
+          manifest_dir="$(mktemp -d)"
+          trap 'rm -f "$run_path" "$artifacts_path" "$latest_runs_path" "$archive_path"; rm -rf "$manifest_dir"' EXIT
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --output "$run_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$backup_run_id"
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --output "$artifacts_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$backup_run_id/artifacts?per_page=100"
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --output "$latest_runs_path" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-cleanup-backup.yml/runs?event=workflow_dispatch&per_page=1"
+          artifact_url="$(node - "$run_path" "$artifacts_path" "$latest_runs_path" "$RELEASE_SHA" "$backup_run_id" <<'NODE'
+          const fs = require('fs');
+          const run = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const artifacts = JSON.parse(fs.readFileSync(process.argv[3], 'utf8')).artifacts ?? [];
+          const latestRuns = JSON.parse(fs.readFileSync(process.argv[4], 'utf8')).workflow_runs ?? [];
+          const sha = process.argv[5];
+          const runId = process.argv[6];
+          if (run.event !== 'workflow_dispatch' || run.conclusion !== 'success' || run.head_sha !== sha
+            || run.path !== '.github/workflows/production-cleanup-backup.yml') process.exit(1);
+          if (latestRuns.length !== 1 || String(latestRuns[0].id) !== runId) process.exit(1);
+          const artifact = artifacts.find((candidate) => candidate.name === `cleanup-backup-manifest-${runId}` && !candidate.expired);
+          if (!artifact?.archive_download_url) process.exit(1);
+          process.stdout.write(artifact.archive_download_url);
+          NODE
+          )"
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --output "$archive_path" "$artifact_url"
+          unzip -q "$archive_path" -d "$manifest_dir"
+          node - "$manifest_dir/backup-manifest.json" "$backup_at" "$backup_provider" "$backup_id" "$backup_release_sha" <<'NODE'
+          const fs = require('fs');
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const [createdAt, provider, backupId, releaseSha] = process.argv.slice(3);
+          if (manifest.version !== 1 || manifest.createdAt !== createdAt || manifest.provider !== provider
+            || manifest.backupId !== backupId || manifest.releaseSha !== releaseSha || manifest.sealed !== true
+            || manifest.sourceProjectRef !== 'vbdqjgwcmckutwehrbvo'
+            || manifest.targetProjectRef !== 'ynwdsmgfirhqwkvzxzsj'
+            || !/^[0-9a-f]{64}$/.test(manifest.publicSchema?.dumpSha256 ?? '')
+            || !/^[0-9a-f]{64}$/.test(manifest.storage?.aggregateSha256 ?? '')) process.exit(1);
+          NODE
           node scripts/apply-production-orphaned-private-attachment-cleanup-045.mjs --dry-run
           npx --no-install supabase link --project-ref vbdqjgwcmckutwehrbvo --yes
           npx --no-install supabase db query --linked --file supabase/production-orphaned-private-attachment-cleanup-045.sql
