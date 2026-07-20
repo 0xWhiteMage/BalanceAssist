@@ -88,7 +88,7 @@ In **Settings → Secrets and variables → Actions** add:
 | `TELEGRAM_BOT_TOKEN` | Same as in Vercel env |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `production` environment only; immutable Vercel deploy and alias promotion |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `production` environment only; bounded schema/service-role readiness probes |
-| `PRODUCTION_DATABASE_URL` | `production-migrations` environment only; never repository configuration |
+| `PRODUCTION_DATABASE_URL` | `production-migrations` and protected `Production` backup environment only; never repository configuration |
 | `SUPABASE_ACCESS_TOKEN` | `production-crm-migrations`, `production-cleanup-migrations`, and `production` canary environments; runs reviewed SQL and migration-record checks through the Supabase Management API |
 | `PRODUCTION_BACKUP_AUDIT_REFERENCE` | `production-cleanup-migrations` environment only; protected backup/audit record bound to the cleanup release SHA |
 
@@ -117,6 +117,8 @@ CRM migrations use the separate protected `production-crm-migrations` workflow. 
 5. If the managed workflow is unavailable after the same backup attestation and protected approval, use only `supabase/production-cleanup-038-043.sql` in the Supabase SQL Editor. Do not paste individual migrations or omit the backup attestation; retain the attestation with the release record.
 
 Migration `045_orphaned_private_attachment_cleanup.sql` is a later one-time cleanup and is not part of the already-applied `038`-`043` artifact. Bind a fresh `PRODUCTION_BACKUP_AUDIT_REFERENCE` to the selected release SHA, then dispatch `Production orphaned private attachment cleanup 045`. That workflow hash-verifies the source and `supabase/production-orphaned-private-attachment-cleanup-045.sql`, applies only that guarded artifact through the managed Supabase CLI, and runs production health smoke. Ordinary production releases remain blocked until `045` is recorded with its exact filename.
+
+When the Supabase plan has no managed backups, dispatch `Production cleanup backup` first. After protected `Production` approval, it destroys the designated disposable test project, rotates and disables its existing API and database credentials, restores an exported-snapshot-consistent copy of the production `public` schema, copies and SHA-256 verifies every private `temporary-attachments` object, seals the target credentials again, and retains a seven-day non-sensitive audit manifest. Construct `PRODUCTION_BACKUP_AUDIT_REFERENCE` only from that successful manifest; never treat an empty project or an unverified dump as a backup.
 
 After both recorded-version verifications succeed, dispatch the ordinary production release for later additive migrations as needed.
 

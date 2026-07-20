@@ -66,6 +66,11 @@ describe('production orphaned private attachment cleanup 045 policy', () => {
     expect(step?.env?.SUPABASE_ACCESS_TOKEN).toBe('${{ secrets.SUPABASE_ACCESS_TOKEN }}');
     expect(step?.env?.PRODUCTION_BACKUP_AUDIT_REFERENCE).toBe('${{ secrets.PRODUCTION_BACKUP_AUDIT_REFERENCE }}');
     expect(step?.run).toContain('test "$backup_release_sha" = "$RELEASE_SHA"');
+    expect(step?.run).toContain('production-cleanup-backup.yml');
+    expect(step?.run).toContain('cleanup-backup-manifest-${runId}');
+    expect(step?.run).toContain('per_page=1');
+    expect(step?.run).toContain('String(latestRuns[0].id) !== runId');
+    expect(step?.run).toContain('manifest.sealed !== true');
     expect(step?.run).toContain('24 * 60 * 60');
     expect(step?.run).toContain('supabase db query --linked --file supabase/production-orphaned-private-attachment-cleanup-045.sql');
     expect(source).not.toContain('PRODUCTION_DATABASE_URL');

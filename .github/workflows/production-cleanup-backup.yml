@@ -1,0 +1,97 @@
+name: Production cleanup backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable commit SHA to bind to the verified cleanup backup
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-cleanup-migrations
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - name: Validate trusted backup workflow and commit
+        id: validate
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/production-cleanup-backup.yml@refs/heads/main"
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet release
+          cd release
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "$RELEASE_REF^{commit}"
+          git merge-base --is-ancestor "$RELEASE_REF" origin/main
+          echo "sha=$(git rev-parse "$RELEASE_REF^{commit}")" >> "$GITHUB_OUTPUT"
+
+  snapshot:
+    needs: validate
+    environment: Production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Overwrite and verify sealed cleanup backup project
+        env:
+          BACKUP_MANIFEST_PATH: ${{ github.workspace }}/backup-manifest.json
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          SOURCE_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          SOURCE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SOURCE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          TARGET_DATABASE_HOST: aws-0-ap-southeast-1.pooler.supabase.com
+          TARGET_SUPABASE_URL: https://ynwdsmgfirhqwkvzxzsj.supabase.co
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          node scripts/create-production-cleanup-backup.mjs
+          test -s "$BACKUP_MANIFEST_PATH"
+      - name: Retain non-sensitive backup audit manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cleanup-backup-manifest-${{ github.run_id }}
+          path: backup-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  seal:
+    if: ${{ always() }}
+    needs: [validate, snapshot]
+    environment: Production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Independently seal backup target credentials
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/create-production-cleanup-backup.mjs --seal-only
