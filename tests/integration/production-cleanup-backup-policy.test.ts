@@ -30,7 +30,7 @@ describe('production cleanup backup policy', () => {
   });
 
   it('uses the session pooler for exported PostgreSQL snapshots', () => {
-    expect(normalizeSessionPoolerUrl('postgresql://postgres:secret@example.supabase.com:6543/postgres'))
+    expect(normalizeSessionPoolerUrl('postgresql://postgres:secret@example.supabase.com:6543/postgres?sslmode=require'))
       .toBe('postgresql://postgres:secret@example.supabase.com:5432/postgres');
     expect(() => assertProductionDatabaseUrl('postgresql://postgres:secret@db.example.com/postgres'))
       .toThrow('not the reviewed production database');
@@ -57,6 +57,7 @@ describe('production cleanup backup policy', () => {
   it('seals credentials and verifies database and private object copies', async () => {
     const source = await readFile(resolve(root, 'scripts/create-production-cleanup-backup.mjs'), 'utf8');
     expect(source).toContain("api-keys/legacy?enabled=false");
+    expect(source).toContain("key.type === 'secret'");
     expect(source).toContain('postgres@sha256:');
     expect(source).toContain('pg_export_snapshot()');
     expect(source).toContain('--snapshot="$SOURCE_SNAPSHOT"');
