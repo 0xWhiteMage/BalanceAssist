@@ -94,7 +94,10 @@ async function deleteTargetKey(token, id, wasCompromised = false) {
 }
 
 async function prepareTargetApi(token, temporaryKeyId) {
-  await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy?enabled=false`, { method: 'PUT' });
+  const legacy = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy`);
+  if (legacy?.enabled !== false) {
+    await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys/legacy?enabled=false`, { method: 'PUT' });
+  }
   const keys = await managementRequest(token, `/projects/${cleanupBackupProjectRef}/api-keys`);
   for (const key of keys ?? []) {
     if (key.type === 'secret' && key.id !== temporaryKeyId) await deleteTargetKey(token, key.id, true);
