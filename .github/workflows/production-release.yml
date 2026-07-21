@@ -474,6 +474,7 @@ jobs:
           # The runner enforces expand-only SQL; cleanup needs a separate approved workflow.
           node scripts/apply-production-migrations.mjs
           node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
           import fs from 'node:fs';
           import pg from 'pg';
           function reviewedBody(path, functionName) {
@@ -486,6 +487,19 @@ jobs:
           }
           function assertRelease(condition, check) {
             if (!condition) throw new Error(`Production baseline verification failed: ${check}`);
+          }
+          function assertReviewedBody(live, path, functionName, check) {
+            const expected = reviewedBody(path, functionName);
+            const actual = live?.trim();
+            if (actual === expected) return;
+            const sha256 = (value) => createHash('sha256').update(value ?? '').digest('hex');
+            const actualLines = actual?.split('\n') ?? [];
+            const expectedLines = expected.split('\n');
+            const firstDifferentLine = Array.from(
+              { length: Math.max(actualLines.length, expectedLines.length) },
+              (_, index) => index
+            ).find((index) => actualLines[index] !== expectedLines[index]);
+            throw new Error(`Production baseline verification failed: ${check} (actual sha256 ${sha256(actual)}, expected sha256 ${sha256(expected)}, first differing line ${(firstDifferentLine ?? -1) + 1}, actual lines ${actualLines.length}, expected lines ${expectedLines.length})`);
           }
           const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL });
           try {
@@ -505,7 +519,7 @@ jobs:
             const row = rows[0];
             assertRelease(rows.length === 1 && row.filename === '057_event_deletion_freeze.sql' && row.tgenabled === 'O', '057 trigger record');
             assertRelease(/BEFORE INSERT ON public\.events FOR EACH ROW EXECUTE FUNCTION (?:public\.)?guard_event_session_active\(\)/i.test(row.trigger_definition), '057 trigger definition');
-            assertRelease(row.prosrc.trim() === reviewedBody('supabase/migrations/057_event_deletion_freeze.sql', 'guard_event_session_active('), '057 function body');
+            assertReviewedBody(row.prosrc, 'supabase/migrations/057_event_deletion_freeze.sql', 'guard_event_session_active(', '057 function body');
             assertRelease(row.prosecdef === true && row.lanname === 'plpgsql' && row.result === 'trigger' && row.proconfig?.includes('search_path=public, pg_temp'), '057 function attributes');
             assertRelease(row.owner === 'postgres', '057 function owner');
 
@@ -519,7 +533,7 @@ jobs:
             `);
             const crmDeletion = live058.rows[0];
             assertRelease(live058.rows.length === 1 && crmDeletion.filename === '058_unsent_crm_deletion.sql', '058 migration record');
-            assertRelease(crmDeletion.prosrc.trim() === reviewedBody('supabase/migrations/058_unsent_crm_deletion.sql', 'queue_crm_lead_deletion('), '058 function body');
+            assertReviewedBody(crmDeletion.prosrc, 'supabase/migrations/058_unsent_crm_deletion.sql', 'queue_crm_lead_deletion(', '058 function body');
             assertRelease(crmDeletion.prosecdef === true && crmDeletion.lanname === 'plpgsql' && crmDeletion.result === 'boolean' && crmDeletion.proconfig?.includes('search_path=public, pg_temp'), '058 function attributes');
             assertRelease(crmDeletion.owner === 'postgres', '058 function owner');
 
@@ -532,7 +546,8 @@ jobs:
                 AND EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '059' AND filename = '059_consent_1_2_compatibility.sql')
             `);
             const compatibility = live059.rows[0];
-            assertRelease(live059.rows.length === 1 && compatibility.prosrc.trim() === reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed('), '059 function body');
+            assertRelease(live059.rows.length === 1, '059 migration record');
+            assertReviewedBody(compatibility.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(', '059 function body');
             assertRelease(compatibility.prosecdef === true && compatibility.lanname === 'plpgsql' && compatibility.result === 'boolean' && compatibility.proconfig?.includes('search_path=public, pg_temp') && compatibility.owner === 'postgres', '059 function attributes');
           } finally {
             await client.end();
