@@ -7,6 +7,7 @@ import { getLocalResponse, getFallbackResponse, getNextMissingFieldPrompt, infer
 import { getBalanceFaqResponse } from '@/lib/conversation/balance-faq';
 import { conversationSteps } from '@/lib/conversation/flow';
 import { sanitizeReply } from '@/lib/conversation/reply-sanitize';
+import { extractDraftUpdatesFromText, getNextConversationStep } from '@/lib/conversation/extract';
 import { isBriefReadyForApproval, missingReviewFields, REVIEW_PROMPT } from '@/lib/conversation/review-state';
 import {
   guardAgainstFabricatedBriefFields,
@@ -647,11 +648,12 @@ export async function POST(request: Request) {
     }
 
     const draftUpdates = sanitizeDraftUpdates(sanitized.draft);
+    const hasModelDraftUpdates = Object.keys(draftUpdates).length > 0;
     const priorValues = { ...createDefaultLeadDraft(), ...llmContext.priorDraft } as LeadDraft;
     for (const [field, value] of Object.entries(draftUpdates)) {
       if (priorValues[field as keyof LeadDraft] === value) delete draftUpdates[field as keyof typeof draftUpdates];
     }
-    if (Object.keys(draftUpdates).length === 0 && !sharedWork) {
+    if (!hasModelDraftUpdates && !sharedWork) {
       Object.assign(draftUpdates, inferDirectIntakeUpdates(priorValues, lastUserMessage));
     }
     const companyCandidate = inferCompanyCandidate(priorValues);
@@ -778,10 +780,15 @@ function inferDirectIntakeUpdates(draft: LeadDraft, userMessage: string): Partia
     return {};
   }
   if (value.includes('?') || /\b(?:already|mentioned|recommend|reference|example|portfolio|show me|tell me about)\b/i.test(value)) return {};
-  if (!hasProjectNeed(draft) || value.length > 200) return {};
+  const currentStep = getNextConversationStep(draft);
+  if (!hasProjectNeed(draft) || value.length > 500) return {};
+  const grounded = extractDraftUpdatesFromText(value, draft, currentStep);
+  if (Object.keys(grounded).length > 0) return grounded;
   if (!draft.projectObjective.trim()) return { projectObjective: value };
   if (!draft.audience.trim()) return { audience: value };
   if (!draft.intendedOutputs.trim()) return { intendedOutputs: value };
+  if (!draft.timelineBand.trim()) return { timelineBand: value };
+  if (!draft.budgetBand.trim()) return { budgetBand: value };
   return {};
 }
 

@@ -561,6 +561,6 @@ describe('WidgetOverlay approved confirmation (Fix 5)', () => {
     const confirmation = await screen.findByTestId('approve-confirmation');
     expect(within(confirmation).getByRole('button', { name: /edit brief/i })).toBeInTheDocument();
     expect(within(confirmation).queryByRole('button', { name: /schedule a call/i })).toBeNull();
-    expect(screen.getByRole('link', { name: /schedule a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/15-minute-call');
+    expect(screen.getByRole('link', { name: /book a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/15-minute-call');
   }, 10000);
 });

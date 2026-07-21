@@ -54,17 +54,16 @@ function buildNextQuestionBlock(draft: Record<string, string> = {}): string {
   if (!has('audience')) return `    - Ask: "Who is this for?"`;
   if (!has('intendedOutputs')) return `    - Ask: "What outputs or deliverables do you expect?"`;
   if (!has('timelineBand')) {
-    return `    - Explain that timing helps with planning and feasibility, then ask: "What timeline are you working with?"`;
+    return `    - Ask: "When would you like us to start, and what is the final delivery deadline? Exact dates are most helpful, but you can say if either date is flexible."`;
   }
   if (!has('budgetBand')) {
     return `    - Explain that budget helps suggest realistic formats and scope, then ask: "What budget range are you working with?"`;
   }
   if (!has('referencesStatus')) {
-    return `    - Ask: "Would you like to add a reference URL, or move on?"`;
+    return `    - Ask whether they want to add a public HTTPS link, describe a reference, see relevant Balance work, or skip.`;
   }
-  if (!has('contactName') && !has('contactEmail')) {
-    return `    - Ask for one contact detail: "What name or email would you like to add?"`;
-  }
+  if (!has('contactName')) return `    - Ask: "What name should I add to the brief?"`;
+  if (!has('contactEmail')) return `    - Ask: "What email address should I add to the brief?"`;
   return '    - Do not ask another intake question. Direct the user to review the saved brief.';
 }
 

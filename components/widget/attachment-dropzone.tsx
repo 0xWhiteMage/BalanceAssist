@@ -357,24 +357,23 @@ export function AttachmentDropzone({
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      <div style={{ display: 'grid', gap: 3 }}>
+      <div style={{ display: 'grid', gap: 4, paddingRight: 44 }}>
         <h2
           id="attachment-dialog-title"
           style={{
-            fontSize: 10,
-            fontWeight: 600,
+            fontSize: 15,
+            fontWeight: 700,
             color: brandTokens.colors.warmGold,
-            textTransform: 'uppercase',
-            letterSpacing: '0.16em'
+            letterSpacing: '0.02em'
           }}
         >
-          Add project references
+          Add References &amp; Files
         </h2>
         <div style={{ fontSize: 11, color: brandTokens.colors.mutedText }}>
           {!sessionId
-            ? 'File sharing will be ready when your secure session starts. You can add a reference link now.'
+            ? 'Add a public reference link now. File upload will be ready when your secure session starts.'
             : privateStorageAvailable
-              ? 'Private for 24 hours. Used only for this AI draft.'
+              ? 'Add a link or upload a non-confidential file. Private uploads are retained for 24 hours.'
               : 'File sharing is temporarily unavailable. Add a reference link instead.'}
         </div>
       </div>
@@ -456,8 +455,7 @@ export function AttachmentDropzone({
             fontSize: 10,
             fontWeight: 600,
             color: brandTokens.colors.lightText,
-            textTransform: 'uppercase',
-            letterSpacing: '0.16em'
+            letterSpacing: '0.06em'
           }}
         >
           {filesEnabled ? 'Store file privately' : !sessionId ? 'Secure session starting' : 'File sharing unavailable'}

@@ -28,11 +28,11 @@ function getNextMissingFieldPrompt(draft: LeadDraft): string {
   if (!draft.projectObjective.trim()) return 'What should this project achieve?';
   if (!draft.audience.trim()) return 'Who is the primary audience?';
   if (!draft.intendedOutputs.trim()) return 'What outputs or deliverables do you expect?';
-  if (!draft.timelineBand) return 'What timeline are you working with?';
+  if (!draft.timelineBand) return 'When would you like us to start, and what is the final delivery deadline? Exact dates are most helpful.';
   if (!draft.budgetBand) return 'What budget range are you working with?';
-  if (!draft.referencesStatus.trim()) return 'Would you like to add any references, or skip that for now?';
-  if (!draft.contactName.trim() && !draft.contactEmail.trim()) return 'What name or email should I put on the brief?';
+  if (!draft.referencesStatus.trim()) return 'Would you like to add a reference link, describe a reference, ask for relevant Balance work, or skip that for now?';
   if (!draft.contactName.trim()) return 'What name should I put on the brief?';
+  if (!draft.contactEmail.trim()) return 'What email address should I add to the brief?';
   const companyCandidate = inferCompanyCandidate(draft);
   if (!draft.contactCompany?.trim() && companyCandidate) {
     return `Your project details suggest ${companyCandidate}. Should I list that as the company, or use another name?`;

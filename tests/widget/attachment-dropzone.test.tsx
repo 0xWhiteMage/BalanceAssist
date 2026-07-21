@@ -175,10 +175,10 @@ test('requires an HTTPS URL before invoking the canonical mutation', async () =>
   expect(onAdd).not.toHaveBeenCalled();
 });
 
-test('renders the uppercase section header and short subhead describing the upload affordance', () => {
+test('renders a clear title-case header and short upload status', () => {
   render(<AttachmentDropzone onAddLink={vi.fn()} sessionId="sess-unavailable-copy" />);
   expect(
-    screen.getByRole('heading', { name: /add project references/i })
+    screen.getByRole('heading', { name: /add references & files/i })
   ).toBeInTheDocument();
   expect(
     screen.getByText(/file sharing is temporarily unavailable.*reference link/i)
@@ -210,7 +210,7 @@ test('enables file selection only after the server verifies private storage', as
   const { container } = render(<AttachmentDropzone onAddLink={vi.fn()} sessionId="sess-ready" />);
 
   await waitFor(() => expect(container.querySelector('input[type="file"]')).not.toBeDisabled());
-  expect(screen.getByText(/private for 24 hours.*used only for this AI draft/i)).toBeInTheDocument();
+  expect(screen.getByText(/upload a non-confidential file.*retained for 24 hours/i)).toBeInTheDocument();
   expect(screen.getByTestId('private-analysis-upload-disclosure')).toHaveTextContent(/never sent to the Balance team/i);
 });
 
@@ -223,7 +223,7 @@ test('places the visible header before saved references and the reference form',
     />
   );
 
-  const heading = screen.getByRole('heading', { name: 'Add project references' });
+  const heading = screen.getByRole('heading', { name: 'Add References & Files' });
   const savedHeading = screen.getByRole('heading', { name: 'Saved references' });
   const savedLink = screen.getByRole('link', { name: 'https://example.com/reference' });
   const input = screen.getByRole('textbox', { name: 'Reference link' });

@@ -65,7 +65,7 @@ test('system prompt treats service as optional and references status independent
       contactName: 'Early Name'
     })
   });
-  expect(referencesPrompt).toMatch(/reference URL.*Skip/i);
+  expect(referencesPrompt).toMatch(/public HTTPS link.*describe a reference.*relevant Balance work.*skip/i);
 
   const contactPrompt = buildSystemPrompt({
     currentStage: { id: 'references-contact', label: 'References and contact' },
@@ -79,7 +79,7 @@ test('system prompt treats service as optional and references status independent
       referencesStatus: 'skipped'
     })
   });
-  expect(contactPrompt).toMatch(/contact detail/i);
+  expect(contactPrompt).toMatch(/What name should I add to the brief\?/i);
   expect(contactPrompt).not.toMatch(/Would you like to add a reference URL/i);
 });
 

@@ -188,6 +188,14 @@ export function extractDraftUpdatesFromText(text: string, currentDraft: LeadDraf
     updates[proseField] = trimmedText;
   }
 
+  if (currentStep === 'timeline' && trimmedText && (!currentDraft.timelineBand || overwrite)) {
+    updates.timelineBand = trimmedText;
+  }
+
+  if (currentStep === 'budget' && trimmedText && (!currentDraft.budgetBand || overwrite)) {
+    updates.budgetBand = trimmedText;
+  }
+
   if (currentStep === 'contact-name' && !updates.contactName && (!currentDraft.contactName || overwrite)) {
     const explicit = text.match(/(?:my name is|i'm called|this is|name's)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/i);
     if (explicit?.[1]) updates.contactName = explicit[1].trim();
@@ -228,9 +236,8 @@ export function getNextConversationStep(draft: LeadDraft): ConversationStepId {
   if (!draft.timelineBand) return 'timeline';
   if (!draft.budgetBand) return 'budget';
   if (!draft.referencesStatus) return 'references';
-  if (!draft.contactName && !draft.contactEmail) return 'contact-name';
+  if (!draft.contactName) return 'contact-name';
   if (!draft.contactEmail) return 'contact-email';
-  if (!draft.consentToShare) return 'consent';
   return 'handoff';
 }
 

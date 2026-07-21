@@ -105,7 +105,7 @@ test('chooses the next missing conversation step dynamically', () => {
     referencesStatus: 'added',
     contactName: 'Jane',
     contactEmail: 'jane@example.com'
-  })).toBe('consent');
+  })).toBe('handoff');
 
   const planningComplete = {
     ...draft,
@@ -147,6 +147,18 @@ test('captures canonical prose from its dedicated intake step', () => {
   expect(outputs.intendedOutputs).toBe('Hero film and cut-downs');
 });
 
+test('captures timeline and budget verbatim from their dedicated steps', () => {
+  const timeline = applyTextToDraft(
+    'Start August 3, final delivery September 18',
+    createDefaultLeadDraft(),
+    'timeline'
+  );
+  const budget = applyTextToDraft('SGD 40,000 to 60,000', timeline, 'budget');
+
+  expect(budget.timelineBand).toBe('Start August 3, final delivery September 18');
+  expect(budget.budgetBand).toBe('SGD 40,000 to 60,000');
+});
+
 test('uses stable prompts and excludes qualification from the user journey', () => {
   expect(conversationSteps.objective).toMatchObject({
     botMessages: ['What should this project achieve? Not sure yet is a valid answer.'],
@@ -164,11 +176,11 @@ test('uses stable prompts and excludes qualification from the user journey', () 
     next: 'timeline'
   });
   expect(conversationSteps.references).toMatchObject({
-    botMessages: ['Would you like to add any references? You can add them now or Skip.'],
+    botMessages: ['Would you like to share a reference? Add a public HTTPS link, describe what you have in mind, ask me for relevant Balance work, or choose Skip.'],
     next: 'contact-name'
   });
   expect(conversationSteps.timeline.botMessages).toEqual([
-    expect.stringMatching(/planning.*feasibility|feasibility.*planning/i)
+    expect.stringMatching(/start.*final delivery deadline.*exact dates/i)
   ]);
   expect(conversationSteps.budget.botMessages).toEqual([
     expect.stringMatching(/realistic formats.*scope|scope.*realistic formats/i)

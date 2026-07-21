@@ -13,7 +13,7 @@ async function enterAiIntake(page: Page) {
 async function assertDirectContactRoutes(page: Page) {
   await expect(page.getByRole('button', { name: 'Message the team without AI' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Email us' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-  await expect(page.getByRole('link', { name: 'Schedule a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+  await expect(page.getByRole('link', { name: 'Book a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
 }
 
 function versionedDraft(draft: Record<string, string>, provenance: Record<string, string>) {

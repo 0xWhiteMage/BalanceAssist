@@ -53,7 +53,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   timeline: {
     id: 'timeline',
-    botMessages: ['What timeline are you working with? This helps with planning and feasibility. Not sure yet is a valid answer.'],
+    botMessages: ['When would you like us to start, and what is the final delivery deadline? Exact dates are most helpful, but you can say if either date is flexible.'],
     freeText: true,
     field: 'timelineBand',
     next: 'budget'
@@ -69,7 +69,7 @@ export const conversationSteps: Record<ConversationStepId, ConversationStep> = {
 
   references: {
     id: 'references',
-    botMessages: ['Would you like to add any references? You can add them now or Skip.'],
+    botMessages: ['Would you like to share a reference? Add a public HTTPS link, describe what you have in mind, ask me for relevant Balance work, or choose Skip.'],
     freeText: true,
     next: 'contact-name'
   },

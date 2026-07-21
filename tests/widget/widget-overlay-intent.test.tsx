@@ -293,7 +293,7 @@ describe('WidgetOverlay brief rail gating (Fix 4)', () => {
     expect(consentRequests()).toHaveLength(0);
     expect(relayRequests()).toHaveLength(0);
     expect(screen.queryByPlaceholderText(/write a message to the balance team/i)).toBeNull();
-    expect(screen.getByRole('link', { name: /email the team/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
+    expect(screen.getByRole('link', { name: /email us/i })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
     expect(screen.getByRole('link', { name: /book a call/i })).toHaveAttribute('href', 'https://calendly.com/balance/recovery');
     expect(screen.getByRole('button', { name: /leave/i })).toBeVisible();
 

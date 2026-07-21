@@ -560,7 +560,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
 
     expect(screen.queryByPlaceholderText(/write a message to the balance team|type a message/i)).toBeNull();
     expect(screen.getByRole('link', { name: /email us/i })).toBeVisible();
-    expect(screen.getByRole('link', { name: /schedule a call/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
     expect(requestLog.some((entry) => entry.url.includes('/consent'))).toBe(false);
     expect(requestLog.some((entry) => entry.url.includes('/api/events'))).toBe(false);
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);
@@ -773,7 +773,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     await chooseHumanPath();
     const unavailable = await screen.findByText('The human-only relay could not start. You can still contact the team directly.');
     const email = screen.getByRole('link', { name: /email us/i });
-    const booking = screen.getByRole('link', { name: /schedule a call/i });
+    const booking = screen.getByRole('link', { name: /book a call/i });
     expect(unavailable).toBeVisible();
     expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
     expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
@@ -795,7 +795,7 @@ describe('WidgetOverlay consent-led session bootstrap', () => {
     fireEvent.click(screen.getByLabelText('Open Balance Assist'));
     await new Promise((resolve) => setTimeout(resolve, 2_100));
     expect(screen.getByRole('link', { name: /email us/i })).toBeVisible();
-    expect(screen.getByRole('link', { name: /schedule a call/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /book a call/i })).toBeVisible();
     expect(screen.getByText('The human-only relay could not start. You can still contact the team directly.')).toBeVisible();
     expect(requestLog.filter((entry) => entry.url.includes('/api/sessions') && entry.method === 'POST')).toHaveLength(1);
     expect(requestLog.some((entry) => /\/api\/(chat|telegram\/relay|telegram\/messages)/.test(entry.url))).toBe(false);

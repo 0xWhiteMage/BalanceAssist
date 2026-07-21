@@ -28,7 +28,7 @@ import { useWidgetSessionDraft } from '@/components/widget/use-widget-session-dr
 import { useTeamRelay } from '@/components/widget/use-team-relay';
 import { getReviewPrompt, isBriefReadyForApproval } from '@/lib/conversation/review-state';
 import type { ChatMessage, ConversationStepId, InlineCard } from '@/lib/conversation/types';
-import { DATA_USE_NOTICE_COPY, type ConsentRecord } from '@/lib/privacy/notice';
+import type { ConsentRecord } from '@/lib/privacy/notice';
 import { HUMAN_UPLOAD_GUIDANCE, UPLOAD_ACCEPT_ATTRIBUTE, validateUploadFile } from '@/lib/uploads/file-policy';
 import { useDialogFocus } from '@/components/widget/use-dialog-focus';
 import { classifyUrl, getReferencePresenceStatus, normalizePublicReferenceUrl } from '@/lib/uploads/url-detect';
@@ -217,9 +217,17 @@ export function WidgetOverlay({
       (message) => !messagesRef.current.some((existing) => existing.teamDbId === message.id)
     );
     if (delivered.length === 0) return;
-    const next = [...messagesRef.current, ...delivered.map((message) => ({
-      id: nextId(), sender: 'bot' as const, text: message.text, timestamp: Date.now(), isTeamMessage: true, teamDbId: message.id
-    }))];
+    const next = [...messagesRef.current, ...delivered.map((message) => {
+      const createdAt = Date.parse(message.createdAt);
+      return {
+        id: nextId(),
+        sender: 'bot' as const,
+        text: message.text,
+        timestamp: Number.isFinite(createdAt) ? createdAt : Date.now(),
+        isTeamMessage: true,
+        teamDbId: message.id
+      };
+    })];
     messagesRef.current = next;
     setMessages(next);
   }, [teamMessages]);
@@ -726,7 +734,7 @@ export function WidgetOverlay({
       const connectMsg: ChatMessage = {
         id: nextId(),
         sender: 'bot',
-        text: `Your human-only relay is ready. ${DATA_USE_NOTICE_COPY.humanDisclosure}`,
+        text: 'You are messaging the Balance team directly. These messages are not sent to AI, and your AI brief is shared only if you approve it separately.',
         timestamp: Date.now(),
         isSystem: true
       };
@@ -751,7 +759,7 @@ export function WidgetOverlay({
     const operation = sessionDraft.beginDraftOperation();
     const result = await sessionDraft.updateDraft(key, value, operation);
     if (!result) return { status: 'failed', message: 'This edit was interrupted. Please retry.' } as const;
-    if (result.status === 'saved') setCurrentStep(getNextConversationStep(sessionDraft.draft));
+    if (result.status === 'saved') setCurrentStep(getNextConversationStep(sessionDraft.getDraftSnapshot()));
     return result;
   }
 
@@ -903,8 +911,20 @@ export function WidgetOverlay({
     setMessages(nextMessages);
 
     if (currentStep === 'references') {
-      const referencesStatus = value === 'Skip' ? 'skipped' : 'added';
-      if (value !== 'Skip') {
+      const skipReference = /^skip[.!]?$/i.test(value.trim());
+      const normalizedReference = normalizePublicReferenceUrl(value);
+      if (!skipReference && !normalizedReference) {
+        const statusResult = await sessionDraft.updateDraft('referencesStatus', 'added');
+        if (statusResult?.status !== 'saved') {
+          await botSay('I could not save that reference request. Please try again.');
+          return;
+        }
+        await handleLLMResponse(nextMessages);
+        setCurrentStep('contact-name');
+        return;
+      }
+      const referencesStatus = skipReference ? 'skipped' : 'added';
+      if (!skipReference) {
         const outcome = await addPrivateReference(value);
         if (outcome.status !== 'saved') {
           await botSay(`${outcome.message} Please try again, or choose Skip.`);
@@ -1580,8 +1600,7 @@ export function WidgetOverlay({
                         fontSize: 11,
                         fontWeight: 700,
                         cursor: 'pointer',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.12em'
+                        letterSpacing: '0.04em'
                       }}
                     >
                       Start with Balance Assist
@@ -1600,8 +1619,7 @@ export function WidgetOverlay({
                         fontSize: 11,
                         fontWeight: 600,
                         cursor: 'pointer',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.12em'
+                        letterSpacing: '0.04em'
                       }}
                     >
                       Talk to a human
@@ -1733,7 +1751,7 @@ export function WidgetOverlay({
                         <button
                           type="button"
                           className="balance-widget-action balance-attachment-close"
-                          aria-label="Close references"
+                          aria-label="Close attachments"
                           onClick={() => setAttachmentOpen(false)}
                         >
                           &#10005;
@@ -1780,9 +1798,10 @@ export function WidgetOverlay({
                 </button>
                 </div>
               </div>
-
-              {!deletionFrozen && <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} calendlyUrl={configuredCalendlyUrl} onConnect={handleTeamConnect} />}
             </>
+          )}
+          {(!useBriefTabs || tabMode === 'chat') && (
+            <HumanFooter isTeamConnected={humanRequested} hasTeamReply={isTeamConnected} humanStatus={humanStatus} calendlyUrl={configuredCalendlyUrl} onConnect={handleTeamConnect} />
           )}
         </div>
       )}

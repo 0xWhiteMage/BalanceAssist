@@ -27,8 +27,7 @@ function SecondaryButton({ onClick, children, ariaLabel }: { onClick: () => void
         fontSize: 11,
         fontWeight: 600,
         cursor: 'pointer',
-        textTransform: 'uppercase',
-        letterSpacing: '0.12em'
+        letterSpacing: '0.04em'
       }}
     >
       {children}
@@ -135,18 +134,11 @@ export function ReviewPanel({
             <span>Privacy &amp; project data</span>
             <svg className="balance-widget-data-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 10l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </summary>
-          <div className="balance-widget-data-actions" aria-label="Brief and data controls">
+          <div role="group" className="balance-widget-data-actions" aria-label="Brief and data controls">
             {onViewBrief && <button type="button" className="balance-widget-inline-action" disabled={Boolean(pendingDataAction)} onClick={() => void runDataAction('view', onViewBrief)}>View stored data</button>}
             {onClearBrief && <button type="button" className="balance-widget-inline-action" disabled={Boolean(pendingDataAction)} onClick={() => setDataConfirmation('clear')}>Clear editable brief</button>}
-            {(onWithdrawTransfer || onRequestDeletion) && (
-              <details className="balance-widget-sharing-controls">
-                <summary>Sharing consent &amp; deletion</summary>
-                <div className="balance-widget-sharing-actions">
-                  {onWithdrawTransfer && <button type="button" className="balance-widget-inline-action" disabled={Boolean(pendingDataAction)} onClick={() => void runDataAction('withdraw', onWithdrawTransfer)}>Withdraw sharing consent</button>}
-                  {onRequestDeletion && <button type="button" className="balance-widget-inline-action balance-widget-inline-action-danger" disabled={Boolean(pendingDataAction)} onClick={() => setDataConfirmation('delete')}>Request project deletion</button>}
-                </div>
-              </details>
-            )}
+            {onWithdrawTransfer && <button type="button" className="balance-widget-inline-action" disabled={Boolean(pendingDataAction)} onClick={() => void runDataAction('withdraw', onWithdrawTransfer)}>Withdraw sharing consent</button>}
+            {onRequestDeletion && <button type="button" className="balance-widget-inline-action balance-widget-inline-action-danger" disabled={Boolean(pendingDataAction)} onClick={() => setDataConfirmation('delete')}>Request project deletion</button>}
             {dataConfirmation === 'clear' && (
               <div role="alert" className="balance-widget-data-confirmation">
                 <span>This clears the editable brief only. Uploads, links, consent history, approved transfers, provider copies, and backups are not deleted.</span>
@@ -203,8 +195,7 @@ export function ReviewPanel({
               fontWeight: 700,
               cursor: approveDisabled ? 'not-allowed' : 'pointer',
               opacity: approveDisabled ? 0.4 : 1,
-              textTransform: 'uppercase',
-              letterSpacing: '0.12em',
+              letterSpacing: '0.04em',
               boxShadow: approveDisabled ? 'none' : '0 4px 18px rgba(219, 181, 128, 0.45)'
             }}
           >

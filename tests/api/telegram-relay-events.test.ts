@@ -28,12 +28,15 @@ describe('POST /api/telegram/relay', () => {
     }));
 
     expect(rpc).toHaveBeenCalledWith('relay_human_message', { p_session_id: 'sess-relay', p_request_id: retryRequestId, p_text: 'Same text' });
-    await expect(response.json()).resolves.toEqual({ ok: true, persisted: true, queued: true });
+    await expect(response.json()).resolves.toEqual({ ok: true, persisted: true, queued: true, delivered: false });
   });
 
   test('dispatches a persisted interactive relay immediately while retaining the durable outbox', async () => {
     process.env.INTERNAL_DISPATCH_SECRET = 'dispatch-secret';
-    const dispatchFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const dispatchFetch = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      results: [{ id: 'handoff-33', status: 'sent' }]
+    }), { status: 200 }));
     vi.stubGlobal('fetch', dispatchFetch);
     rpc.mockResolvedValue({ data: [{ persisted: true, consent_required: false, handoff_id: 'handoff-33' }], error: null });
     const { POST } = await import('@/app/api/telegram/relay/route');
@@ -46,7 +49,25 @@ describe('POST /api/telegram/relay', () => {
       new URL('https://balance.example/api/internal/handoff-dispatch'),
       expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer dispatch-secret' } })
     );
-    await expect(response.json()).resolves.toMatchObject({ persisted: true, queued: true });
+    await expect(response.json()).resolves.toMatchObject({ persisted: true, queued: true, delivered: true });
+  });
+
+  test('falls back to CRON_SECRET when the internal dispatch secret is blank', async () => {
+    process.env.INTERNAL_DISPATCH_SECRET = '   ';
+    process.env.CRON_SECRET = 'cron-secret';
+    const dispatchFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, results: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', dispatchFetch);
+    rpc.mockResolvedValue({ data: [{ persisted: true, consent_required: false, handoff_id: 'handoff-33' }], error: null });
+    const { POST } = await import('@/app/api/telegram/relay/route');
+
+    await POST(new Request('https://balance.example/api/telegram/relay', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': retryRequestId }, body: JSON.stringify({ sessionId: 'sess-relay', text: 'Same text' })
+    }));
+
+    expect(dispatchFetch).toHaveBeenCalledWith(
+      new URL('https://balance.example/api/internal/handoff-dispatch'),
+      expect.objectContaining({ headers: { Authorization: 'Bearer cron-secret' } })
+    );
   });
 
   test('returns only the stable persistence error when the RPC fails', async () => {

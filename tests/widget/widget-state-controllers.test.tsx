@@ -773,6 +773,18 @@ describe('useWidgetSessionDraft', () => {
 });
 
 describe('useTeamRelay', () => {
+  test('reports a verified fast-path delivery immediately', async () => {
+    const { result } = renderHook(() => useTeamRelay({
+      sessionId: 'session-1',
+      fetchTeamMessages: vi.fn(),
+      relayUserMessage: vi.fn(async () => ({ persisted: true, queued: true, delivered: true }))
+    }));
+
+    await act(async () => { await result.current.send('Hello'); });
+
+    expect(result.current.status).toBe('delivered');
+  });
+
   test('ignores previous-outbox delivery evidence while the current send is pending', async () => {
     const pendingSend = deferred<{ persisted: boolean; queued: boolean; delivered: boolean }>();
     const poll = vi.fn(async () => ({ outgoingStatus: 'delivered' as const, messages: [], fileRequestOpen: false, fileRequestNote: null, scheduleRequestOpen: false }));
@@ -1354,6 +1366,21 @@ describe('relay API client', () => {
       persisted: true,
       queued: true,
       delivered: false
+    });
+  });
+
+  test('reports delivery only from the explicit verified response field', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      persisted: true,
+      queued: true,
+      delivered: true
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(relayUserMessage('session-1', 'Hello', 'request-1')).resolves.toEqual({
+      persisted: true,
+      queued: true,
+      delivered: true
     });
   });
 

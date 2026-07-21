@@ -18,10 +18,10 @@ describe('human relay public status', () => {
     expect(action).toHaveAttribute('type', 'button');
     expect(action).toHaveClass('balance-widget-contact-action');
     expect(screen.getByRole('link', { name: 'Email us' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-    expect(screen.getByRole('link', { name: 'Schedule a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
-    expect(screen.getByText('Email Us')).toBeVisible();
-    expect(screen.getByText('Schedule a Call')).toBeVisible();
-    expect(screen.getByText('Message the Team')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Book a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+    expect(screen.getByText('Email')).toBeVisible();
+    expect(screen.getByText('Book a call')).toBeVisible();
+    expect(screen.getByText('Message the team')).toBeVisible();
   });
 
   test('omits delivery status clutter while preserving direct contact actions', () => {
@@ -32,12 +32,11 @@ describe('human relay public status', () => {
     expect(screen.queryByText(/provider|telegram|private provider failure/i)).toBeNull();
   });
 
-  test('keeps direct email and booking recovery available for unavailable delivery', () => {
+  test('leaves unavailable-delivery recovery to the persistent footer', () => {
     render(<HumanFallbacks calendlyUrl="https://calendly.com/balance/test" deliveryUnavailable={true} />);
 
-    expect(screen.getByText('Message delivery is unavailable. Please email the team or book a call instead.')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Email us' })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-    expect(screen.getByRole('link', { name: 'Schedule a call' })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+    expect(screen.getByText('Message delivery is unavailable. Use the contact options below.')).toBeVisible();
+    expect(screen.queryByRole('link')).toBeNull();
     expect(screen.queryByText(/provider|telegram|private provider failure/i)).toBeNull();
   });
 

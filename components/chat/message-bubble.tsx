@@ -1,9 +1,11 @@
 'use client';
 
 import { memo } from 'react';
+import Image from 'next/image';
 import { brandTokens } from '@/lib/brand-tokens';
 import type { ChatMessage, InlineCard } from '@/lib/conversation/types';
 import { WorkCardRow, type WorkCardCategory } from '@/components/chat/work-card';
+import { balanceLogoUrl } from '@/components/widget/widget-overlay-parts';
 
 type MessageBubbleProps = {
   message: ChatMessage;
@@ -36,6 +38,21 @@ function renderText(text: string) {
 
     return <span key={i}>{part}</span>;
   });
+}
+
+function MessageTime({ timestamp }: { timestamp: number }) {
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return null;
+  return (
+    <time className="balance-message-time" dateTime={date.toISOString()}>
+      {new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      }).format(date)}
+    </time>
+  );
 }
 
 export const MessageBubble = memo(function MessageBubble({ message, onInlineCardClick }: MessageBubbleProps) {
@@ -79,21 +96,25 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
         >
           Balance Studio Team
         </span>
-        <div
-          style={{
-            maxWidth: 'min(78%, 620px)',
-            padding: '12px 16px',
-            borderRadius: '4px 16px 16px 16px',
-            background: 'rgba(74, 222, 128, 0.06)',
-            border: '1px solid rgba(74, 222, 128, 0.3)',
-            borderLeftWidth: '3px',
-            fontSize: '13px',
-            lineHeight: 1.6,
-            color: brandTokens.colors.lightText
-          }}
-        >
-          {renderText(message.text)}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+          <TeamAvatar />
+          <div
+            style={{
+              maxWidth: 'min(78%, 620px)',
+              padding: '12px 16px',
+              borderRadius: '4px 16px 16px 16px',
+              background: 'rgba(74, 222, 128, 0.06)',
+              border: '1px solid rgba(74, 222, 128, 0.3)',
+              borderLeftWidth: '3px',
+              fontSize: '13px',
+              lineHeight: 1.6,
+              color: brandTokens.colors.lightText
+            }}
+          >
+            {renderText(message.text)}
+          </div>
         </div>
+        <div style={{ marginLeft: '36px' }}><MessageTime timestamp={message.timestamp} /></div>
       </div>
     );
   }
@@ -127,6 +148,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
             </div>
           </div>
         )}
+        {showBubble && <div style={{ marginLeft: '36px' }}><MessageTime timestamp={message.timestamp} /></div>}
 
         {!showBubble && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
@@ -213,7 +235,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
   }
 
   return (
-    <div role="group" aria-label="Message from you" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+    <div role="group" aria-label="Message from you" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
       <div
         className="balance-message-bubble balance-message-bubble--user"
         style={{
@@ -229,6 +251,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
       >
         {renderText(message.text)}
       </div>
+      <MessageTime timestamp={message.timestamp} />
     </div>
   );
 });
@@ -236,7 +259,8 @@ export const MessageBubble = memo(function MessageBubble({ message, onInlineCard
 function BotAvatar() {
   return (
     <div
-      aria-hidden="true"
+      role="img"
+      aria-label="AI assistant"
       style={{
         width: '28px',
         height: '28px',
@@ -257,6 +281,14 @@ function BotAvatar() {
           strokeLinejoin="round"
         />
       </svg>
+    </div>
+  );
+}
+
+function TeamAvatar() {
+  return (
+    <div className="balance-message-team-avatar">
+      <Image src={balanceLogoUrl} alt="Balance logo" width={16} height={16} unoptimized />
     </div>
   );
 }

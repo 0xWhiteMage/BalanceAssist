@@ -42,10 +42,10 @@ export function WidgetOverlayHeader({
         </div>
         <div>
           <p id="balance-assist-dialog-title" className="balance-widget-title">
-            {isTeamConnected ? 'Balance Studio Team' : humanRelayActive ? 'Balance Studio Relay' : 'Balance Assist'}
+            {isTeamConnected || humanRelayActive ? 'Message the team' : 'Balance Assist'}
           </p>
           <p className="balance-widget-eyebrow">
-            {isTeamConnected ? 'Team reply received' : humanRelayActive ? 'Human-only relay' : 'AI brief assistant'}
+            {isTeamConnected || humanRelayActive ? 'Direct to Balance, no AI' : 'AI brief assistant'}
           </p>
         </div>
       </div>
@@ -148,7 +148,7 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
           <div>
-            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', color: brandTokens.colors.warmGold }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', color: brandTokens.colors.warmGold }}>
               Accepted files
             </div>
             <div id="upload-policy-title" style={{ marginTop: '4px', fontSize: '14px', fontWeight: 600 }}>Upload guidelines</div>
@@ -167,7 +167,7 @@ export function UploadPolicyModal({ onClose }: { onClose: () => void }) {
         <div style={{ marginTop: '14px', display: 'grid', gap: '10px' }}>
           {groups.map(([label, list]) => (
             <div key={label} style={{ border: `1px solid ${brandTokens.colors.subtleBorder}`, borderRadius: '10px', padding: '10px 12px', background: 'rgba(255,255,255,0.02)' }}>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: brandTokens.colors.warmGold, letterSpacing: '0.06em' }}>
                 {label}
               </div>
               <div style={{ marginTop: '4px', fontSize: '12px', lineHeight: 1.6 }}>{list}</div>
@@ -205,17 +205,17 @@ export function HumanFooter({
       <nav className="balance-widget-contact-actions" aria-label="Contact Balance directly">
           <a href="mailto:hello@balancestudio.tv" className="balance-widget-contact-action" aria-label="Email us">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-            Email Us
+            Email
           </a>
           {calendlyUrl && (
-            <a href={calendlyUrl} className="balance-widget-contact-action" aria-label="Schedule a call">
+            <a href={calendlyUrl} className="balance-widget-contact-action" aria-label="Book a call">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 011 1v14H4V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              Schedule a Call
+              Book a call
             </a>
           )}
           <button type="button" className="balance-widget-contact-action" aria-label="Message the team without AI" onClick={onConnect}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 17l-2 4 5-2h8a5 5 0 005-5V8a5 5 0 00-5-5H8a5 5 0 00-5 5v6a5 5 0 002 3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-            Message the Team
+            Message the team
           </button>
       </nav>
     </div>
@@ -223,7 +223,6 @@ export function HumanFooter({
 }
 
 export function HumanFallbacks({
-  calendlyUrl,
   unavailable = false,
   deliveryUnavailable = false
 }: {
@@ -232,7 +231,7 @@ export function HumanFallbacks({
   deliveryUnavailable?: boolean;
 }) {
   const copy = deliveryUnavailable
-    ? 'Message delivery is unavailable. Please email the team or book a call instead.'
+    ? 'Message delivery is unavailable. Use the contact options below.'
     : unavailable
       ? 'The human-only relay could not start. You can still contact the team directly.'
       : 'Prefer another route? Contact the team directly.';
@@ -240,14 +239,11 @@ export function HumanFallbacks({
   return (
     <div role={unavailable || deliveryUnavailable ? 'status' : undefined} className="balance-widget-fallback-line">
       <span>{copy}</span>
-      <a href="mailto:hello@balancestudio.tv">Email us</a>
-      {calendlyUrl && <a href={calendlyUrl}>Schedule a call</a>}
     </div>
   );
 }
 
 export function ConfidentialDiversionRecovery({
-  calendlyUrl,
   onHuman,
   onLeave
 }: {
@@ -260,8 +256,6 @@ export function ConfidentialDiversionRecovery({
       <p role="status" style={{ margin: 0 }}>{CONFIDENTIAL_INTAKE_RESPONSE}</p>
       <p style={{ margin: 0 }}>Nothing is sent to the Balance team until you choose to continue.</p>
       <button type="button" onClick={onHuman} style={{ padding: '10px 12px', borderRadius: 999, border: 'none', background: brandTokens.colors.warmGold, color: brandTokens.colors.baseBlack, fontWeight: 700, cursor: 'pointer' }}>Talk to the team without AI</button>
-      <a href="mailto:hello@balancestudio.tv" style={{ color: brandTokens.colors.warmGold }}>Email the team</a>
-      {calendlyUrl && <a href={calendlyUrl} style={{ color: brandTokens.colors.warmGold }}>Book a call</a>}
       <button type="button" onClick={onLeave} style={{ padding: '8px 12px', borderRadius: 999, border: `1px solid ${brandTokens.colors.border}`, background: 'transparent', color: brandTokens.colors.lightText, cursor: 'pointer' }}>Leave</button>
     </div>
   );
@@ -432,7 +426,7 @@ export function ProjectBriefCard({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
         <div>
-          <div style={{ fontSize: labelFontSize, fontWeight: 600, color: brandTokens.colors.warmGold, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
+          <div style={{ fontSize: labelFontSize, fontWeight: 600, color: brandTokens.colors.warmGold, letterSpacing: '0.08em' }}>
             {title ?? 'Project Brief'}
           </div>
         </div>

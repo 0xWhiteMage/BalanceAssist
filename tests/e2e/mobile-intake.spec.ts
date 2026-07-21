@@ -33,7 +33,7 @@ async function assertNoHorizontalOverflow(locator: Locator, label: string) {
 async function assertDirectContactRoutes(page: Page) {
   await assertMinimumTarget(page.getByRole('button', { name: 'Message the team without AI', exact: true }));
   await expect(page.getByRole('link', { name: 'Email us', exact: true })).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
-  await expect(page.getByRole('link', { name: 'Schedule a call', exact: true })).toHaveAttribute('href', 'https://calendly.com/balance/test');
+  await expect(page.getByRole('link', { name: 'Book a call', exact: true })).toHaveAttribute('href', 'https://calendly.com/balance/test');
 }
 
 function versionedDraft(draft: Record<string, string>, provenance: Record<string, string>) {
@@ -663,7 +663,7 @@ test.describe('mobile intake', () => {
     }));
     expect(briefWidth.panel).toBeCloseTo(briefWidth.parent, 0);
     await expect(page.getByRole('link', { name: 'Email us' })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: 'Schedule a call' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Book a call' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Message the team without AI' })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Edit original wording' }).click();
@@ -693,7 +693,7 @@ test.describe('mobile intake', () => {
     await expect(chatTab).toHaveAttribute('aria-selected', 'true');
     await expect(input).toBeVisible();
     await expect(page.getByRole('link', { name: 'Email us' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Schedule a call' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Book a call' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Message the team without AI' })).toBeVisible();
 
     await chatTab.focus();
@@ -705,7 +705,7 @@ test.describe('mobile intake', () => {
     await chatTab.click();
     const human = page.getByRole('button', { name: 'Message the team without AI', exact: true });
     await expect(human).toBeVisible();
-    await expect(human).toHaveText('Message the Team');
+    await expect(human).toHaveText('Message the team');
     await expect(human).toHaveClass(/balance-widget-contact-action/);
     const humanBounds = await human.boundingBox();
     expect(humanBounds).not.toBeNull();

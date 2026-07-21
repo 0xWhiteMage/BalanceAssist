@@ -205,11 +205,11 @@ export async function relayUserMessage(sessionId: string, text: string, requestI
       keepalive: true
     }, 30_000);
     if (!response.ok) return { persisted: false, queued: false, delivered: false };
-    const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean };
+    const data = await response.json() as { ok?: boolean; persisted?: boolean; queued?: boolean; delivered?: boolean };
     return {
       persisted: data.ok === true && data.persisted === true,
       queued: data.queued === true,
-      delivered: false
+      delivered: data.delivered === true
     };
   } catch {
     return { persisted: false, queued: false, delivered: false };

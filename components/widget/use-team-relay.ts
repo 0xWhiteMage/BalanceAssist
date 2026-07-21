@@ -169,6 +169,7 @@ export function useTeamRelay({ sessionId, fetchTeamMessages, relayUserMessage }:
       retryRef.current = null;
       setStatus((current) => {
         if (current === 'delivered') return current;
+        if (typeof result !== 'boolean' && result.delivered) return 'delivered';
         return typeof result === 'boolean' || result.queued ? 'queued' : 'saved';
       });
     }

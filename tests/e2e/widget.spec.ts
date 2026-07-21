@@ -53,8 +53,8 @@ test('direct human contact keeps a usable pending request input without claiming
 
   await page.getByRole('button', { name: 'Talk to the team without AI', exact: true }).click();
 
-  await expect(page.getByText('Balance Studio Relay', { exact: true })).toBeVisible();
-  await expect(page.getByText('Human-only relay', { exact: true })).toBeVisible();
+  await expect(page.locator('#balance-assist-dialog-title')).toHaveText('Message the team');
+  await expect(page.getByText('Direct to Balance, no AI', { exact: true })).toBeVisible();
   await expect(page.getByText('AI brief assistant', { exact: true })).toHaveCount(0);
   await expect(page.getByPlaceholder('Write a message to the Balance team...')).toBeVisible();
   await expect(page.getByRole('status')).toHaveCount(0);
@@ -81,7 +81,7 @@ test('human recovery persists on mobile when session creation fails', async ({ p
 
   const notice = page.getByText('The human-only relay could not start. You can still contact the team directly.');
   const email = page.getByRole('link', { name: 'Email us', exact: true });
-  const booking = page.getByRole('link', { name: 'Schedule a call', exact: true });
+  const booking = page.getByRole('link', { name: 'Book a call', exact: true });
   await expect(notice).toBeVisible();
   await expect(email).toHaveAttribute('href', 'mailto:hello@balancestudio.tv');
   await expect(booking).toHaveAttribute('href', 'https://calendly.com/balance/test');
@@ -219,13 +219,13 @@ test('restores focus after closing its nested reference dialog without force cli
   await attachment.focus();
   await attachment.press('Enter');
 
-  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add References & Files' })).toBeVisible();
   await attachment.focus();
   await expect(attachment).not.toBeFocused();
   await expect(attachment.click({ timeout: 500 })).rejects.toThrow(/intercepts pointer events/);
-  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add References & Files' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Add References & Files' })).toBeHidden();
   await expect(attachment).toBeFocused();
 });
 
@@ -256,7 +256,7 @@ test('stores an available private upload through the keyboard path', async ({ pa
   const attachment = page.getByRole('button', { name: 'Attach references' });
   await attachment.focus();
   await attachment.press('Enter');
-  await expect(page.getByRole('dialog', { name: 'Add project references' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add References & Files' })).toBeVisible();
 
   const privateUpload = page.getByRole('button', { name: /store file privately/i });
   await expect(privateUpload).toBeEnabled();

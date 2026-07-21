@@ -169,7 +169,8 @@ describe('ReviewPanel', () => {
     expect(screen.queryByRole('link', { name: /email the team/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /talk to the team/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Privacy & project data'));
-    fireEvent.click(screen.getByText('Sharing consent & deletion'));
+    const controls = screen.getByRole('group', { name: 'Brief and data controls' });
+    expect(controls.querySelectorAll('button')).toHaveLength(4);
     expect(screen.getByRole('button', { name: 'Request project deletion' })).toBeInTheDocument();
   });
 
@@ -186,7 +187,6 @@ describe('ReviewPanel', () => {
     );
 
     fireEvent.click(screen.getByText('Privacy & project data'));
-    fireEvent.click(screen.getByText('Sharing consent & deletion'));
     fireEvent.click(screen.getByRole('button', { name: 'Withdraw sharing consent' }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Sharing consent withdrawn.'));
 
