@@ -224,6 +224,7 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain('test -n "$PRODUCTION_DATABASE_URL"');
     expect(migrate?.run).toContain('node scripts/apply-production-migrations.mjs');
     expect(migrate?.run).toContain('node scripts/apply-production-consent-1-2-059-repair.mjs --dry-run');
+    expect(migrate?.run).toContain('node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run');
     expect(migrate?.run).toContain('node scripts/apply-production-api-security-061.mjs --dry-run');
     expect(migrate?.run).toContain("version = '061'");
     expect(migrate?.run).toContain('supabase/production-api-security-061.sql');
@@ -244,7 +245,9 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain('pg_advisory_xact_lock(90442059)');
     expect(migrate?.run).toContain('059 repair function attributes');
     expect(migrate?.run).toContain('supabase/production-consent-1-2-compatibility-059-repair.sql');
-    expect(migrate?.run).toContain('060 function body drift');
+    expect(migrate?.run).toContain('060 unreviewed function drift');
+    expect(migrate?.run).toContain("client.query(fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8'))");
+    expect(migrate?.run).toContain('060 repaired function set');
     expect(migrate?.run).toContain("cutoverRecorded ? 'supabase/migrations/060_consent_1_2_cutover.sql'");
     expect(migrate?.run).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')");
     expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");

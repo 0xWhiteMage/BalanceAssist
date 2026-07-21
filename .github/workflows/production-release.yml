@@ -474,6 +474,7 @@ jobs:
           # The runner enforces expand-only SQL; cleanup needs a separate approved workflow.
           node scripts/apply-production-migrations.mjs
           node scripts/apply-production-consent-1-2-059-repair.mjs --dry-run
+          node scripts/apply-production-consent-1-2-cutover-060.mjs --dry-run
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
           import fs from 'node:fs';
@@ -532,9 +533,11 @@ jobs:
                 `);
                 assertRelease(live060.rows.length === 5, '060 function set');
                 const bodyDrift = [];
+                const liveBodyHashes = new Map();
                 for (const fn of live060.rows) {
                   const expected = reviewedBody('supabase/migrations/060_consent_1_2_cutover.sql', `${fn.proname}(`);
                   const actual = fn.prosrc.trim();
+                  liveBodyHashes.set(fn.proname, bodySha256(actual));
                   if (actual !== expected) bodyDrift.push(`${fn.proname} actual ${bodySha256(actual)} expected ${bodySha256(expected)}`);
                   const expectedResult = fn.proname === 'finalize_session_lead'
                     ? 'TABLE(persisted boolean, consent_required boolean, qualification_status text, score integer, recommended_next_step text, lead_id bigint, handoff_id uuid, crm_record_id uuid, crm_revision integer, approved_draft_version integer, crm_queued boolean, approval_input_hash text, approved_reference_set_hash text)'
@@ -545,7 +548,30 @@ jobs:
                   assertRelease(fn.prosecdef === true && fn.lanname === 'plpgsql' && fn.result === expectedResult && fn.proconfig?.includes(expectedSearchPath) && fn.owner === 'postgres', `060 ${fn.proname} attributes`);
                   assertRelease(fn.public_execute === false && fn.anon_execute === false && fn.authenticated_execute === false && fn.service_role_execute === true, `060 ${fn.proname} privileges`);
                 }
-                assertRelease(bodyDrift.length === 0, `060 function body drift (${bodyDrift.join('; ')})`);
+                if (bodyDrift.length) {
+                  const observedDrift = new Map([
+                    ['assert_session_processing_allowed', '7bcba5a99145ead5ce20700a06b37e7c911f8099853f5ce9c450a8213a385215'],
+                    ['finalize_session_lead', '0b8c5c330f793cc8e9c1f925085b594417a69d09d6eb34ce3926e4350f5e8b70'],
+                    ['relay_human_message', '5618daf9b7a94d5b99e92db18c6e6ad1336d633a18e6c58115c730d95ab5db06'],
+                    ['reserve_handoff_send', 'dcb6892c8e14d7ea7ea61f51bf9e34cd4e901cbcf2a0f298c1efd0a494eeadf2'],
+                    ['delete_session_for_deletion_job', '87f193f5dccbdc828090d4693fa6bc5c6c37a4611967b410b5584edef0d4e218'],
+                  ]);
+                  assertRelease(bodyDrift.length === observedDrift.size && [...observedDrift].every(([name, hash]) => liveBodyHashes.get(name) === hash), `060 unreviewed function drift (${bodyDrift.join('; ')})`);
+                  await client.query(fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8'));
+                  const restored060 = await client.query(`
+                    SELECT p.proname, p.prosrc FROM pg_proc p WHERE p.oid IN (
+                      'public.assert_session_processing_allowed(uuid)'::regprocedure,
+                      'public.finalize_session_lead(uuid)'::regprocedure,
+                      'public.relay_human_message(uuid,text,text)'::regprocedure,
+                      'public.reserve_handoff_send(uuid,uuid)'::regprocedure,
+                      'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure
+                    )
+                  `);
+                  assertRelease(restored060.rows.length === observedDrift.size, '060 repaired function set');
+                  for (const fn of restored060.rows) {
+                    assertReviewedBody(fn.prosrc, 'supabase/migrations/060_consent_1_2_cutover.sql', `${fn.proname}(`, `060 repaired ${fn.proname} body`);
+                  }
+                }
               } else {
                 const repairState = await client.query(`
                 SELECT p.prosrc, p.prosecdef, p.proconfig, l.lanname,
