@@ -178,8 +178,9 @@ describe('production release workflows', () => {
     expect(immutableSmoke?.run).toContain('--connect-timeout 5');
     expect(immutableSmoke?.run).toContain('POST');
     expect(immutableSmoke?.run).toContain('$DEPLOYMENT_URL/api/sessions');
-    expect(immutableSmoke?.run).toContain('origin: https://balance-assist.vercel.app');
-    expect(immutableSmoke?.run).toContain('{\\"sourceUrl\\":\\"https://balance-assist.vercel.app/session-smoke\\",\\"consentVersion\\":\\"1.2\\",\\"consentedAt\\":\\"$consented_at\\"}');
+    expect(immutableSmoke?.run).toContain('new URL(process.env.DEPLOYMENT_URL).origin');
+    expect(immutableSmoke?.run).toContain('origin: $deployment_origin');
+    expect(immutableSmoke?.run).toContain('{\\"sourceUrl\\":\\"$deployment_origin/session-smoke\\",\\"consentVersion\\":\\"1.2\\",\\"consentedAt\\":\\"$consented_at\\"}');
     expect(immutableSmoke?.run).toContain('date -u +%Y-%m-%dT%H:%M:%SZ');
     expect(immutableSmoke?.run).not.toContain('consents');
     expect(immutableSmoke?.run).toContain('session.persisted !== true');

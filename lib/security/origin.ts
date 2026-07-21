@@ -4,10 +4,12 @@ const DEFAULT_ORIGINS = [
   'https://balance-assist.vercel.app'
 ];
 
-function getVercelPreviewOrigins(): string[] {
-  if (process.env.VERCEL_ENV !== 'preview') return [];
+function getVercelDeploymentOrigins(): string[] {
+  const names = process.env.VERCEL_ENV === 'preview'
+    ? ['VERCEL_URL', 'VERCEL_BRANCH_URL']
+    : ['VERCEL_URL'];
 
-  return ['VERCEL_URL', 'VERCEL_BRANCH_URL'].flatMap((name) => {
+  return names.flatMap((name) => {
     const hostname = process.env[name]?.trim().toLowerCase();
     if (!hostname || !/^[a-z0-9.-]+$/.test(hostname) || !hostname.endsWith('.vercel.app')) return [];
     return [`https://${hostname}`];
@@ -23,10 +25,10 @@ export function getAllowedOrigins(): string[] {
       .map((o) => o.trim())
       .filter(Boolean);
 
-    return [...new Set([...DEFAULT_ORIGINS, ...parsed, ...getVercelPreviewOrigins()])];
+    return [...new Set([...DEFAULT_ORIGINS, ...parsed, ...getVercelDeploymentOrigins()])];
   }
 
-  return [...new Set([...DEFAULT_ORIGINS, ...getVercelPreviewOrigins()])];
+  return [...new Set([...DEFAULT_ORIGINS, ...getVercelDeploymentOrigins()])];
 }
 
 export function isAllowedOrigin(origin: string | null): boolean {
