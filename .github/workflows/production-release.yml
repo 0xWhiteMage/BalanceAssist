@@ -819,7 +819,7 @@ jobs:
           test -n "$VERCEL_TOKEN"
           alias_path="$(mktemp)"
           trap 'rm -f "$alias_path"' EXIT
-          ./node_modules/.bin/vercel inspect "$PRODUCTION_URL" --format=json --token="$VERCEL_TOKEN" > "$alias_path"
+          ./node_modules/.bin/vercel inspect "$PRODUCTION_URL" --format=json > "$alias_path"
           previous_deployment_url="$(node - "$alias_path" <<'NODE'
           const fs = require('node:fs');
           const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
