@@ -531,10 +531,10 @@ jobs:
             const compatibility = live059.rows[0];
             if (live059.rows.length !== 1 || compatibility.prosrc.trim() !== reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(')) process.exit(1);
             if (compatibility.prosecdef !== true || compatibility.lanname !== 'plpgsql' || compatibility.result !== 'boolean' || !compatibility.proconfig?.includes('search_path=public, pg_temp') || compatibility.owner !== 'postgres') process.exit(1);
-           } finally {
-             await client.end();
-           }
-           NODE
+          } finally {
+            await client.end();
+          }
+          NODE
           # Migration 061 must complete while Git-based production auto-deploy remains disabled,
           # after immutable preview smoke and before deployment review or alias promotion.
           node scripts/apply-production-api-security-061.mjs --dry-run
