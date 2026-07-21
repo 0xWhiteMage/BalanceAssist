@@ -201,7 +201,7 @@ jobs:
           function reviewedBody(functionName) {
             const signature = source.indexOf(`FUNCTION public.${functionName}`);
             const start = source.indexOf('AS $$', signature) + 5;
-            const end = source.indexOf('\n$$;', start);
+            const end = source.indexOf('$$;', start);
             if (signature < 0 || start < 5 || end < 0) process.exit(1);
             return source.slice(start, end).trim();
           }

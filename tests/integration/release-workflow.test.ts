@@ -248,6 +248,8 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain('060 unreviewed function drift');
     expect(migrate?.run).toContain("client.query(fs.readFileSync('supabase/migrations/060_consent_1_2_cutover.sql', 'utf8'))");
     expect(migrate?.run).toContain('060 repaired function set');
+    expect(migrate?.run).toContain("source.indexOf('$$;', start)");
+    expect(migrate?.run).not.toContain("source.indexOf('\\n$$;', start)");
     expect(migrate?.run).toContain("cutoverRecorded ? 'supabase/migrations/060_consent_1_2_cutover.sql'");
     expect(migrate?.run).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')");
     expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");
