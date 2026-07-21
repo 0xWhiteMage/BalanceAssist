@@ -473,6 +473,7 @@ jobs:
           export PRODUCTION_DATABASE_URL
           # The runner enforces expand-only SQL; cleanup needs a separate approved workflow.
           node scripts/apply-production-migrations.mjs
+          node scripts/apply-production-consent-1-2-059-repair.mjs --dry-run
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
           import fs from 'node:fs';
@@ -488,22 +489,50 @@ jobs:
           function assertRelease(condition, check) {
             if (!condition) throw new Error(`Production baseline verification failed: ${check}`);
           }
+          const bodySha256 = (value) => createHash('sha256').update(value ?? '').digest('hex');
           function assertReviewedBody(live, path, functionName, check) {
             const expected = reviewedBody(path, functionName);
             const actual = live?.trim();
             if (actual === expected) return;
-            const sha256 = (value) => createHash('sha256').update(value ?? '').digest('hex');
             const actualLines = actual?.split('\n') ?? [];
             const expectedLines = expected.split('\n');
             const firstDifferentLine = Array.from(
               { length: Math.max(actualLines.length, expectedLines.length) },
               (_, index) => index
             ).find((index) => actualLines[index] !== expectedLines[index]);
-            throw new Error(`Production baseline verification failed: ${check} (actual sha256 ${sha256(actual)}, expected sha256 ${sha256(expected)}, first differing line ${(firstDifferentLine ?? -1) + 1}, actual lines ${actualLines.length}, expected lines ${expectedLines.length})`);
+            throw new Error(`Production baseline verification failed: ${check} (actual sha256 ${bodySha256(actual)}, expected sha256 ${bodySha256(expected)}, first differing line ${(firstDifferentLine ?? -1) + 1}, actual lines ${actualLines.length}, expected lines ${expectedLines.length})`);
           }
           const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL });
           try {
             await client.connect();
+            await client.query('BEGIN');
+            try {
+              await client.query('SELECT pg_advisory_xact_lock(90442059)');
+              const repairState = await client.query(`
+                SELECT p.prosrc, p.prosecdef, p.proconfig, l.lanname,
+                  pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result,
+                  EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '059' AND filename = '059_consent_1_2_compatibility.sql') AS migration_059,
+                  EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '060') AS migration_060
+                FROM pg_proc p
+                JOIN pg_language l ON l.oid = p.prolang
+                WHERE p.oid = 'public.assert_session_processing_allowed(uuid)'::regprocedure
+              `);
+              const repair = repairState.rows[0];
+              assertRelease(repairState.rows.length === 1 && repair.migration_059 === true, '059 repair baseline');
+              assertRelease(repair.migration_060 === false, '059 repair blocked after 060');
+              assertRelease(repair.prosecdef === true && repair.lanname === 'plpgsql' && repair.result === 'boolean' && repair.proconfig?.includes('search_path=public, pg_temp') && repair.owner === 'postgres', '059 repair function attributes');
+              const expected059 = reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(');
+              if (repair.prosrc.trim() !== expected059) {
+                assertRelease(bodySha256(repair.prosrc.trim()) === '7bcba5a99145ead5ce20700a06b37e7c911f8099853f5ce9c450a8213a385215', '059 unreviewed function drift');
+                await client.query(fs.readFileSync('supabase/production-consent-1-2-compatibility-059-repair.sql', 'utf8'));
+                const restored = await client.query("SELECT prosrc FROM pg_proc WHERE oid = 'public.assert_session_processing_allowed(uuid)'::regprocedure");
+                assertReviewedBody(restored.rows[0]?.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(', '059 repaired function body');
+              }
+              await client.query('COMMIT');
+            } catch (error) {
+              await client.query('ROLLBACK');
+              throw error;
+            }
             const { rows } = await client.query(`
               SELECT m.filename, t.tgenabled, pg_get_triggerdef(t.oid) AS trigger_definition,
                 p.prosrc, p.prosecdef, p.proconfig, l.lanname, pg_get_userbyid(p.proowner) AS owner,

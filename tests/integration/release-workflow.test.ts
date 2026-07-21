@@ -223,6 +223,7 @@ describe('production release workflows', () => {
     expect(migrate?.env?.PRODUCTION_DATABASE_URL).toBe('${{ secrets.PRODUCTION_DATABASE_URL }}');
     expect(migrate?.run).toContain('test -n "$PRODUCTION_DATABASE_URL"');
     expect(migrate?.run).toContain('node scripts/apply-production-migrations.mjs');
+    expect(migrate?.run).toContain('node scripts/apply-production-consent-1-2-059-repair.mjs --dry-run');
     expect(migrate?.run).toContain('node scripts/apply-production-api-security-061.mjs --dry-run');
     expect(migrate?.run).toContain("version = '061'");
     expect(migrate?.run).toContain('supabase/production-api-security-061.sql');
@@ -239,6 +240,11 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain("assertReviewedBody(compatibility.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql'");
     expect(migrate?.run).toContain("createHash('sha256').update(value ?? '').digest('hex')");
     expect(migrate?.run).toContain('first differing line');
+    expect(migrate?.run).toContain("bodySha256(repair.prosrc.trim()) === '7bcba5a99145ead5ce20700a06b37e7c911f8099853f5ce9c450a8213a385215'");
+    expect(migrate?.run).toContain('pg_advisory_xact_lock(90442059)');
+    expect(migrate?.run).toContain('059 repair blocked after 060');
+    expect(migrate?.run).toContain('059 repair function attributes');
+    expect(migrate?.run).toContain('supabase/production-consent-1-2-compatibility-059-repair.sql');
     expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");
     expect(migrate?.run).toContain("database.searchParams.set('uselibpqcompat', 'true')");
     expect(migrate?.run).toContain("['require', 'verify-full'].includes(option)");
