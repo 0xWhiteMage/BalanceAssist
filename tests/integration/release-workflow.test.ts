@@ -238,6 +238,7 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");
     expect(migrate?.run).toContain("database.searchParams.set('uselibpqcompat', 'true')");
     expect(migrate?.run).toContain("['require', 'verify-full'].includes(option)");
+    expect(migrate?.run).not.toContain('ssl: { rejectUnauthorized: true }');
     expect(migrate?.run).toContain("row.owner !== 'postgres'");
     expect(jobs.promote?.environment).toBe('production-consent-cutover');
     const cutover = jobs.promote?.steps?.find((step) => step.name === 'Apply consent 1.2 cutover');
