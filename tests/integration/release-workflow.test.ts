@@ -275,6 +275,7 @@ describe('production release workflows', () => {
       .flatMap((job) => job.steps ?? [])
       .flatMap((step) => step.run?.includes('\n') ? [step.run] : [])
       .join('\n');
+    expect(shellSource.match(/<<'NODE'/g)?.length).toBe(shellSource.match(/^NODE$/gm)?.length);
     const syntax = spawnSync('bash', ['-n'], { input: shellSource, encoding: 'utf8' });
     expect(syntax.error, 'could not invoke bash').toBeUndefined();
     expect(syntax.status, syntax.stderr).toBe(0);
