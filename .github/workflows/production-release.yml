@@ -484,7 +484,7 @@ jobs:
             if (signature < 0 || start < 5 || end < 0) process.exit(1);
             return source.slice(start, end).trim();
           }
-          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL, ssl: { rejectUnauthorized: true } });
+          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL });
           try {
             await client.connect();
             const { rows } = await client.query(`
@@ -549,7 +549,7 @@ jobs:
             if (signature < 0 || start < 5 || end < 0) process.exit(1);
             return source.slice(start, end).trim();
           }
-          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL, ssl: { rejectUnauthorized: true } });
+          const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL });
           try {
             await client.connect();
             const recorded = await client.query("SELECT filename FROM public.schema_migrations WHERE version = '061'");
