@@ -817,17 +817,13 @@ jobs:
           test -n "$RELEASE_SHA"
           test -n "$PRODUCTION_URL"
           test -n "$VERCEL_TOKEN"
-          production_host="$(node -e "process.stdout.write(new URL(process.env.PRODUCTION_URL).hostname)")"
           alias_path="$(mktemp)"
           trap 'rm -f "$alias_path"' EXIT
-          curl --fail --silent --show-error --retry 3 --retry-all-errors \
-            --header "Authorization: Bearer $VERCEL_TOKEN" \
-            --output "$alias_path" \
-            "https://api.vercel.com/v4/aliases/$production_host?teamId=$VERCEL_ORG_ID"
+          ./node_modules/.bin/vercel inspect "$PRODUCTION_URL" --format=json --token="$VERCEL_TOKEN" > "$alias_path"
           previous_deployment_url="$(node - "$alias_path" <<'NODE'
           const fs = require('node:fs');
           const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          const url = payload.deployment?.url;
+          const url = payload.url;
           if (typeof url !== 'string' || !url.endsWith('.vercel.app')) process.exit(1);
           process.stdout.write(`https://${url}`);
           NODE
