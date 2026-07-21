@@ -193,7 +193,11 @@ describe('production release workflows', () => {
     expect(immutableSmoke?.run).toContain('test "$event_status" = "409"');
     expect(immutableSmoke?.run).toContain("event.error !== 'event_session_inactive'");
     expect(immutableSmoke?.run).toContain('trap');
-    expect(jobs.promote?.steps?.find((step) => step.name === 'Promote immutable deployment')?.run).toContain('vercel alias set');
+    const promotion = jobs.promote?.steps?.find((step) => step.name === 'Promote immutable deployment');
+    expect(promotion?.run).toContain('vercel inspect "$PRODUCTION_URL" --format=json');
+    expect(promotion?.run).toContain('const url = payload.url');
+    expect(promotion?.run).not.toContain('/v4/aliases/');
+    expect(promotion?.run).toContain('vercel alias set');
     const aliasSmoke = jobs.promote?.steps?.find((step) => step.name === 'Smoke promoted production alias');
     expect(aliasSmoke?.run).toContain('$PRODUCTION_URL/api/health');
     expect(aliasSmoke?.run).toContain('/rest/v1/schema_migrations?select=version&limit=1');
