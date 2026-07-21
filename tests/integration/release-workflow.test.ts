@@ -163,9 +163,11 @@ describe('production release workflows', () => {
         expect(checkout.with?.['persist-credentials']).toBe(false);
       }
     }
-    const immutableDeploy = jobs.deploy?.steps?.find((step) => step.name === 'Deploy immutable Vercel preview');
+    const immutableDeploy = jobs.deploy?.steps?.find((step) => step.name === 'Deploy immutable Vercel candidate');
     expect(immutableDeploy?.env?.RELEASE_SHA).toBe('${{ needs.validate.outputs.sha }}');
+    expect(immutableDeploy?.run).toContain('vercel build --prod');
     expect(immutableDeploy?.run).toContain('vercel deploy --prebuilt');
+    expect(immutableDeploy?.run).toContain('--prod --skip-domain');
     expect(immutableDeploy?.run).toContain('--meta githubCommitSha="$GITHUB_SHA"');
     expect(jobs.smoke?.steps?.find((step) => step.name === 'Smoke immutable deployment')?.run).toContain('/api/health');
     const immutableSmoke = jobs.smoke?.steps?.find((step) => step.name === 'Smoke immutable deployment');
