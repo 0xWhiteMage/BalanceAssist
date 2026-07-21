@@ -195,6 +195,7 @@ describe('production release workflows', () => {
     expect(immutableSmoke?.run).toContain('trap');
     const promotion = jobs.promote?.steps?.find((step) => step.name === 'Promote immutable deployment');
     expect(promotion?.run).toContain('vercel inspect "$PRODUCTION_URL" --format=json');
+    expect(promotion?.run).not.toContain('inspect "$PRODUCTION_URL" --format=json --token');
     expect(promotion?.run).toContain('const url = payload.url');
     expect(promotion?.run).not.toContain('/v4/aliases/');
     expect(promotion?.run).toContain('vercel alias set');
