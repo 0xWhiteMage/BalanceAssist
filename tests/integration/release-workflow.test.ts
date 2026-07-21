@@ -234,9 +234,11 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain("row.tgenabled === 'O'");
     expect(migrate?.run).toContain('(?:public\\.)?guard_event_session_active');
     expect(migrate?.run).toContain('Production baseline verification failed:');
-    expect(migrate?.run).toContain("row.prosrc.trim() === reviewedBody('supabase/migrations/057_event_deletion_freeze.sql'");
-    expect(migrate?.run).toContain("crmDeletion.prosrc.trim() === reviewedBody('supabase/migrations/058_unsent_crm_deletion.sql'");
-    expect(migrate?.run).toContain("compatibility.prosrc.trim() === reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql'");
+    expect(migrate?.run).toContain("assertReviewedBody(row.prosrc, 'supabase/migrations/057_event_deletion_freeze.sql'");
+    expect(migrate?.run).toContain("assertReviewedBody(crmDeletion.prosrc, 'supabase/migrations/058_unsent_crm_deletion.sql'");
+    expect(migrate?.run).toContain("assertReviewedBody(compatibility.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql'");
+    expect(migrate?.run).toContain("createHash('sha256').update(value ?? '').digest('hex')");
+    expect(migrate?.run).toContain('first differing line');
     expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");
     expect(migrate?.run).toContain("database.searchParams.set('uselibpqcompat', 'true')");
     expect(migrate?.run).toContain("['require', 'verify-full'].includes(option)");
