@@ -237,14 +237,16 @@ describe('production release workflows', () => {
     expect(migrate?.run).toContain('Production baseline verification failed:');
     expect(migrate?.run).toContain("assertReviewedBody(row.prosrc, 'supabase/migrations/057_event_deletion_freeze.sql'");
     expect(migrate?.run).toContain("assertReviewedBody(crmDeletion.prosrc, 'supabase/migrations/058_unsent_crm_deletion.sql'");
-    expect(migrate?.run).toContain("assertReviewedBody(compatibility.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql'");
+    expect(migrate?.run).toContain('assertReviewedBody(compatibility.prosrc, cutoverRecorded');
     expect(migrate?.run).toContain("createHash('sha256').update(value ?? '').digest('hex')");
     expect(migrate?.run).toContain('first differing line');
     expect(migrate?.run).toContain("bodySha256(repair.prosrc.trim()) === '7bcba5a99145ead5ce20700a06b37e7c911f8099853f5ce9c450a8213a385215'");
     expect(migrate?.run).toContain('pg_advisory_xact_lock(90442059)');
-    expect(migrate?.run).toContain('059 repair blocked after 060');
     expect(migrate?.run).toContain('059 repair function attributes');
     expect(migrate?.run).toContain('supabase/production-consent-1-2-compatibility-059-repair.sql');
+    expect(migrate?.run).toContain('060 function body drift');
+    expect(migrate?.run).toContain("cutoverRecorded ? 'supabase/migrations/060_consent_1_2_cutover.sql'");
+    expect(migrate?.run).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')");
     expect(migrate?.run).toContain("database.hostname === `db.${projectRef}.supabase.co`");
     expect(migrate?.run).toContain("database.searchParams.set('uselibpqcompat', 'true')");
     expect(migrate?.run).toContain("['require', 'verify-full'].includes(option)");
