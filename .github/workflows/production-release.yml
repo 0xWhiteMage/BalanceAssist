@@ -503,30 +503,68 @@ jobs:
             throw new Error(`Production baseline verification failed: ${check} (actual sha256 ${bodySha256(actual)}, expected sha256 ${bodySha256(expected)}, first differing line ${(firstDifferentLine ?? -1) + 1}, actual lines ${actualLines.length}, expected lines ${expectedLines.length})`);
           }
           const client = new pg.Client({ connectionString: process.env.PRODUCTION_DATABASE_URL });
+          let cutoverRecorded = false;
           try {
             await client.connect();
             await client.query('BEGIN');
             try {
               await client.query('SELECT pg_advisory_xact_lock(90442059)');
-              const repairState = await client.query(`
+              const migration060 = await client.query("SELECT filename FROM public.schema_migrations WHERE version = '060'");
+              assertRelease(migration060.rows.length <= 1 && (!migration060.rows.length || migration060.rows[0].filename === '060_consent_1_2_cutover.sql'), '060 migration record');
+              cutoverRecorded = migration060.rows.length === 1;
+              if (cutoverRecorded) {
+                const live060 = await client.query(`
+                  SELECT p.proname, p.prosrc, p.prosecdef, p.proconfig, l.lanname,
+                    pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result,
+                    has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_execute,
+                    has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_execute,
+                    has_function_privilege('service_role', p.oid, 'EXECUTE') AS service_role_execute,
+                    EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE') AS public_execute
+                  FROM pg_proc p
+                  JOIN pg_language l ON l.oid = p.prolang
+                  WHERE p.oid IN (
+                    'public.assert_session_processing_allowed(uuid)'::regprocedure,
+                    'public.finalize_session_lead(uuid)'::regprocedure,
+                    'public.relay_human_message(uuid,text,text)'::regprocedure,
+                    'public.reserve_handoff_send(uuid,uuid)'::regprocedure,
+                    'public.delete_session_for_deletion_job(uuid,uuid)'::regprocedure
+                  )
+                `);
+                assertRelease(live060.rows.length === 5, '060 function set');
+                const bodyDrift = [];
+                for (const fn of live060.rows) {
+                  const expected = reviewedBody('supabase/migrations/060_consent_1_2_cutover.sql', `${fn.proname}(`);
+                  const actual = fn.prosrc.trim();
+                  if (actual !== expected) bodyDrift.push(`${fn.proname} actual ${bodySha256(actual)} expected ${bodySha256(expected)}`);
+                  const expectedResult = fn.proname === 'finalize_session_lead'
+                    ? 'TABLE(persisted boolean, consent_required boolean, qualification_status text, score integer, recommended_next_step text, lead_id bigint, handoff_id uuid, crm_record_id uuid, crm_revision integer, approved_draft_version integer, crm_queued boolean, approval_input_hash text, approved_reference_set_hash text)'
+                    : fn.proname === 'relay_human_message'
+                      ? 'TABLE(persisted boolean, consent_required boolean, message_id bigint, handoff_id uuid, thread_id bigint)'
+                      : 'boolean';
+                  const expectedSearchPath = fn.proname === 'finalize_session_lead' ? 'search_path=public, extensions, pg_temp' : 'search_path=public, pg_temp';
+                  assertRelease(fn.prosecdef === true && fn.lanname === 'plpgsql' && fn.result === expectedResult && fn.proconfig?.includes(expectedSearchPath) && fn.owner === 'postgres', `060 ${fn.proname} attributes`);
+                  assertRelease(fn.public_execute === false && fn.anon_execute === false && fn.authenticated_execute === false && fn.service_role_execute === true, `060 ${fn.proname} privileges`);
+                }
+                assertRelease(bodyDrift.length === 0, `060 function body drift (${bodyDrift.join('; ')})`);
+              } else {
+                const repairState = await client.query(`
                 SELECT p.prosrc, p.prosecdef, p.proconfig, l.lanname,
                   pg_get_userbyid(p.proowner) AS owner, pg_get_function_result(p.oid) AS result,
-                  EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '059' AND filename = '059_consent_1_2_compatibility.sql') AS migration_059,
-                  EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '060') AS migration_060
+                  EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '059' AND filename = '059_consent_1_2_compatibility.sql') AS migration_059
                 FROM pg_proc p
                 JOIN pg_language l ON l.oid = p.prolang
                 WHERE p.oid = 'public.assert_session_processing_allowed(uuid)'::regprocedure
               `);
-              const repair = repairState.rows[0];
-              assertRelease(repairState.rows.length === 1 && repair.migration_059 === true, '059 repair baseline');
-              assertRelease(repair.migration_060 === false, '059 repair blocked after 060');
-              assertRelease(repair.prosecdef === true && repair.lanname === 'plpgsql' && repair.result === 'boolean' && repair.proconfig?.includes('search_path=public, pg_temp') && repair.owner === 'postgres', '059 repair function attributes');
-              const expected059 = reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(');
-              if (repair.prosrc.trim() !== expected059) {
-                assertRelease(bodySha256(repair.prosrc.trim()) === '7bcba5a99145ead5ce20700a06b37e7c911f8099853f5ce9c450a8213a385215', '059 unreviewed function drift');
-                await client.query(fs.readFileSync('supabase/production-consent-1-2-compatibility-059-repair.sql', 'utf8'));
-                const restored = await client.query("SELECT prosrc FROM pg_proc WHERE oid = 'public.assert_session_processing_allowed(uuid)'::regprocedure");
-                assertReviewedBody(restored.rows[0]?.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(', '059 repaired function body');
+                const repair = repairState.rows[0];
+                assertRelease(repairState.rows.length === 1 && repair.migration_059 === true, '059 repair baseline');
+                assertRelease(repair.prosecdef === true && repair.lanname === 'plpgsql' && repair.result === 'boolean' && repair.proconfig?.includes('search_path=public, pg_temp') && repair.owner === 'postgres', '059 repair function attributes');
+                const expected059 = reviewedBody('supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(');
+                if (repair.prosrc.trim() !== expected059) {
+                  assertRelease(bodySha256(repair.prosrc.trim()) === '7bcba5a99145ead5ce20700a06b37e7c911f8099853f5ce9c450a8213a385215', '059 unreviewed function drift');
+                  await client.query(fs.readFileSync('supabase/production-consent-1-2-compatibility-059-repair.sql', 'utf8'));
+                  const restored = await client.query("SELECT prosrc FROM pg_proc WHERE oid = 'public.assert_session_processing_allowed(uuid)'::regprocedure");
+                  assertReviewedBody(restored.rows[0]?.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(', '059 repaired function body');
+                }
               }
               await client.query('COMMIT');
             } catch (error) {
@@ -576,7 +614,7 @@ jobs:
             `);
             const compatibility = live059.rows[0];
             assertRelease(live059.rows.length === 1, '059 migration record');
-            assertReviewedBody(compatibility.prosrc, 'supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(', '059 function body');
+            assertReviewedBody(compatibility.prosrc, cutoverRecorded ? 'supabase/migrations/060_consent_1_2_cutover.sql' : 'supabase/migrations/059_consent_1_2_compatibility.sql', 'assert_session_processing_allowed(', cutoverRecorded ? '060 function body' : '059 function body');
             assertRelease(compatibility.prosecdef === true && compatibility.lanname === 'plpgsql' && compatibility.result === 'boolean' && compatibility.proconfig?.includes('search_path=public, pg_temp') && compatibility.owner === 'postgres', '059 function attributes');
           } finally {
             await client.end();
