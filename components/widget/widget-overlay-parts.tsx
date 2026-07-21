@@ -233,7 +233,7 @@ export function HumanFallbacks({
   const copy = deliveryUnavailable
     ? 'Message delivery is unavailable. Use the contact options below.'
     : unavailable
-      ? 'The human-only relay could not start. You can still contact the team directly.'
+      ? 'Direct messaging is temporarily unavailable. You can still email the team or book a call below.'
       : 'Prefer another route? Contact the team directly.';
 
   return (
