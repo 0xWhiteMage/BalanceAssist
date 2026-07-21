@@ -203,7 +203,7 @@ jobs:
           const config = JSON.parse(await (await import('node:fs/promises')).readFile('vercel.json', 'utf8'));
           if (config.git?.deploymentEnabled?.main !== false) throw new Error('Vercel main-branch auto-deployment is not disabled');
           NODE
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version-file: .node-version
           cache: npm
@@ -331,7 +331,7 @@ jobs:
           persist-credentials: false
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version-file: .node-version
           cache: npm
@@ -448,7 +448,7 @@ jobs:
           persist-credentials: false
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version-file: .node-version
           cache: npm
@@ -721,7 +721,7 @@ jobs:
           persist-credentials: false
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version-file: .node-version
           cache: npm
@@ -797,7 +797,7 @@ jobs:
           persist-credentials: false
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version-file: .node-version
           cache: npm
