@@ -372,6 +372,7 @@ jobs:
           test -n "$RELEASE_SHA"
           test -n "$SUPABASE_URL"
           test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          deployment_origin="$(node -e "process.stdout.write(new URL(process.env.DEPLOYMENT_URL).origin)")"
           curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null "$DEPLOYMENT_URL/api/health"
           curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 5 --max-time 15 --output /dev/null \
             --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
@@ -382,8 +383,8 @@ jobs:
           consented_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           session_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
             --header "content-type: application/json" \
-            --header "origin: https://balance-assist.vercel.app" \
-            --data "{\"sourceUrl\":\"https://balance-assist.vercel.app/session-smoke\",\"consentVersion\":\"1.2\",\"consentedAt\":\"$consented_at\"}" \
+            --header "origin: $deployment_origin" \
+            --data "{\"sourceUrl\":\"$deployment_origin/session-smoke\",\"consentVersion\":\"1.2\",\"consentedAt\":\"$consented_at\"}" \
             --cookie-jar "$probe_dir/cookies" \
             --dump-header "$probe_dir/session-headers" \
             --output "$probe_dir/session.json" \
@@ -403,7 +404,7 @@ jobs:
           NODE
           )"
           deletion_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
-            --header "origin: https://balance-assist.vercel.app" \
+            --header "origin: $deployment_origin" \
             --cookie "$probe_dir/cookies" \
             --output "$probe_dir/deletion.json" \
             --write-out '%{http_code}' \
@@ -420,7 +421,7 @@ jobs:
           NODE
           event_status="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 15 \
             --header "content-type: application/json" \
-            --header "origin: https://balance-assist.vercel.app" \
+            --header "origin: $deployment_origin" \
             --cookie "$probe_dir/cookies" \
             --data "{\"sessionId\":\"$session_id\",\"eventName\":\"widget_closed\"}" \
             --output "$probe_dir/event.json" \

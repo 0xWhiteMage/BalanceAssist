@@ -83,16 +83,20 @@ describe('security/origin', () => {
       expect(origins).not.toContain('https://other-project.vercel.app');
     });
 
-    it('ignores malformed preview hostnames and preview values in production', () => {
+    it('ignores malformed Vercel hostnames', () => {
       process.env.VERCEL_ENV = 'preview';
       process.env.VERCEL_URL = 'evil.com/path.vercel.app';
       process.env.VERCEL_BRANCH_URL = 'other-project.example.com';
       expect(getAllowedOrigins()).not.toContain('https://evil.com/path.vercel.app');
       expect(getAllowedOrigins()).not.toContain('https://other-project.example.com');
+    });
 
+    it('includes the exact Vercel deployment hostname in production', () => {
       process.env.VERCEL_ENV = 'production';
-      process.env.VERCEL_URL = 'balance-assist-preview-team.vercel.app';
-      expect(getAllowedOrigins()).not.toContain('https://balance-assist-preview-team.vercel.app');
+      process.env.VERCEL_URL = 'balance-assist-immutable-team.vercel.app';
+      process.env.VERCEL_BRANCH_URL = 'balance-assist-branch-team.vercel.app';
+      expect(getAllowedOrigins()).toContain('https://balance-assist-immutable-team.vercel.app');
+      expect(getAllowedOrigins()).not.toContain('https://balance-assist-branch-team.vercel.app');
     });
   });
 
