@@ -336,7 +336,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      - name: Deploy immutable Vercel preview
+      - name: Deploy immutable Vercel candidate
         id: deploy
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
@@ -351,8 +351,8 @@ jobs:
           GITHUB_SHA="$(git rev-parse HEAD)"
           test "$GITHUB_SHA" = "$RELEASE_SHA"
           ./node_modules/.bin/vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          ./node_modules/.bin/vercel build --token="$VERCEL_TOKEN"
-          deployment_url="$(./node_modules/.bin/vercel deploy --prebuilt --token="$VERCEL_TOKEN" --meta githubCommitSha="$GITHUB_SHA")"
+          ./node_modules/.bin/vercel build --prod --token="$VERCEL_TOKEN"
+          deployment_url="$(./node_modules/.bin/vercel deploy --prebuilt --prod --skip-domain --token="$VERCEL_TOKEN" --meta githubCommitSha="$GITHUB_SHA")"
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
 
   smoke:
